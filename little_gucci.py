@@ -5547,6 +5547,87 @@ class MainWindow(QtWidgets.QMainWindow):
             print(f"Error handling db_update: {e}")
             return False
 
+    def _handle_qrz_update(self, content: str) -> bool:
+        """Handle a qrz_update push from commsrvr server.
+
+        Expected format:
+        qrz_update
+        sql: BEGIN TRANSACTION;
+        {SQL statements}
+        COMMIT;
+        UPDATE controls SET qrz_id = 1119;
+
+        Unlike db_update, this format carries no `db:` line and does not
+        bump controls.db_version — it's purely a qrz_id sync notification.
+
+        Args:
+            content: The qrz_update response content
+
+        Returns:
+            True if update was successful, False otherwise
+        """
+        try:
+            lines = content.split('\n')
+
+            if not lines or lines[0].strip() != 'qrz_update':
+                return False
+
+            sql_section = None
+
+            # Find sql section
+            for i, line in enumerate(lines):
+                if line.strip().startswith('sql:'):
+                    # SQL may start on this line or the next
+                    sql_start = line.split(':', 1)[1].strip()
+                    if sql_start:
+                        # SQL starts on same line
+                        sql_section = sql_start + '\n' + '\n'.join(lines[i+1:])
+                    else:
+                        # SQL starts on next line
+                        sql_section = '\n'.join(lines[i+1:])
+                    break
+
+            if sql_section is None:
+                return False
+
+            # Split SQL statements by semicolon
+            sql_statements = []
+            raw_statements = sql_section.split(';')
+
+            for stmt in raw_statements:
+                stmt = stmt.strip()
+                if stmt:  # Skip empty statements
+                    sql_statements.append(stmt)
+
+            if not sql_statements:
+                return False
+
+            qrz_id_pattern = re.compile(r'UPDATE\s+controls\s+SET\s+qrz_id\s*=\s*(\d+)', re.IGNORECASE)
+            qrz_id_value = None
+
+            # Execute SQL statements
+            try:
+                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                    cursor = conn.cursor()
+                    for sql in sql_statements:
+                        cursor.execute(sql)
+                        match = qrz_id_pattern.search(sql)
+                        if match:
+                            qrz_id_value = match.group(1)
+                    conn.commit()
+                if qrz_id_value is not None:
+                    print(f"Updated qrz_id to {qrz_id_value} in controls table.")
+                else:
+                    print("qrz_update applied successfully.")
+                return True
+            except sqlite3.Error as e:
+                print(f"Database update failed: {e}")
+                return False
+
+        except Exception as e:
+            print(f"Error handling qrz_update: {e}")
+            return False
+
     def _handle_program_update(self, content: str) -> bool:
         """Handle program update from commsrvr server.
 
@@ -6544,6 +6625,9 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             elif content_stripped.startswith('program_update'):
                 self._handle_program_update(content_stripped)
+                return
+            elif content_stripped.startswith('qrz_update'):
+                self._handle_qrz_update(content_stripped)
                 return
 
             if "::DELIVERED::" in content_stripped:

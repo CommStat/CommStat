@@ -214,7 +214,7 @@ class MaintenanceDialog(QDialog):
         row.setSpacing(4)
 
         lbl_code = QLabel(
-            f"<span style='font-family:Roboto Mono;'>{code}</span> "
+            f"<span style='font-family:Roboto;'>{code}</span> "
             f"<span style='font-family:Roboto;'>— {title}</span>"
         )
         lbl_code.setStyleSheet(
