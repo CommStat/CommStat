@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (
 from constants import (
     DEFAULT_COLORS, COLOR_INPUT_BORDER,
     COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
-    COLOR_BTN_BLUE, COLOR_BTN_CYAN,
+    COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_RED,
 )
 from id_utils import generate_time_based_id
 from little_gucci import create_verified_ssl_context
@@ -59,6 +59,7 @@ _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
 
 _COL_CANCEL = "#555555"
+_COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 _WIN_W = 640
 _WIN_H = 440
@@ -260,23 +261,24 @@ class AlertDialog(QDialog):
         body.addWidget(self.title_field)
 
         # ── Message field ─────────────────────────────────────────────────────
+        message_row = QHBoxLayout()
         message_lbl = QLabel("Message:")
         message_lbl.setFont(label_font())
-        body.addWidget(message_lbl)
+        message_row.addWidget(message_lbl)
+        message_row.addStretch()
+        self.message_count_label = QLabel()
+        self.message_count_label.setStyleSheet(
+            "QLabel { font-family:'Kode Mono'; font-size:13px; }"
+        )
+        message_row.addWidget(self.message_count_label)
+        body.addLayout(message_row)
 
         self.message_field = QPlainTextEdit()
         self.message_field.setPlaceholderText("195 characters max")
         self.message_field.setFixedHeight(86)
-        def _enforce_msg_limit():
-            text = self.message_field.toPlainText()
-            if len(text) > MAX_MESSAGE_LENGTH:
-                cursor = self.message_field.textCursor()
-                pos = cursor.position()
-                self.message_field.setPlainText(text[:MAX_MESSAGE_LENGTH])
-                cursor.setPosition(min(pos, MAX_MESSAGE_LENGTH))
-                self.message_field.setTextCursor(cursor)
-        self.message_field.textChanged.connect(_enforce_msg_limit)
+        self.message_field.textChanged.connect(self._enforce_message_limit)
         body.addWidget(self.message_field)
+        self._update_message_count_label()
 
         body.addStretch()
 
@@ -476,6 +478,31 @@ class AlertDialog(QDialog):
             self.group_combo.blockSignals(True)
             self.group_combo.setCurrentIndex(0)
             self.group_combo.blockSignals(False)
+
+    def _enforce_message_limit(self) -> None:
+        text = self.message_field.toPlainText()
+        if len(text) > MAX_MESSAGE_LENGTH:
+            cursor = self.message_field.textCursor()
+            pos = min(cursor.position(), MAX_MESSAGE_LENGTH)
+            self.message_field.blockSignals(True)
+            self.message_field.setPlainText(text[:MAX_MESSAGE_LENGTH])
+            cursor.setPosition(pos)
+            self.message_field.setTextCursor(cursor)
+            self.message_field.blockSignals(False)
+            text = text[:MAX_MESSAGE_LENGTH]
+        self._update_message_count_label(len(text))
+
+    def _update_message_count_label(self, count: Optional[int] = None) -> None:
+        """Refresh the 'N of MAX' counter next to the Message label."""
+        if not hasattr(self, 'message_count_label'):
+            return
+        if count is None:
+            count = len(self.message_field.toPlainText())
+        self.message_count_label.setText(f"{count} of {MAX_MESSAGE_LENGTH}")
+        color = COLOR_BTN_RED if count >= MAX_MESSAGE_LENGTH else _COL_COUNTER
+        self.message_count_label.setStyleSheet(
+            f"QLabel {{ font-family:'Kode Mono'; font-size:13px; color:{color}; }}"
+        )
 
     def _get_target(self) -> str:
         call_target = self.target_call_field.text().strip().upper()

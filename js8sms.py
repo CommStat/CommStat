@@ -42,6 +42,7 @@ _PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
 _PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
+_COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 
 # =============================================================================
@@ -164,17 +165,28 @@ class JS8SMSDialog(QDialog):
         layout.addWidget(self.phone_field)
 
         # Message
+        message_row = QtWidgets.QHBoxLayout()
         message_label = QtWidgets.QLabel("Text Message:")
         message_label.setStyleSheet(
             "QLabel { font-family:Roboto; font-size:13px; font-weight:bold; }"
         )
-        layout.addWidget(message_label)
+        message_row.addWidget(message_label)
+        message_row.addStretch()
+        self.message_count_label = QtWidgets.QLabel()
+        self.message_count_label.setStyleSheet(
+            "QLabel { font-family:'Kode Mono'; font-size:13px; }"
+        )
+        message_row.addWidget(self.message_count_label)
+        layout.addLayout(message_row)
+
         self.message_field = QtWidgets.QLineEdit()
         self.message_field.setMinimumHeight(30)
         self.message_field.setMaxLength(MAX_MESSAGE_LENGTH)
         self.message_field.setPlaceholderText("Your message here (67 characters max)")
         self.message_field.textChanged.connect(self._force_uppercase_message)
+        self.message_field.textChanged.connect(self._update_message_count_label)
         layout.addWidget(self.message_field)
+        self._update_message_count_label()
 
         # Note + Opt-in + Limitations
         note = QtWidgets.QLabel(
@@ -227,6 +239,15 @@ class JS8SMSDialog(QDialog):
             self.message_field.setText(upper)
             self.message_field.blockSignals(False)
             self.message_field.setCursorPosition(pos)
+
+    def _update_message_count_label(self, _text: str = "") -> None:
+        """Refresh the 'N of MAX' counter next to the Text Message label."""
+        count = len(self.message_field.text())
+        self.message_count_label.setText(f"{count} of {MAX_MESSAGE_LENGTH}")
+        color = COLOR_BTN_RED if count >= MAX_MESSAGE_LENGTH else _COL_COUNTER
+        self.message_count_label.setStyleSheet(
+            f"QLabel {{ font-family:'Kode Mono'; font-size:13px; color:{color}; }}"
+        )
 
     # -------------------------------------------------------------------------
     # Rig management

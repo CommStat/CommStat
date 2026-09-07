@@ -13,7 +13,7 @@ from typing import Dict
 # Application Identity
 # =============================================================================
 
-VERSION = "4.11a"
+VERSION = "4.12"
 
 # When True, MainWindow._resolve_dialog_class() re-imports a dialog's module
 # from disk every time it's opened, instead of reusing the cached import —

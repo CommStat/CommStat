@@ -1159,7 +1159,7 @@ class ConfigManager:
             self.directed_config = {
                 'hide_heartbeat': False, 'show_every_group': True,
                 'hide_map': False, 'show_alerts': False, 'show_contacts': False,
-                'hide_internet_feed': False,
+                'hide_internet_feed': False, 'hide_live_feed': False,
                 'save_all_alerts': False, 'save_all_messages': False, 'save_all_videos': False,
                 'selected_rss_feed': default_feed, 'apply_text_normalization': False,
                 'unchecked_groups': '',
@@ -1196,6 +1196,7 @@ class ConfigManager:
                 'show_alerts': config.getboolean("DIRECTEDCONFIG", "show_alerts", fallback=False),
                 'show_contacts': config.getboolean("DIRECTEDCONFIG", "show_contacts", fallback=False),
                 'hide_internet_feed': config.getboolean("DIRECTEDCONFIG", "hide_internet_feed", fallback=False),
+                'hide_live_feed': config.getboolean("DIRECTEDCONFIG", "hide_live_feed", fallback=False),
                 'save_all_alerts': config.getboolean("DIRECTEDCONFIG", "save_all_alerts", fallback=False),
                 'save_all_messages': config.getboolean("DIRECTEDCONFIG", "save_all_messages", fallback=False),
                 'save_all_videos': config.getboolean("DIRECTEDCONFIG", "save_all_videos", fallback=False),
@@ -1226,7 +1227,7 @@ class ConfigManager:
             self.directed_config = {
                 'hide_heartbeat': False, 'show_every_group': True,
                 'hide_map': False, 'show_alerts': False, 'show_contacts': False,
-                'hide_internet_feed': False,
+                'hide_internet_feed': False, 'hide_live_feed': False,
                 'save_all_alerts': False, 'save_all_messages': False, 'save_all_videos': False,
                 'selected_rss_feed': default_feed, 'apply_text_normalization': False,
                 'unchecked_groups': '',
@@ -1318,6 +1319,12 @@ class ConfigManager:
 
     def set_hide_internet_feed(self, value: bool) -> None:
         self._save_setting('hide_internet_feed', value)
+
+    def get_hide_live_feed(self) -> bool:
+        return self.directed_config.get('hide_live_feed', False)
+
+    def set_hide_live_feed(self, value: bool) -> None:
+        self._save_setting('hide_live_feed', value)
 
     def get_hide_map(self) -> bool:
         return self.directed_config.get('hide_map', False)
@@ -2850,7 +2857,7 @@ class _PersistentCheckMenu(_MenuBarMenu):
     filters, Hide Green Pins, Weather Radar, Watchlist Overlay entries, etc.)
     is clicked, so several can be toggled without reopening the menu each
     time. Non-checkable actions (e.g. the date-range presets) still close the
-    menu as normal. Used by the Filter and Map menus."""
+    menu as normal. Used by the Filter, Map, and Settings menus."""
 
     def mouseReleaseEvent(self, event):
         action = self.activeAction()
@@ -2992,7 +2999,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Live feed message buffer (stores messages from all TCP connections)
         self.feed_messages: List[str] = []
         self.max_feed_messages = 500  # Limit buffer size
-        self._hide_live_feed: bool = False          # Session-only; resets on restart
+        self._hide_live_feed: bool = self.config.get_hide_live_feed()
         self._hide_internet_statrep: bool = self.config.get_hide_internet_feed()
         self._hide_green_pins: bool = False         # Session-only; resets on restart
         self._hide_all_pins: bool = False           # Session-only; resets on restart
@@ -3661,7 +3668,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.menubar.setStyleSheet(self._menubar_qss())
 
         # Create the main menu
-        self.menu = _MenuBarMenu("Settings", self.menubar)
+        self.menu = _PersistentCheckMenu("Settings", self.menubar)
         self.menubar.addMenu(self.menu)
 
         # Define menu actions: (name, text, handler)
@@ -3802,7 +3809,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self.hide_live_feed_action = QtWidgets.QAction("Hide Live Feed", self)
         self.hide_live_feed_action.setCheckable(True)
-        self.hide_live_feed_action.setChecked(False)
+        self.hide_live_feed_action.setChecked(self.config.get_hide_live_feed())
         self.hide_live_feed_action.triggered.connect(self._on_toggle_hide_live_feed)
         self.filter_menu.addAction(self.hide_live_feed_action)
 
@@ -4018,6 +4025,16 @@ class MainWindow(QtWidgets.QMainWindow):
         # Create Websites dropdown menu - browser links formerly under Tools
         self.websites_menu = _MenuBarMenu("Websites", self.menubar)
         self.menubar.addMenu(self.websites_menu)
+
+        add_section_header(self.websites_menu, "Open Source Intel")
+        for label, url in [
+            ("Osiris",     "https://www.osirisai.live"),
+            ("Provenance", "https://www.provenance.website"),
+        ]:
+            create_action(
+                self.websites_menu, label, "osint_" + label.lower(),
+                lambda checked=False, u=url, lbl=label: self._open_external_link(u, lbl)
+            )
 
         add_section_header(self.websites_menu, "Weather Maps")
         for label, url in WEATHER_MAP_LINKS:
@@ -5753,12 +5770,11 @@ class MainWindow(QtWidgets.QMainWindow):
         try:
             from qrz_client import QRZClient, load_qrz_config
 
-            # Check if QRZ is active
-            active, username, password = load_qrz_config()
-            if not active:
-                return None
-
-            # Create client and do lookup (uses cache first)
+            # Local qrz table first, always — lookup() serves a cached row
+            # (any age) when QRZ is disabled, unconfigured, or the account
+            # has no XML subscription, and only calls the API for a
+            # stale/missing row on a subscriber account.
+            _active, username, password = load_qrz_config()
             client = QRZClient(username, password)
             result = client.lookup(callsign, use_cache=True)
 
@@ -6385,6 +6401,7 @@ class MainWindow(QtWidgets.QMainWindow):
             from qrz_lookup import MessageDetailDialog
             detail = MessageDetailDialog(
                 callsign, message_text, self._internet_available,
+                commsrvr_url=_COMMSRVR,
                 module_background=self.config.get_color('module_background'),
                 module_foreground=self.config.get_color('module_foreground'),
                 data_background=self.config.get_color('data_background'),
@@ -6670,6 +6687,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.content_splitter.setStretchFactor(0, 1)  # statrep absorbs all vertical resize
         self.content_splitter.setStretchFactor(1, 0)  # live feed stays fixed
         self.content_splitter.setStretchFactor(2, 0)  # bottom section stays fixed
+
+        if self._hide_live_feed:
+            self.feed_text.hide()
 
     def _load_live_feed(self) -> None:
         """Initialize the live feed display from buffer."""
@@ -8457,6 +8477,7 @@ window.commstatBouncePin = function(srid) {
                 from qrz_lookup import MessageDetailDialog
                 dlg = MessageDetailDialog(
                     callsign, message_text, self._internet_available,
+                    commsrvr_url=_COMMSRVR,
                     module_background=self.config.get_color('module_background'),
                     module_foreground=self.config.get_color('module_foreground'),
                     data_background=self.config.get_color('data_background'),
@@ -9403,8 +9424,9 @@ window.commstatBouncePin = function(srid) {
         show(self, **self._help_theme_colors())
 
     def _on_toggle_hide_live_feed(self, checked: bool) -> None:
-        """Hide/show the live feed. Session-only — resets on restart."""
+        """Hide/show the live feed. Persisted to config.ini."""
         self._hide_live_feed = checked
+        self.config.set_hide_live_feed(checked)
         if checked:
             self.feed_text.hide()
         else:
@@ -9980,6 +10002,12 @@ window.commstatBouncePin = function(srid) {
             _clean = self._preprocess_message_value(value, from_call)
             _user_call = self.get_callsign_for_rig(rig_name)
 
+            # RR status-report acknowledgment: "RR CALLSIGN,SRID." — net-wide,
+            # not gated to messages addressed to us. See _process_rr_ack.
+            if self._process_rr_ack(from_call, _clean, utc_db):
+                self._load_statrep_data()
+                return  # fully handled
+
             if _user_call:
                 # Pattern A: USER_CALL> ACK *DE* RECIPIENT
                 _ack = _re_relay.match(
@@ -10066,7 +10094,9 @@ window.commstatBouncePin = function(srid) {
                 _activity_match = _re.match(
                     r'^(?:\w+:\s+)?(@\w+)\s+MSG\s+', _check_value, _re.IGNORECASE
                 )
-                if _activity_match:
+                if self._process_rr_ack(from_call, _check_value, utc_str):
+                    self._load_statrep_data()
+                elif _activity_match:
                     to_call = _activity_match.group(1)
                     utc_db = utc_dt.strftime("%Y-%m-%d %H:%M:%S")
                     dial_freq = freq - offset if freq else 0
@@ -10155,6 +10185,54 @@ window.commstatBouncePin = function(srid) {
         value = re.sub(r'[^ -~]', '', value).strip()
 
         return value
+
+    def _process_rr_ack(self, from_call: str, value: str, utc_db: str) -> bool:
+        """
+        Detect a JS8 'RR' status-report acknowledgment: "RR CALLSIGN,SRID.",
+        optionally addressed to a group, e.g. "@AMRRON RR N0DDK,Y26".
+        Appends "||ACK <from_call>" to the matching statrep row's comments.
+
+        Returns True if the RR pattern matched (fully handled), else False.
+        """
+        match = re.match(
+            r'^(?:\w+:\s+)?(?:@\w+\s+)?RR\s+([A-Z0-9/]{3,12}),(\w{3})\.?\s*$',
+            value, re.IGNORECASE
+        )
+        if not match:
+            return False
+
+        target_callsign = _strip_cs_suffix(match.group(1).strip().upper())
+        sr_id = match.group(2).strip().upper()
+        if not _CONTACTS_BASE_CS_PATTERN.match(target_callsign):
+            return True  # matched shape but not a usable callsign — treat as handled, skip DB work
+
+        date_only = utc_db.split(" ")[0]
+        ack_callsign = from_call.strip().upper() if from_call else ""
+        if not ack_callsign:
+            return True
+
+        try:
+            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, from_callsign, comments FROM statrep WHERE date = ? AND sr_id = ?",
+                    (date_only, sr_id)
+                )
+                row = next(
+                    (r for r in cursor.fetchall() if base_callsign(r[1]) == base_callsign(target_callsign)),
+                    None
+                )
+                if row:
+                    row_id, _, existing_comments = row
+                    cursor.execute(
+                        "UPDATE statrep SET comments = ? WHERE id = ?",
+                        (f"{existing_comments or ''}||ACK {ack_callsign}", row_id)
+                    )
+                    conn.commit()
+        except sqlite3.Error as e:
+            print(f"[RR ack] DB error matching statrep {target_callsign}/{sr_id} on {date_only}: {e}")
+
+        return True
 
     def _parse_standard_statrep(
         self,
@@ -10281,9 +10359,35 @@ window.commstatBouncePin = function(srid) {
             rig_name, "statrep", data, "sr_id", "statrep", from_callsign, fwd_marker
         )
         if result:
+            # Auto-ack: only for genuinely new inserts (not duplicates) received
+            # live over the JS8 TCP feed (source=1), and only when the report
+            # was addressed to a group (no group slot to echo back otherwise).
+            if source == 1 and target:
+                self._send_statrep_ack(rig_name, target, from_callsign, sr_id)
             return (result, None)
 
         return ("", None)
+
+    def _send_statrep_ack(self, rig_name: str, group: str, from_callsign: str, sr_id: str) -> None:
+        """
+        Auto-transmit a JS8 RR acknowledgment for a status report just saved
+        from the JS8 TCP feed: "{my callsign}: {group} RR {from_callsign},{sr_id}".
+        Mirrors the pattern _process_rr_ack looks for, so other stations
+        (and our own database) can record that the report was copied.
+        """
+        my_callsign = self.get_callsign_for_rig(rig_name)
+        if not my_callsign:
+            my_callsign, _, __ = self.db.get_user_settings()
+        if not my_callsign:
+            return
+
+        client = self.tcp_pool.get_client(rig_name)
+        if not client or not client.is_connected():
+            return
+
+        ack_message = f"{my_callsign.upper()}: {group} RR {from_callsign.upper()},{sr_id}"
+        client.send_tx_message(ack_message)
+        print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
 
     def _parse_group_event(
         self,

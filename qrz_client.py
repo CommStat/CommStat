@@ -29,6 +29,27 @@ def qrz_log(msg: str) -> None:
     print(f"[QRZ] {msg}")
 
 
+# Session-wide XML subscription status, learned from the SubExp element of the
+# first successful login: None = not yet known, True = subscriber, False = free
+# account. A free account can log in but only receives name/city/state/country
+# from a data lookup — writing that over a full cached row (server-pushed or
+# from an earlier subscription) silently destroys address/grid/lat/lon. So once
+# a login reports "non-subscriber", every lookup for the rest of the session
+# serves the local qrz table regardless of age and never touches the data API.
+_subscriber: Optional[bool] = None
+
+
+def subscription_status() -> Optional[bool]:
+    """True/False once a login this session has reported it, None if unknown."""
+    return _subscriber
+
+
+def reset_subscription_status() -> None:
+    """Forget the cached status (call after credentials are changed/removed)."""
+    global _subscriber
+    _subscriber = None
+
+
 def load_qrz_config() -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Load QRZ configuration from database.
@@ -163,7 +184,9 @@ class QRZClient:
                     if age_days < CACHE_DAYS:
                         return dict(row), True
                     else:
-                        qrz_log(f"Cache expired for {callsign} (age: {age_days} days), refreshing from API")
+                        # What happens next (API refresh vs. local data) is
+                        # decided and logged by lookup().
+                        qrz_log(f"Cache expired for {callsign} (age: {age_days} days)")
                         return dict(row), False
 
                 return None, False
@@ -311,12 +334,19 @@ class QRZClient:
             self.session_key = key_elem.text
             qrz_log(f"Connected to QRZ.com as {username}")
 
-            # Check subscription status
+            # Check subscription status. QRZ reports "non-subscriber" here for
+            # free accounts; anything else is an expiry date.
+            global _subscriber
             sub_exp = session.find("qrz:SubExp", ns)
             if sub_exp is None:
                 sub_exp = session.find("SubExp")
-            if sub_exp is not None and sub_exp.text:
-                qrz_log(f"Subscription expires: {sub_exp.text}")
+            sub_text = (sub_exp.text or "").strip() if sub_exp is not None else ""
+            if sub_text.lower() == "non-subscriber":
+                _subscriber = False
+                qrz_log("No XML subscription - lookups will use the local contact database only")
+            elif sub_text:
+                _subscriber = True
+                qrz_log(f"Subscription expires: {sub_text}")
 
             return True
 
@@ -363,9 +393,26 @@ class QRZClient:
             qrz_log("QRZ disabled or QRZ not configured")
             return stale_data
 
+        # No XML subscription (known from an earlier login this session):
+        # serve whatever the local table has, expired or not, and never hit
+        # the data API — its limited reply would clobber the cached row.
+        if _subscriber is False:
+            if stale_data:
+                qrz_log(f"No XML subscription - using local data for {callsign}")
+            else:
+                qrz_log(f"No XML subscription - {callsign} not in local database")
+            return stale_data
+
         # Need session key
         if not self.session_key:
             if not self.login():
+                return stale_data
+            # Login just learned the account is a free one — same rule as above.
+            if _subscriber is False:
+                if stale_data:
+                    qrz_log(f"Using local data for {callsign}")
+                else:
+                    qrz_log(f"{callsign} not in local database")
                 return stale_data
 
         # Make API call

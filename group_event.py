@@ -25,7 +25,7 @@ from PyQt5.QtWidgets import QMessageBox, QDialog
 from constants import (
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
     COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
-    COLOR_BTN_GREEN, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_HELP,
+    COLOR_BTN_GREEN, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_HELP, COLOR_BTN_RED,
     RIG_FREQ_DELAY_MS,
 )
 from id_utils import generate_time_based_id
@@ -99,6 +99,7 @@ _PANEL_BG   = DEFAULT_COLORS.get("module_background",   "#DDDDDD")
 _PANEL_FG   = DEFAULT_COLORS.get("module_foreground",   "#000000")
 _COL_CANCEL = "#555555"
 _COL_PINK   = COLOR_BTN_HELP
+_COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 # All 12 statrep condition columns, all forced to STATUS_EVENT for an Event.
 _CONDITION_COLUMNS = [
@@ -173,6 +174,42 @@ class GroupEventDialog(QDialog):
 
     def _is_internet_only(self) -> bool:
         return hasattr(self, 'rig_combo') and self.rig_combo.currentText() == INTERNET_RIG
+
+    def _message_max_len(self) -> int:
+        """Max message length for the current rig selection."""
+        return MESSAGE_MAX_INTERNET if self._is_internet_only() else MESSAGE_MAX_RADIO
+
+    def _enforce_message_limit(self) -> None:
+        """Hard-cap the message at the character limit (measured post-cleaning,
+        same as _validate/_build_message) and refresh the counter."""
+        max_len = self._message_max_len()
+        raw = self.message_edit.toPlainText()
+        cleaned = self._clean_message(raw)
+        if len(cleaned) > max_len:
+            cursor = self.message_edit.textCursor()
+            pos = cursor.position()
+            while raw and len(self._clean_message(raw)) > max_len:
+                raw = raw[:-1]
+            cleaned = self._clean_message(raw)
+            self.message_edit.blockSignals(True)
+            self.message_edit.setPlainText(raw)
+            self.message_edit.blockSignals(False)
+            cursor = self.message_edit.textCursor()
+            cursor.setPosition(min(pos, len(raw)))
+            self.message_edit.setTextCursor(cursor)
+        self._update_message_count_label(len(cleaned), max_len)
+
+    def _update_message_count_label(self, count: int = None, max_len: int = None) -> None:
+        """Refresh the 'N of MAX' counter next to the Message label."""
+        if not hasattr(self, 'message_count_label'):
+            return
+        if max_len is None:
+            max_len = self._message_max_len()
+        if count is None:
+            count = len(self._clean_message(self.message_edit.toPlainText()))
+        self.message_count_label.setText(f"{count} of {max_len}")
+        color = COLOR_BTN_RED if count >= max_len else _COL_COUNTER
+        self.message_count_label.setStyleSheet(f"color: {color};")
 
     def _is_commsrvr_enabled(self) -> bool:
         """True when the global Off-Grid/Online switch is Online."""
@@ -277,6 +314,8 @@ class GroupEventDialog(QDialog):
             if not is_internet:
                 self.delivery_combo.addItem("Limited Reach")
             self.delivery_combo.blockSignals(False)
+
+        self._update_message_count_label()
 
         if rig_name == INTERNET_RIG:
             # Grid is intentionally left as whatever the operator has typed —
@@ -641,9 +680,15 @@ class GroupEventDialog(QDialog):
         layout.addLayout(header_grid)
 
         # Message body
+        message_row = QtWidgets.QHBoxLayout()
         message_label = QtWidgets.QLabel("Message:")
         message_label.setFont(label_font())
-        layout.addWidget(message_label)
+        message_row.addWidget(message_label)
+        message_row.addStretch()
+        self.message_count_label = QtWidgets.QLabel()
+        self.message_count_label.setFont(mono_font())
+        message_row.addWidget(self.message_count_label)
+        layout.addLayout(message_row)
 
         self.message_edit = QtWidgets.QPlainTextEdit()
         self.message_edit.setFont(mono_font())
@@ -655,7 +700,9 @@ class GroupEventDialog(QDialog):
             f"background-color: white; color: {COLOR_INPUT_TEXT};"
             f" border: 1px solid {COLOR_INPUT_BORDER}; border-radius: 4px; padding: 2px 4px;"
         )
+        self.message_edit.textChanged.connect(self._enforce_message_limit)
         layout.addWidget(self.message_edit)
+        self._update_message_count_label()
 
         layout.addStretch()
 
@@ -754,7 +801,7 @@ class GroupEventDialog(QDialog):
         # placeholder) — that's what actually gets transmitted/stored, and it
         # can run longer than the raw textbox contents.
         message = self._clean_message(self.message_edit.toPlainText().strip())
-        max_len = MESSAGE_MAX_INTERNET if self._is_internet_only() else MESSAGE_MAX_RADIO
+        max_len = self._message_max_len()
         if len(message) > max_len:
             self._show_error(f"Message too long (max {max_len} characters)")
             return False

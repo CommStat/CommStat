@@ -27,12 +27,12 @@ from PyQt5.QtWidgets import QMessageBox, QDialog, QComboBox
 from constants import (
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
     COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
-    COLOR_BTN_GREEN, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_HELP,
+    COLOR_BTN_GREEN, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_HELP, COLOR_BTN_RED,
     RIG_FETCH_DELAY_MS, RIG_FREQ_DELAY_MS,
     SCOPE_OPTIONS, scope_code_for_text, scope_db_text_for_code,
 )
 from id_utils import generate_time_based_id
-from little_gucci import create_verified_ssl_context
+from little_gucci import create_verified_ssl_context, UpperCaseLineEdit
 from ui_helpers import (make_button, label_font, mono_font, apply_standard_dialog_chrome,
                         connect_single, show_help_dialog)
 
@@ -148,6 +148,7 @@ _COL_CANCEL = "#555555"
 _COL_GRAY   = "#6c757d"
 _COL_PURPLE = "#6f42c1"
 _COL_PINK   = COLOR_BTN_HELP
+_COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 
 # =============================================================================
@@ -294,6 +295,38 @@ class StatRepDialog(QDialog):
     def _swap_remarks_widget(self, internet_only: bool) -> None:
         """No-op: expanded remarks widget is always shown."""
 
+    def _remarks_max_len(self) -> int:
+        """Max remarks length for the current rig selection."""
+        return REMARKS_MAX_INTERNET if self._is_internet_only() else REMARKS_MAX_RADIO
+
+    def _on_remarks_text_changed(self) -> None:
+        """Hard-cap remarks at the character limit and refresh the counter."""
+        max_len = self._remarks_max_len()
+        text = self.remarks_expanded.toPlainText()
+        if len(text) > max_len:
+            cursor = self.remarks_expanded.textCursor()
+            pos = cursor.position()
+            text = text[:max_len]
+            self.remarks_expanded.blockSignals(True)
+            self.remarks_expanded.setPlainText(text)
+            self.remarks_expanded.blockSignals(False)
+            cursor = self.remarks_expanded.textCursor()
+            cursor.setPosition(min(pos, len(text)))
+            self.remarks_expanded.setTextCursor(cursor)
+        self._update_remarks_count_label(len(text), max_len)
+
+    def _update_remarks_count_label(self, count: Optional[int] = None, max_len: Optional[int] = None) -> None:
+        """Refresh the 'N of MAX' counter next to the Remarks label."""
+        if not hasattr(self, 'remarks_count_label'):
+            return
+        if max_len is None:
+            max_len = self._remarks_max_len()
+        if count is None:
+            count = len(self.remarks_expanded.toPlainText())
+        self.remarks_count_label.setText(f"{count} of {max_len}")
+        color = COLOR_BTN_RED if count >= max_len else _COL_COUNTER
+        self.remarks_count_label.setStyleSheet(f"color: {color};")
+
     def _get_all_groups_from_db(self) -> list:
         """Get all groups from the database."""
         try:
@@ -304,6 +337,20 @@ class StatRepDialog(QDialog):
         except sqlite3.Error as e:
             print(f"Error reading groups from database: {e}")
         return []
+
+    def _get_group_target(self) -> str:
+        """Build the transmit/DB target from the Group-or-Callsign field.
+
+        A saved group is prefixed with '@' (matches the '@GROUP' convention
+        parsed app-wide); an unrecognized entry is treated as a manually
+        typed callsign and sent bare, same as Alert's '_get_target'."""
+        text = self.to_combo.currentText().strip()
+        if not text:
+            return ""
+        known_groups = {g.strip().upper() for g in self._get_all_groups_from_db()}
+        if text.upper() in known_groups:
+            return f"@{text}"
+        return text.upper()
 
     def _is_commsrvr_enabled(self) -> bool:
         """Check if commsrvr submission is enabled.
@@ -432,6 +479,7 @@ class StatRepDialog(QDialog):
 
         # Swap remarks widget based on rig type
         self._swap_remarks_widget(is_internet)
+        self._update_remarks_count_label()
 
         if rig_name == INTERNET_RIG:
             callsign, grid, state = self._get_internet_user_settings()
@@ -747,6 +795,9 @@ class StatRepDialog(QDialog):
         self.to_combo = QtWidgets.QComboBox()
         self.to_combo.setFont(mono_font())
         self.to_combo.setMaxVisibleItems(30)
+        self.to_combo.setEditable(True)
+        self.to_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.to_combo.setCompleter(None)
         all_groups = self._get_all_groups_from_db()
         if len(all_groups) == 1:
             self.to_combo.addItem(all_groups[0])
@@ -754,8 +805,11 @@ class StatRepDialog(QDialog):
             self.to_combo.addItem("")
             for group in all_groups:
                 self.to_combo.addItem(group)
+        # setLineEdit() must come after setEditable(True)/addItem() — it
+        # replaces the combo's editor, so signals must be wired afterward.
+        self.to_combo.setLineEdit(UpperCaseLineEdit(self.to_combo))
         _apply_combo_popup_style(self.to_combo)
-        _add_header_cell(1, "Group:", self.to_combo)
+        _add_header_cell(1, "Group or Callsign:", self.to_combo)
 
         self.grid_field = QtWidgets.QLineEdit(self.grid)
         self.grid_field.setMaxLength(6)
@@ -806,9 +860,15 @@ class StatRepDialog(QDialog):
         layout.addWidget(self.status_grid_widget)
 
         # Remarks
+        remarks_row = QtWidgets.QHBoxLayout()
         remarks_label = QtWidgets.QLabel("Remarks:")
         remarks_label.setFont(label_font())
-        layout.addWidget(remarks_label)
+        remarks_row.addWidget(remarks_label)
+        remarks_row.addStretch()
+        self.remarks_count_label = QtWidgets.QLabel()
+        self.remarks_count_label.setFont(mono_font())
+        remarks_row.addWidget(self.remarks_count_label)
+        layout.addLayout(remarks_row)
 
         self.remarks_field = QtWidgets.QLineEdit()
         self.remarks_field.setFont(mono_font())
@@ -826,9 +886,11 @@ class StatRepDialog(QDialog):
             f"background-color: white; color: {COLOR_INPUT_TEXT};"
             f" border: 1px solid {COLOR_INPUT_BORDER}; border-radius: 4px; padding: 2px 4px;"
         )
+        self.remarks_expanded.textChanged.connect(self._on_remarks_text_changed)
         _, _, initial_state = self._get_internet_user_settings()
         self.remarks_expanded.setPlainText(initial_state)
         layout.addWidget(self.remarks_expanded)
+        self._update_remarks_count_label()
 
         layout.addStretch()
 
@@ -949,10 +1011,10 @@ class StatRepDialog(QDialog):
             self.rig_combo.setFocus()
             return False
 
-        # Check group is selected
+        # Check group/callsign is entered
         group_name = self.to_combo.currentText()
         if not group_name or group_name == "":
-            self._show_error("Please select a Group")
+            self._show_error("Please select a Group or enter a Callsign")
             self.to_combo.setFocus()
             return False
 
@@ -980,7 +1042,7 @@ class StatRepDialog(QDialog):
 
         # Check remarks length
         remarks = self._get_remarks_text()
-        max_len = REMARKS_MAX_INTERNET if self._is_internet_only() else REMARKS_MAX_RADIO
+        max_len = self._remarks_max_len()
         if len(remarks) > max_len:
             self._show_error(f"Remarks too long (max {max_len} characters)")
             return False
@@ -1247,7 +1309,8 @@ class StatRepDialog(QDialog):
             status_str = "+"
 
         # Format: CALLSIGN: @GROUP ,GRID,SCOPE,ID,STATUSES,REMARKS,{&%}
-        group = f"@{self.to_combo.currentText()}"
+        # (or CALLSIGN: TARGETCALL ,... when addressing a specific callsign)
+        group = self._get_group_target()
         if getattr(self, "_forward_origin", None):
             marker = "{F%}"
             message = f"{self._forward_origin.upper()}: {group} ,{self.grid},{scope_code},{self.statrep_id},{status_str},{remarks},{marker}"
@@ -1280,7 +1343,7 @@ class StatRepDialog(QDialog):
             'source': 3 if self.rig_combo.currentText() == INTERNET_RIG else 1,
             'statrep_id': self.statrep_id,
             'callsign': self.callsign.upper(),
-            'target': '@' + self.to_combo.currentText().upper(),
+            'target': self._get_group_target(),
             'grid': self.grid.upper(),
             'scope_text': scope_db_text_for_code(self.scope_combo.currentData()),
             'date': now.toString("yyyy-MM-dd HH:mm:ss"),
@@ -1297,7 +1360,7 @@ class StatRepDialog(QDialog):
             'crime': values["crime"],
             'civil': values["civil"],
             'political': values["political"],
-            'comments': remarks,
+            'comments': remarks + NEWLINE_PLACEHOLDER,
         }
 
     def _save_to_database(self, frequency: int = 0, global_id: int = 0) -> None:

@@ -31,6 +31,7 @@ from PyQt5.QtWidgets import (
 )
 
 from constants import DEFAULT_COLORS
+from qrz_client import reset_subscription_status
 from ui_helpers import make_button, make_input, confirm, apply_standard_dialog_chrome
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -116,9 +117,12 @@ def _test_qrz_credentials(username: str, password: str) -> Tuple[bool, str]:
         sub_exp = session.find("qrz:SubExp", ns)
         if sub_exp is None:
             sub_exp = session.find("SubExp")
-        exp_text = sub_exp.text if sub_exp is not None else None
+        exp_text = (sub_exp.text or "").strip() if sub_exp is not None else ""
         msg = "Login successful!\nQRZ XML connection verified."
-        if exp_text:
+        if exp_text.lower() == "non-subscriber":
+            msg += ("\nNo XML data subscription: CommStat will use its "
+                    "local contact database only.")
+        elif exp_text:
             msg += f"\nSubscription expires: {exp_text}"
         return True, msg
 
@@ -440,6 +444,9 @@ class QRZSettingsDialog(QDialog):
             if not ok:
                 QMessageBox.critical(self, "Error", "Could not save QRZ settings.")
                 return
+            # New credentials may belong to a different account — re-detect
+            # the XML subscription status on the next lookup.
+            reset_subscription_status()
 
         for col in range(3):
             self.table.removeCellWidget(row, col)
@@ -480,6 +487,7 @@ class QRZSettingsDialog(QDialog):
                        no_label="Cancel"):
             return
         self.db.set_qrz_settings("", "", False)
+        reset_subscription_status()
         self._load()
 
     # ── Test ──────────────────────────────────────────────────────────────────

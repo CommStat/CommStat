@@ -17,6 +17,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+import time
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -35,7 +36,7 @@ from PyQt5.QtWidgets import (
 )
 
 from id_utils import generate_time_based_id
-from qrz_client import QRZClient, get_qrz_cached, load_qrz_config
+from qrz_client import QRZClient, get_qrz_cached, load_qrz_config, subscription_status
 from constants import (
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
     COLOR_BTN_RED, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_GREEN,
@@ -112,6 +113,11 @@ def _normalize_qrz(data: dict) -> dict:
     Handles both the raw API response (addr1/addr2/call) and the
     cached DB row (address/city/callsign) transparently.
     """
+    # grid_override is a local-only correction (set when a contact's QRZ grid
+    # is known to be stale — see watchlist_members.py) that takes priority
+    # over the cached grid/lat/lon everywhere else in the app (StatRep table,
+    # main-map watchlist pins); do the same here so it isn't silently ignored.
+    grid_override = (data.get("grid_override") or "").strip()
     return {
         "call":     (data.get("call") or data.get("callsign") or "").upper(),
         "name":     " ".join(x for x in (
@@ -127,9 +133,9 @@ def _normalize_qrz(data: dict) -> dict:
         "county":   data.get("county") or "",
         "country":  data.get("country") or "",
         "license":  data.get("class") or "",
-        "grid":     data.get("grid") or "",
-        "lat":      str(data.get("lat") or ""),
-        "lon":      str(data.get("lon") or ""),
+        "grid":     grid_override or data.get("grid") or "",
+        "lat":      "" if grid_override else str(data.get("lat") or ""),
+        "lon":      "" if grid_override else str(data.get("lon") or ""),
         "email":    data.get("email") or "",
         "image":    data.get("image") or "",
         "moddate":  data.get("moddate") or "",
@@ -576,23 +582,28 @@ class _QRZInfoSection(QWidget):
         msg_grid.setColumnStretch(1, 1)
         msg_grid.setColumnStretch(2, 1)
 
-        self.lbl_msg_target = QLabel(); self.lbl_msg_target.setFont(_mono_font())
-        self.lbl_msg_freq   = QLabel(); self.lbl_msg_freq.setFont(_mono_font())
-        self.lbl_msg_posted = QLabel(); self.lbl_msg_posted.setFont(_mono_font())
-        self.lbl_msg_id     = QLabel(); self.lbl_msg_id.setFont(_mono_font())
-        self.lbl_msg_source = QLabel(); self.lbl_msg_source.setFont(_mono_font())
+        self.lbl_msg_target    = QLabel(); self.lbl_msg_target.setFont(_mono_font())
+        self.lbl_msg_freq      = QLabel(); self.lbl_msg_freq.setFont(_mono_font())
+        self.lbl_msg_posted    = QLabel(); self.lbl_msg_posted.setFont(_mono_font())
+        self.lbl_msg_id        = QLabel(); self.lbl_msg_id.setFont(_mono_font())
+        self.lbl_msg_source    = QLabel(); self.lbl_msg_source.setFont(_mono_font())
+        self.lbl_msg_global_id = QLabel(); self.lbl_msg_global_id.setFont(_mono_font())
+        self.lbl_msg_delivered = QLabel(); self.lbl_msg_delivered.setFont(_mono_font())
 
         msg_hdr = QLabel("Message Details")
         msg_hdr.setFont(_lbl_font())
 
-        # Row 0: header | To:     | Freq:
-        msg_grid.addWidget(msg_hdr,              0, 0)
-        msg_grid.addWidget(self.lbl_msg_target,  0, 1)
-        msg_grid.addWidget(self.lbl_msg_freq,    0, 2)
+        # Row 0: header | Freq:
+        msg_grid.addWidget(msg_hdr,                 0, 0)
+        msg_grid.addWidget(self.lbl_msg_freq,       0, 1)
         # Row 1: Posted: | Message ID: | Received via:
-        msg_grid.addWidget(self.lbl_msg_posted,  1, 0)
-        msg_grid.addWidget(self.lbl_msg_id,      1, 1)
-        msg_grid.addWidget(self.lbl_msg_source,  1, 2)
+        msg_grid.addWidget(self.lbl_msg_posted,     1, 0)
+        msg_grid.addWidget(self.lbl_msg_id,         1, 1)
+        msg_grid.addWidget(self.lbl_msg_source,     1, 2)
+        # Row 2: To: | Global ID: | Delivered To:
+        msg_grid.addWidget(self.lbl_msg_target,     2, 0)
+        msg_grid.addWidget(self.lbl_msg_global_id,  2, 1)
+        msg_grid.addWidget(self.lbl_msg_delivered,  2, 2)
 
         self._main_layout.addLayout(msg_grid)
 
@@ -1464,6 +1475,7 @@ class StatRepDetailDialog(QDialog):
         self._rc_thread: Optional[_ReadCountThread] = None
         self._reload_token: int = 0
         self._map_loaded = False
+        self._map_ready = False
         self._last_nav: str = "older"
         self._record_list: list = list(record_list) if record_list else []
         self._record_list_provider = record_list_provider
@@ -1533,6 +1545,7 @@ class StatRepDetailDialog(QDialog):
         lower.setSpacing(10)
         self.map_view = QWebEngineView()
         self.map_view.setFixedSize(480, 220)
+        self.map_view.loadFinished.connect(self._on_map_view_load_finished)
         lower.addWidget(self.map_view, alignment=Qt.AlignTop)
 
         self.comments = QTextBrowser()
@@ -1636,7 +1649,7 @@ class StatRepDetailDialog(QDialog):
         self._global_id = global_id
         freq_mhz = (float(row[17]) / 1_000_000) if row[17] else 0.0
         sr_id    = row[16] or ""
-        group    = ("@" + (row[18] or "").lstrip("@")) if (row[18] or "").strip("@") else ""
+        group    = (row[18] or "").strip()
         sr_grid  = row[15] or ""
         source   = row[21] if row[21] is not None else 0
         _source_map = {1: "RF via JS8Call", 2: "Internet", 3: "Internet Only"}
@@ -1703,6 +1716,7 @@ class StatRepDetailDialog(QDialog):
                 self._statrep_lat = lat
                 self._statrep_lon = lon
                 self._statrep_grid = grid[:4].upper()
+                self._map_ready = False
                 self.map_view.setHtml(
                     _make_map_html(lat, lon, self.internet_available),
                     QUrl("http://localhost/")
@@ -1710,6 +1724,15 @@ class StatRepDetailDialog(QDialog):
                 self._map_loaded = True
             except Exception as e:
                 print(f"[StatRepDetailDialog] Map error for grid {grid}: {e}")
+
+    def _on_map_view_load_finished(self, ok: bool) -> None:
+        """Flag-only readiness signal used by the print/PDF view (_on_print)
+        to avoid grabbing a blank frame before the map has actually painted.
+        Deliberately does NOT grab the widget here: QWebEngineView.grab() has
+        been observed to disrupt the widget's own live rendering on some
+        Windows GPU/driver stacks, so it must only ever be called lazily, at
+        the moment the user clicks Print — never automatically on every load."""
+        self._map_ready = bool(ok)
 
     def _on_read_count(self, text: str) -> None:
         if not text:
@@ -1886,7 +1909,7 @@ class StatRepDetailDialog(QDialog):
         )
 
         map_html = ""
-        if self._map_loaded:
+        if self._map_loaded and self._map_ready:
             try:
                 map_pm = self.map_view.grab()
                 uri = self._pixmap_to_data_uri(map_pm)
@@ -2026,6 +2049,18 @@ class StatRepDetailDialog(QDialog):
         if self._print_busy:
             return
         self._print_busy = True
+        self._print_wait_deadline = time.monotonic() + 1.5
+        self._await_map_then_print()
+
+    def _await_map_then_print(self) -> None:
+        # The map loads asynchronously; grabbing before it has painted (its
+        # tiles included) captures a blank frame. Wait briefly for it, but
+        # don't block Print indefinitely if it never finishes.
+        if (self._map_loaded and not self._map_ready
+                and time.monotonic() < self._print_wait_deadline):
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(100, self._await_map_then_print)
+            return
 
         try:
             html = self._build_print_html()
@@ -2198,6 +2233,7 @@ class StatRepDetailDialog(QDialog):
         self._record_id = record_id
         self.callsign = callsign
         self._map_loaded = False
+        self._map_ready = False
         self._global_id = 0
         self._row_data = {}
         self._sr_datetime = ""
@@ -2345,6 +2381,10 @@ class StatRepDetailDialog(QDialog):
         if not result:
             return
         self.qrz_info.update_data(result)
+        if subscription_status() is False:
+            self.qrz_info.set_qrz_status(
+                f"QRZ XML subscription not found — showing local data for {self.callsign}"
+            )
         self.contact_memo_edit.blockSignals(True)
         self.contact_memo_edit.setText(result.get("memo") or "")
         self.contact_memo_edit.blockSignals(False)
@@ -2412,6 +2452,7 @@ class MessageDetailDialog(QDialog):
 
     def __init__(self, callsign: str, message_text: str,
                  internet_available: bool = True,
+                 commsrvr_url: str = "",
                  module_background: str = "#f5f5f5",
                  module_foreground: str = "#333333",
                  data_background: str = "#D2D0CF",
@@ -2436,6 +2477,7 @@ class MessageDetailDialog(QDialog):
         self._tcp_pool = tcp_pool
         self._connector_manager = connector_manager
         self.internet_available = internet_available
+        self._commsrvr_url = commsrvr_url
         self._module_bg = module_background
         self._module_fg = module_foreground
         self._data_bg = data_background
@@ -2444,6 +2486,7 @@ class MessageDetailDialog(QDialog):
         self._msg_id = msg_id
         self._refresh_callback = refresh_callback
         self._thread: Optional[_QRZThread] = None
+        self._rc_thread: Optional[_ReadCountThread] = None
         self._reload_token: int = 0
         self._map_loaded = False
         self._deleted_any = False
@@ -2451,8 +2494,8 @@ class MessageDetailDialog(QDialog):
         self._msg_datetime: str = ""
         self.setWindowTitle(f"Message — {callsign}")
         self.setModal(True)
-        self.setMinimumSize(996, 588)
-        self.resize(996, 588)
+        self.setMinimumSize(996, 616)
+        self.resize(996, 616)
         if os.path.exists("radiation-32.png"):
             self.setWindowIcon(QtGui.QIcon("radiation-32.png"))
         self._setup_ui()
@@ -2582,7 +2625,7 @@ class MessageDetailDialog(QDialog):
             with sqlite3.connect(DB_PATH, timeout=10) as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT datetime, freq, target, source FROM messages WHERE msg_id = ?",
+                    "SELECT datetime, freq, target, source, global_id FROM messages WHERE msg_id = ?",
                     (self._msg_id,)
                 )
                 row = cur.fetchone()
@@ -2590,11 +2633,12 @@ class MessageDetailDialog(QDialog):
             row = None
         if row:
             self._msg_datetime = row[0] or ""
-            self._populate_message_labels(row[0] or "", row[1], row[2] or "", row[3])
+            self._populate_message_labels(row[0] or "", row[1], row[2] or "", row[3], row[4] or 0)
         else:
             self._populate_message_labels(self._msg_datetime, None, "", None)
 
-    def _populate_message_labels(self, datetime_str: str, freq, target: str, source) -> None:
+    def _populate_message_labels(self, datetime_str: str, freq, target: str, source,
+                                  global_id: int = 0) -> None:
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
         _source_map = {1: "RF via JS8Call", 2: "Internet", 3: "Internet Only"}
 
@@ -2606,14 +2650,29 @@ class MessageDetailDialog(QDialog):
             f'<span style="{_k}">Message ID:</span>  {self._msg_id}' if self._msg_id
             else f'<span style="{_k}">Message ID:</span>'
         )
-        target_text = ""
-        if target:
-            stripped = target.lstrip("@")
-            target_text = ("@" + stripped) if stripped else ""
+        target_text = target.strip() if target else ""
         self.qrz_info.lbl_msg_target.setText(
             f'<span style="{_k}">To:</span>  {target_text}' if target_text
             else f'<span style="{_k}">To:</span>'
         )
+        self.qrz_info.lbl_msg_global_id.setText(
+            f'<span style="{_k}">Global ID:</span>  {global_id}' if global_id
+            else f'<span style="{_k}">Global ID:</span>'
+        )
+        self.qrz_info.lbl_msg_delivered.setText(f'<span style="{_k}">Delivered To:</span>')
+        local_cs = _get_local_callsign()
+        target_cs = target_text.lstrip("@").strip().upper() if target_text else ""
+        if target_cs and local_cs and target_cs == local_cs.strip().upper():
+            self.qrz_info.lbl_msg_delivered.setText(
+                f'<span style="{_k}">Delivered To:</span>  0 CommStat users'
+            )
+        elif global_id and self._commsrvr_url and self.internet_available and local_cs:
+            rc_token = self._reload_token
+            self._rc_thread = _ReadCountThread(self._commsrvr_url, local_cs, global_id)
+            self._rc_thread.count_ready.connect(
+                lambda text, t=rc_token: self._on_read_count(text) if t == self._reload_token else None
+            )
+            self._rc_thread.start()
         try:
             freq_mhz = (float(freq) / 1_000_000) if freq else 0.0
         except (TypeError, ValueError):
@@ -2633,11 +2692,28 @@ class MessageDetailDialog(QDialog):
                 f'<span style="{_k}">Received via:</span>  {source_text}'
             )
 
+    def _on_read_count(self, text: str) -> None:
+        if not text:
+            return
+        # Response carries both values, e.g. "115,50 seconds ago"
+        # (delivered count before the comma, last-seen after).
+        count_str = text.split(",", 1)[0].strip()
+        _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
+        self.qrz_info.lbl_msg_delivered.setText(
+            f'<span style="{_k}">Delivered To:</span>  {count_str} CommStat users'
+        )
+
     def _reload(self, msg_id: str, callsign: str, message_text: str, msg_datetime: str,
-                freq=None, target: str = "", source=None) -> None:
+                freq=None, target: str = "", source=None, global_id: int = 0) -> None:
         self._reload_token += 1
         self.btn_newer.setEnabled(False)
         self.btn_older.setEnabled(False)
+        if self._rc_thread is not None:
+            try:
+                self._rc_thread.count_ready.disconnect()
+            except (TypeError, RuntimeError):
+                pass
+            self._rc_thread = None
         self._msg_id = msg_id
         self.callsign = callsign
         self.message_text = message_text
@@ -2650,7 +2726,7 @@ class MessageDetailDialog(QDialog):
         self.contact_memo_edit.clear()
         self.contact_memo_edit.blockSignals(False)
         self.qrz_info.update_data({"call": callsign})
-        self._populate_message_labels(msg_datetime, freq, target, source)
+        self._populate_message_labels(msg_datetime, freq, target, source, global_id)
         if self._thread is not None:
             try:
                 self._thread.result_ready.disconnect()
@@ -2699,14 +2775,14 @@ class MessageDetailDialog(QDialog):
                 cur = conn.cursor()
                 if direction == "newer":
                     cur.execute(
-                        "SELECT msg_id, from_callsign, message, datetime, freq, target, source FROM messages "
-                        "WHERE datetime > ? ORDER BY datetime ASC LIMIT 1",
+                        "SELECT msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                        "FROM messages WHERE datetime > ? ORDER BY datetime ASC LIMIT 1",
                         (self._msg_datetime,)
                     )
                 else:
                     cur.execute(
-                        "SELECT msg_id, from_callsign, message, datetime, freq, target, source FROM messages "
-                        "WHERE datetime < ? ORDER BY datetime DESC LIMIT 1",
+                        "SELECT msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                        "FROM messages WHERE datetime < ? ORDER BY datetime DESC LIMIT 1",
                         (self._msg_datetime,)
                     )
                 row = cur.fetchone()
@@ -2717,7 +2793,7 @@ class MessageDetailDialog(QDialog):
             self._update_nav_buttons()
             return
         self._reload(row[0], row[1] or "", row[2] or "", row[3] or "",
-                     freq=row[4], target=row[5] or "", source=row[6])
+                     freq=row[4], target=row[5] or "", source=row[6], global_id=row[7] or 0)
 
     def _on_delete(self) -> None:
         deleted_dt = self._msg_datetime
@@ -2736,14 +2812,14 @@ class MessageDetailDialog(QDialog):
                     direction = self._last_nav
                     if direction == "newer":
                         cur.execute(
-                            "SELECT msg_id, from_callsign, message, datetime, freq, target, source FROM messages "
-                            "WHERE datetime > ? ORDER BY datetime ASC LIMIT 1",
+                            "SELECT msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                            "FROM messages WHERE datetime > ? ORDER BY datetime ASC LIMIT 1",
                             (deleted_dt,)
                         )
                     else:
                         cur.execute(
-                            "SELECT msg_id, from_callsign, message, datetime, freq, target, source FROM messages "
-                            "WHERE datetime < ? ORDER BY datetime DESC LIMIT 1",
+                            "SELECT msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                            "FROM messages WHERE datetime < ? ORDER BY datetime DESC LIMIT 1",
                             (deleted_dt,)
                         )
                     next_row = cur.fetchone()
@@ -2755,7 +2831,8 @@ class MessageDetailDialog(QDialog):
             self.accept()
             return
         self._reload(next_row[0], next_row[1] or "", next_row[2] or "", next_row[3] or "",
-                     freq=next_row[4], target=next_row[5] or "", source=next_row[6])
+                     freq=next_row[4], target=next_row[5] or "", source=next_row[6],
+                     global_id=next_row[7] or 0)
 
     def _start_qrz(self) -> None:
         cached_fresh = get_qrz_cached(self.callsign)
@@ -2788,7 +2865,11 @@ class MessageDetailDialog(QDialog):
             self._on_qrz_result(cached_fresh)
             return
 
-        # No fresh cache (missing or stale) — live lookup; QRZClient handles stale refresh
+        # No fresh cache — show stale cached data now (the map pin doesn't go
+        # stale) while a live lookup refreshes the profile fields in the background.
+        if cached_any:
+            self._on_qrz_result(cached_any)
+
         token = self._reload_token
         self._thread = _QRZThread(self.callsign, username, password)
         self._thread.result_ready.connect(
@@ -2800,6 +2881,10 @@ class MessageDetailDialog(QDialog):
         if not result:
             return
         self.qrz_info.update_data(result)
+        if subscription_status() is False:
+            self.qrz_info.set_qrz_status(
+                f"QRZ XML subscription not found — showing local data for {self.callsign}"
+            )
         self.contact_memo_edit.blockSignals(True)
         self.contact_memo_edit.setText(result.get("memo") or "")
         self.contact_memo_edit.blockSignals(False)

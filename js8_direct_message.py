@@ -77,6 +77,7 @@ _PANEL_BG   = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG   = DEFAULT_COLORS.get("module_foreground",    "#000000")
 _COL_HELP   = COLOR_BTN_HELP
 _COL_CANCEL = COLOR_BTN_CLOSE
+_COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 # ── Help content ──────────────────────────────────────────────────────────────
 # Beside the feature it documents. Two columns are a table here rather than a
@@ -412,9 +413,17 @@ class JS8DirectMessageDialog(QDialog):
         layout.addWidget(self.qrz_info_label)
 
         # Message body (~4 visual rows)
+        msg_row = QHBoxLayout()
         msg_label = QLabel("Message:")
         msg_label.setStyleSheet("QLabel { font-family:Roboto; font-size:13px; font-weight:bold; }")
-        layout.addWidget(msg_label)
+        msg_row.addWidget(msg_label)
+        msg_row.addStretch()
+        self.message_count_label = QLabel()
+        self.message_count_label.setStyleSheet(
+            "QLabel { font-family:'Kode Mono'; font-size:13px; }"
+        )
+        msg_row.addWidget(self.message_count_label)
+        layout.addLayout(msg_row)
 
         self.body = QPlainTextEdit()
         self.body.setMinimumHeight(144)
@@ -422,6 +431,7 @@ class JS8DirectMessageDialog(QDialog):
         self.body.installEventFilter(_UpperCaseEventFilter(self.body))
         self.body.textChanged.connect(self._on_body_changed)
         layout.addWidget(self.body, 1)  # stretch factor — absorbs extra vertical space
+        self._update_message_count_label()
 
         # Buttons: Help (left) · Clear · Transmit · Cancel (right)
         btn_row = QHBoxLayout()
@@ -847,7 +857,20 @@ class JS8DirectMessageDialog(QDialog):
             cursor = self.body.textCursor()
             cursor.setPosition(min(pos, len(normalized)))
             self.body.setTextCursor(cursor)
+        self._update_message_count_label(len(normalized))
         self._update_transmit_state()
+
+    def _update_message_count_label(self, count: int = None) -> None:
+        """Refresh the 'N of MAX' counter next to the Message label."""
+        if not hasattr(self, 'message_count_label'):
+            return
+        if count is None:
+            count = len(self.body.toPlainText())
+        self.message_count_label.setText(f"{count} of {MAX_MESSAGE_LENGTH}")
+        color = COLOR_BTN_RED if count >= MAX_MESSAGE_LENGTH else _COL_COUNTER
+        self.message_count_label.setStyleSheet(
+            f"QLabel {{ font-family:'Kode Mono'; font-size:13px; color:{color}; }}"
+        )
 
     def _update_transmit_state(self) -> None:
         target_ok = bool(_CALLSIGN_PATTERN.match(self._effective_target_cs()))

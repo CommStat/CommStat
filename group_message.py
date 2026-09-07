@@ -27,7 +27,7 @@ from PyQt5.QtWidgets import (
 from constants import (
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
     COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
-    COLOR_BTN_CYAN, COLOR_BTN_BLUE,
+    COLOR_BTN_CYAN, COLOR_BTN_BLUE, COLOR_BTN_RED,
     RIG_FETCH_DELAY_MS,
 )
 from id_utils import generate_time_based_id
@@ -61,6 +61,7 @@ _DATA_BG  = DEFAULT_COLORS.get("data_background",      "#F8F6F4")
 _DATA_FG  = DEFAULT_COLORS.get("data_foreground",      "#000000")
 
 _COL_CANCEL = "#555555"
+_COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 _WIN_W          = 640
 _WIN_H_RF       = 420
@@ -210,17 +211,26 @@ class GroupMessageDialog(QDialog):
         body.addLayout(group_row)
 
         # Message label + inputs
+        msg_row = QHBoxLayout()
         msg_lbl = QLabel("Message:")
         msg_lbl.setStyleSheet(
             "QLabel { font-family:Roboto; font-size:13px; font-weight:bold; }"
         )
-        body.addWidget(msg_lbl)
+        msg_row.addWidget(msg_lbl)
+        msg_row.addStretch()
+        self.message_count_label = QLabel()
+        self.message_count_label.setStyleSheet(
+            "QLabel { font-family:'Kode Mono'; font-size:13px; }"
+        )
+        msg_row.addWidget(self.message_count_label)
+        body.addLayout(msg_row)
 
         self.message_expanded = QPlainTextEdit()
         self.message_expanded.setMinimumHeight(160)
         self.message_expanded.setPlaceholderText("1500 characters max")
         self.message_expanded.textChanged.connect(self._enforce_message_limit)
         body.addWidget(self.message_expanded)
+        self._update_message_count_label()
 
         body.addStretch()
 
@@ -390,6 +400,22 @@ class GroupMessageDialog(QDialog):
             cursor.setPosition(pos)
             self.message_expanded.setTextCursor(cursor)
             self.message_expanded.blockSignals(False)
+            text = text[:limit]
+        self._update_message_count_label(len(text), limit)
+
+    def _update_message_count_label(self, count: Optional[int] = None, limit: Optional[int] = None) -> None:
+        """Refresh the 'N of MAX' counter next to the Message label."""
+        if not hasattr(self, 'message_count_label'):
+            return
+        if limit is None:
+            limit = MAX_MESSAGE_LENGTH_INTERNET if self._message_is_expanded else MAX_MESSAGE_LENGTH
+        if count is None:
+            count = len(self.message_expanded.toPlainText())
+        self.message_count_label.setText(f"{count} of {limit}")
+        color = COLOR_BTN_RED if count >= limit else _COL_COUNTER
+        self.message_count_label.setStyleSheet(
+            f"QLabel {{ font-family:'Kode Mono'; font-size:13px; color:{color}; }}"
+        )
 
     def _on_mode_changed(self, index: int) -> None:
         rig_name = self.rig_combo.currentText()

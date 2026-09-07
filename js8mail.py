@@ -44,6 +44,7 @@ _PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
 _PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
+_COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 
 # =============================================================================
@@ -166,17 +167,28 @@ class JS8MailDialog(QDialog):
         layout.addWidget(self.email_field)
 
         # Subject / message
+        subject_row = QtWidgets.QHBoxLayout()
         subject_label = QtWidgets.QLabel("Message (Subject Line):")
         subject_label.setStyleSheet(
             "QLabel { font-family:Roboto; font-size:13px; font-weight:bold; }"
         )
-        layout.addWidget(subject_label)
+        subject_row.addWidget(subject_label)
+        subject_row.addStretch()
+        self.subject_count_label = QtWidgets.QLabel()
+        self.subject_count_label.setStyleSheet(
+            "QLabel { font-family:'Kode Mono'; font-size:13px; }"
+        )
+        subject_row.addWidget(self.subject_count_label)
+        layout.addLayout(subject_row)
+
         self.subject_field = QtWidgets.QLineEdit()
         self.subject_field.setMinimumHeight(30)
         self.subject_field.setMaxLength(MAX_SUBJECT_LENGTH)
         self.subject_field.setPlaceholderText("Your message here (67 characters max)")
         self.subject_field.textChanged.connect(self._force_uppercase_subject)
+        self.subject_field.textChanged.connect(self._update_subject_count_label)
         layout.addWidget(self.subject_field)
+        self._update_subject_count_label()
 
         # Note + Limitations
         note = QtWidgets.QLabel(
@@ -218,6 +230,15 @@ class JS8MailDialog(QDialog):
             self.subject_field.setText(upper)
             self.subject_field.blockSignals(False)
             self.subject_field.setCursorPosition(pos)
+
+    def _update_subject_count_label(self, _text: str = "") -> None:
+        """Refresh the 'N of MAX' counter next to the Subject label."""
+        count = len(self.subject_field.text())
+        self.subject_count_label.setText(f"{count} of {MAX_SUBJECT_LENGTH}")
+        color = COLOR_BTN_RED if count >= MAX_SUBJECT_LENGTH else _COL_COUNTER
+        self.subject_count_label.setStyleSheet(
+            f"QLabel {{ font-family:'Kode Mono'; font-size:13px; color:{color}; }}"
+        )
 
     # -------------------------------------------------------------------------
     # Rig management
