@@ -46,14 +46,15 @@ _COL_CONNECTED    = "#1a7f37"
 _COL_DISCONNECTED = "#cc0000"
 _COL_DISABLED     = "#888888"
 
-_WIN_W = 860
+_WIN_W = 940
 _WIN_H = 380
 
-_TABLE_COLS = ["Rig Name", "Server", "Port", "State", "Status", "Auto", "Comment"]
+_TABLE_COLS = ["Rig Name", "Server", "Port", "State", "Status", "Auto", "RF Ack", "Comment"]
 
-_STATUS_COL = 4   # live read-only column — never gets setCellWidget
-_AUTO_COL   = 5   # auto-connect-at-startup flag (Yes/No, QCheckBox in edit mode)
-_COMMENT_COL = 6
+_STATUS_COL  = 4   # live read-only column — never gets setCellWidget
+_AUTO_COL    = 5   # auto-connect-at-startup flag (Yes/No, QCheckBox in edit mode)
+_RF_ACK_COL  = 6   # RF RR-ack-on-receipt flag (Yes/No, QCheckBox in edit mode)
+_COMMENT_COL = 7
 
 
 # ── Dialog ─────────────────────────────────────────────────────────────────────
@@ -75,6 +76,7 @@ class JS8ConnectorsDialog(QDialog):
         self._iw_port:    Optional[QLineEdit] = None
         self._iw_state:   Optional[QLineEdit] = None
         self._iw_auto:    Optional[QCheckBox] = None
+        self._iw_rf_ack:  Optional[QCheckBox] = None
         self._iw_comment: Optional[QLineEdit] = None
 
         apply_standard_dialog_chrome(self, "JS8 Connectors", _WIN_W, _WIN_H)
@@ -128,7 +130,8 @@ class JS8ConnectorsDialog(QDialog):
         hh.setSectionResizeMode(3, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        hh.setSectionResizeMode(6, QHeaderView.Stretch)
+        hh.setSectionResizeMode(6, QHeaderView.ResizeToContents)
+        hh.setSectionResizeMode(7, QHeaderView.Stretch)
 
         self.table.setStyleSheet(
             f"QTableWidget {{ background-color:{_DATA_BG}; alternate-background-color:{_DATA_BG};"
@@ -191,7 +194,9 @@ class JS8ConnectorsDialog(QDialog):
             f"<b><span style='color:#AA0000'>Note:</span></b>"
             f" <span style='color:{_PANEL_FG}'>Each connector requires a unique IP address and port combination</span><br>"
             f"<b><span style='color:#AA0000'>Auto:</span></b>"
-            f" <span style='color:{_PANEL_FG}'>Uncheck to keep CommStat from auto-connecting at startup; use Reconnect on demand</span>"
+            f" <span style='color:{_PANEL_FG}'>Uncheck to keep CommStat from auto-connecting at startup; use Reconnect on demand</span><br>"
+            f"<b><span style='color:#AA0000'>RF Ack:</span></b>"
+            f" <span style='color:{_PANEL_FG}'>Uncheck to stop auto-transmitting an RF acknowledgment for STATREPs received on this connector</span>"
         )
         tip_lbl.setWordWrap(True)
         body.addWidget(tip_lbl)
@@ -212,6 +217,7 @@ class JS8ConnectorsDialog(QDialog):
 
             is_enabled = bool(conn.get("enabled", 1))
             auto       = bool(conn.get("auto_connect", 1))
+            rf_ack     = bool(conn.get("rf_ack", 1))
             rig     = conn.get("rig_name", "")
             server  = conn.get("server",   DEFAULT_SERVER)
             port    = str(conn.get("tcp_port", DEFAULT_TCP_PORT))
@@ -228,17 +234,18 @@ class JS8ConnectorsDialog(QDialog):
                 status_text  = "Disconnected"
                 status_color = _COL_DISCONNECTED
 
-            auto_text = "Yes" if auto else "No"
+            auto_text   = "Yes" if auto else "No"
+            rf_ack_text = "Yes" if rf_ack else "No"
 
             for col_idx, val in enumerate(
-                [rig, server, port, state, status_text, auto_text, comment]
+                [rig, server, port, state, status_text, auto_text, rf_ack_text, comment]
             ):
                 item = QTableWidgetItem(val)
                 item.setFont(mono)
                 item.setFlags(Qt.ItemIsSelectable | Qt.ItemIsEnabled)
                 if col_idx == _STATUS_COL:
                     item.setForeground(QtGui.QColor(status_color))
-                if col_idx == _AUTO_COL:
+                if col_idx in (_AUTO_COL, _RF_ACK_COL):
                     item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row_idx, col_idx, item)
 
@@ -278,16 +285,20 @@ class JS8ConnectorsDialog(QDialog):
         self._iw_server  = make_input(default=DEFAULT_SERVER)
         self._iw_port    = make_input(default=str(DEFAULT_TCP_PORT), max_len=5)
         self._iw_state   = make_input(placeholder="e.g. TX", max_len=2)
-        self._iw_auto    = self._make_auto_checkbox()
+        self._iw_auto    = self._make_checkbox()
+        self._iw_rf_ack  = self._make_checkbox()
         self._iw_comment = make_input(placeholder="Optional Description", max_len=60)
 
-        # Default Auto = checked for a new row; for an edit, read from the underlying DB row.
+        # Default Auto/RF Ack = checked for a new row; for an edit, read from the underlying DB row.
         auto_default = True
+        rf_ack_default = True
         if not adding and self._edit_id is not None:
             conn = self.connector_manager.get_connector_by_id(self._edit_id)
             if conn:
                 auto_default = bool(conn.get("auto_connect", 1))
+                rf_ack_default = bool(conn.get("rf_ack", 1))
         self._iw_auto.setChecked(auto_default)
+        self._iw_rf_ack.setChecked(rf_ack_default)
 
         self._iw_rig.setText("" if adding else _cell(0))
         self._iw_server.setText(_cell(1) if not adding and _cell(1) else DEFAULT_SERVER)
@@ -333,6 +344,7 @@ class JS8ConnectorsDialog(QDialog):
         self.table.setCellWidget(row, 3, _wrap_fixed(self._iw_state,  _state_w))
         # col 4 (_STATUS_COL) intentionally skipped
         self.table.setCellWidget(row, _AUTO_COL, self._iw_auto)
+        self.table.setCellWidget(row, _RF_ACK_COL, self._iw_rf_ack)
         self.table.setCellWidget(row, _COMMENT_COL, self._iw_comment)
         self.table.setRowHeight(row, 42)
         self.table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -349,14 +361,15 @@ class JS8ConnectorsDialog(QDialog):
         QWidget.setTabOrder(self._iw_server, self._iw_port)
         QWidget.setTabOrder(self._iw_port, self._iw_state)
         QWidget.setTabOrder(self._iw_state, self._iw_auto)
-        QWidget.setTabOrder(self._iw_auto, self._iw_comment)
+        QWidget.setTabOrder(self._iw_auto, self._iw_rf_ack)
+        QWidget.setTabOrder(self._iw_rf_ack, self._iw_comment)
         QWidget.setTabOrder(self._iw_comment, self.btn_save)
 
         self._on_inline_changed()
         self._iw_rig.setFocus()
 
-    def _make_auto_checkbox(self) -> QCheckBox:
-        """Centered checkbox cell widget for the Auto column during inline edit."""
+    def _make_checkbox(self) -> QCheckBox:
+        """Centered checkbox cell widget for a flag column (Auto, RF Ack) during inline edit."""
         cb = QCheckBox()
         cb.setStyleSheet(
             f"QCheckBox {{ background-color:{_DATA_BG}; padding-left:14px; }}"
@@ -379,6 +392,7 @@ class JS8ConnectorsDialog(QDialog):
             port_str = self._iw_port.text().strip()
             state    = self._iw_state.text().strip().upper()[:2]
             auto     = bool(self._iw_auto.isChecked())
+            rf_ack   = bool(self._iw_rf_ack.isChecked())
             comment  = self._iw_comment.text().strip()
 
             if not rig:
@@ -392,14 +406,14 @@ class JS8ConnectorsDialog(QDialog):
             if self._edit_id is None:
                 ok = self.connector_manager.add_connector(
                     rig_name=rig, tcp_port=port, state=state,
-                    comment=comment, server=server, auto_connect=auto,
+                    comment=comment, server=server, auto_connect=auto, rf_ack=rf_ack,
                 )
                 action = "add"
             else:
                 ok = self.connector_manager.update_connector(
                     connector_id=self._edit_id, rig_name=rig,
                     tcp_port=port, state=state, comment=comment, server=server,
-                    auto_connect=auto,
+                    auto_connect=auto, rf_ack=rf_ack,
                 )
                 action = "update"
 
@@ -415,11 +429,11 @@ class JS8ConnectorsDialog(QDialog):
                 self.tcp_pool.refresh_connections()
 
         # Remove cell widgets — skip Status column (live, read-only)
-        for col in [0, 1, 2, 3, _AUTO_COL, _COMMENT_COL]:
+        for col in [0, 1, 2, 3, _AUTO_COL, _RF_ACK_COL, _COMMENT_COL]:
             self.table.removeCellWidget(row, col)
 
         self._iw_rig = self._iw_server = self._iw_port = None
-        self._iw_state = self._iw_auto = self._iw_comment = None
+        self._iw_state = self._iw_auto = self._iw_rf_ack = self._iw_comment = None
         self._in_edit_mode = False
         self._edit_id = None
 

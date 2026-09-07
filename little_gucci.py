@@ -10004,7 +10004,7 @@ window.commstatBouncePin = function(srid) {
 
             # RR status-report acknowledgment: "RR CALLSIGN,SRID." — net-wide,
             # not gated to messages addressed to us. See _process_rr_ack.
-            if self._process_rr_ack(from_call, _clean, utc_db):
+            if self._process_rr_ack(rig_name, from_call, _clean, utc_db):
                 self._load_statrep_data()
                 return  # fully handled
 
@@ -10094,7 +10094,7 @@ window.commstatBouncePin = function(srid) {
                 _activity_match = _re.match(
                     r'^(?:\w+:\s+)?(@\w+)\s+MSG\s+', _check_value, _re.IGNORECASE
                 )
-                if self._process_rr_ack(from_call, _check_value, utc_str):
+                if self._process_rr_ack(rig_name, from_call, _check_value, utc_str):
                     self._load_statrep_data()
                 elif _activity_match:
                     to_call = _activity_match.group(1)
@@ -10186,23 +10186,39 @@ window.commstatBouncePin = function(srid) {
 
         return value
 
-    def _process_rr_ack(self, from_call: str, value: str, utc_db: str) -> bool:
+    def _process_rr_ack(self, rig_name: str, from_call: str, value: str, utc_db: str) -> bool:
         """
         Detect a JS8 'RR' status-report acknowledgment: "RR CALLSIGN,SRID.",
-        optionally addressed to a group, e.g. "@AMRRON RR N0DDK,Y26".
+        addressed to a group, e.g. "@AMRRON RR N0DDK,Y26", or directly to a
+        station, e.g. "KI5ABC RR N0DDK,Y26". JS8Call requires a directed
+        message to carry this addressee, so it's always present here.
         Appends "||ACK <from_call>" to the matching statrep row's comments.
+
+        Group-addressed acks are processed net-wide. A directly-addressed
+        ack is only processed when it's addressed to this station's own
+        callsign — one addressed to some other callsign isn't ours to act
+        on and is discarded.
 
         Returns True if the RR pattern matched (fully handled), else False.
         """
         match = re.match(
-            r'^(?:\w+:\s+)?(?:@\w+\s+)?RR\s+([A-Z0-9/]{3,12}),(\w{3})\.?\s*$',
+            r'^(?:\w+:\s+)?(@?\w+)\s+RR\s+([A-Z0-9/]{3,12}),(\w{3})\.?\s*$',
             value, re.IGNORECASE
         )
         if not match:
             return False
 
-        target_callsign = _strip_cs_suffix(match.group(1).strip().upper())
-        sr_id = match.group(2).strip().upper()
+        addressee = match.group(1)
+        target_callsign = _strip_cs_suffix(match.group(2).strip().upper())
+        sr_id = match.group(3).strip().upper()
+
+        if not addressee.startswith("@"):
+            user_callsign = self.get_callsign_for_rig(rig_name)
+            if not user_callsign:
+                user_callsign, _, __ = self.db.get_user_settings()
+            if not user_callsign or base_callsign(addressee) != base_callsign(user_callsign):
+                return True  # directed at another station — not ours to act on
+
         if not _CONTACTS_BASE_CS_PATTERN.match(target_callsign):
             return True  # matched shape but not a usable callsign — treat as handled, skip DB work
 
@@ -10360,10 +10376,14 @@ window.commstatBouncePin = function(srid) {
         )
         if result:
             # Auto-ack: only for genuinely new inserts (not duplicates) received
-            # live over the JS8 TCP feed (source=1), and only when the report
-            # was addressed to a group (no group slot to echo back otherwise).
+            # live over the JS8 TCP feed (source=1). Fires for both group-
+            # addressed and direct-to-user STATREPs (target is populated in
+            # both cases by _process_directed_message). For a direct STATREP,
+            # address the ack back to the sender rather than echoing our own
+            # callsign.
             if source == 1 and target:
-                self._send_statrep_ack(rig_name, target, from_callsign, sr_id)
+                ack_addressee = target if target.startswith("@") else from_callsign
+                self._send_statrep_ack(rig_name, ack_addressee, from_callsign, sr_id)
             return (result, None)
 
         return ("", None)
@@ -10374,7 +10394,14 @@ window.commstatBouncePin = function(srid) {
         from the JS8 TCP feed: "{my callsign}: {group} RR {from_callsign},{sr_id}".
         Mirrors the pattern _process_rr_ack looks for, so other stations
         (and our own database) can record that the report was copied.
+
+        Gated on the connector's rf_ack flag — only transmits if the rig
+        used to receive this STATREP has rf_ack = 1.
         """
+        connector = self.connector_manager.get_connector_by_name(rig_name)
+        if not connector or not connector.get("rf_ack", 1):
+            return
+
         my_callsign = self.get_callsign_for_rig(rig_name)
         if not my_callsign:
             my_callsign, _, __ = self.db.get_user_settings()
@@ -11180,28 +11207,15 @@ window.commstatBouncePin = function(srid) {
         # (N0DDK/P), and traffic may be addressed to either form.
         is_to_user = base_callsign(to_call) == base_callsign(user_callsign) if user_callsign else False
 
-        # Group check: groups accepted if in our groups list, plus the
-        # always-accepted network-wide group (treated as if we were a member,
-        # so its traffic reaches the per-type parsers below — each of which
-        # still applies its own save rule).
-        if to_call.startswith("@"):
-            group_name = to_call[1:].upper()
-            is_to_group = (group_name in self.db.get_all_groups()
-                           or group_name == _ALWAYS_SAVE_GROUP)
-        else:
-            is_to_group = False
+        # Group check: any @GROUP is accepted here so its traffic reaches the
+        # per-type parsers below. Alerts/messages/videos still apply their own
+        # membership-or-"Save all"-toggle gate inside their own parsers.
+        # STATREPs and Group Events have no such gate, so they're always saved
+        # for any group — display filtering is handled by the Filter menu.
+        is_to_group = to_call.startswith("@")
 
         # Only process if to our group OR to our callsign.
-        # Exception: an @group we're not a member of can still be captured by the
-        # bare-message fallback when "Save all Messages" is on (mirrors the
-        # RX.ACTIVITY path, which routes to _parse_group_message directly). This
-        # only applies the conversational fallback — alerts/statreps to non-member
-        # groups remain gated out.
         if not (is_to_group or is_to_user):
-            if to_call.startswith("@") and self.config.get_save_all_messages():
-                return self._parse_group_message(
-                    rig_name, value, from_callsign, target, freq, snr, utc, source=1
-                )[0]
             return ""
 
         # For direct-callsign messages, store the recipient callsign as target

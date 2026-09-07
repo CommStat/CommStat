@@ -22,7 +22,7 @@ DEFAULT_SERVER = "127.0.0.1"
 
 _CONNECTOR_COLS = (
     "id, rig_name, tcp_port, server, state, comment, "
-    "date_added, is_default, enabled, auto_connect"
+    "date_added, is_default, enabled, auto_connect, rf_ack"
 )
 
 # Why: under fd exhaustion (EMFILE) every DB call here fails identically, and
@@ -74,7 +74,8 @@ class ConnectorManager:
                         comment TEXT,
                         date_added TEXT NOT NULL,
                         is_default INTEGER DEFAULT 0,
-                        enabled INTEGER DEFAULT 1
+                        enabled INTEGER DEFAULT 1,
+                        rf_ack INTEGER DEFAULT 1
                     )
                 """)
                 conn.commit()
@@ -189,6 +190,7 @@ class ConnectorManager:
         set_as_default: bool = False,
         server: str = DEFAULT_SERVER,
         auto_connect: bool = True,
+        rf_ack: bool = True,
     ) -> bool:
         """
         Add a new connector.
@@ -202,6 +204,8 @@ class ConnectorManager:
             server: IP address or hostname of the JS8Call computer (default 127.0.0.1).
             auto_connect: If True (default), CommStat reconnects this row at startup.
                 False marks it as manual-only (e.g. the TCP test tool).
+            rf_ack: If True (default), CommStat auto-transmits an RF RR-ack
+                for STATREPs received live on this connector.
 
         Returns:
             True if successful, False otherwise.
@@ -243,10 +247,10 @@ class ConnectorManager:
 
                 cursor.execute("""
                     INSERT INTO js8_connectors
-                    (rig_name, tcp_port, state, comment, date_added, is_default, server, auto_connect)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (rig_name, tcp_port, state, comment, date_added, is_default, server, auto_connect, rf_ack)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (rig_name, tcp_port, state, comment, date_added, is_default, server,
-                      1 if auto_connect else 0))
+                      1 if auto_connect else 0, 1 if rf_ack else 0))
 
                 conn.commit()
                 logger.info("Added connector: %s on %s:%s", rig_name, server, tcp_port)
@@ -268,6 +272,7 @@ class ConnectorManager:
         comment: str = "",
         server: str = DEFAULT_SERVER,
         auto_connect: Optional[bool] = None,
+        rf_ack: Optional[bool] = None,
     ) -> bool:
         """
         Update an existing connector.
@@ -280,6 +285,8 @@ class ConnectorManager:
             comment: New comment.
             server: IP address or hostname of the JS8Call computer.
             auto_connect: If provided, update the row's auto_connect flag.
+                None (default) leaves it unchanged.
+            rf_ack: If provided, update the row's rf_ack flag.
                 None (default) leaves it unchanged.
 
         Returns:
@@ -307,20 +314,21 @@ class ConnectorManager:
                     logger.warning("Cannot update connector: %s:%s already in use", server, tcp_port)
                     return False
 
-                if auto_connect is None:
-                    cursor.execute("""
-                        UPDATE js8_connectors
-                        SET rig_name = ?, tcp_port = ?, state = ?, comment = ?, server = ?
-                        WHERE id = ?
-                    """, (rig_name, tcp_port, state, comment, server, connector_id))
-                else:
-                    cursor.execute("""
-                        UPDATE js8_connectors
-                        SET rig_name = ?, tcp_port = ?, state = ?, comment = ?, server = ?,
-                            auto_connect = ?
-                        WHERE id = ?
-                    """, (rig_name, tcp_port, state, comment, server,
-                          1 if auto_connect else 0, connector_id))
+                set_parts = ["rig_name = ?", "tcp_port = ?", "state = ?", "comment = ?", "server = ?"]
+                params = [rig_name, tcp_port, state, comment, server]
+                if auto_connect is not None:
+                    set_parts.append("auto_connect = ?")
+                    params.append(1 if auto_connect else 0)
+                if rf_ack is not None:
+                    set_parts.append("rf_ack = ?")
+                    params.append(1 if rf_ack else 0)
+                params.append(connector_id)
+
+                cursor.execute(f"""
+                    UPDATE js8_connectors
+                    SET {", ".join(set_parts)}
+                    WHERE id = ?
+                """, params)
                 conn.commit()
 
                 if cursor.rowcount > 0:

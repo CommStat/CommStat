@@ -86,8 +86,8 @@ magnitude, create a Status Report instead.</p>
 DATABASE_FILE = "traffic.db3"
 
 WINDOW_WIDTH = 700
-WINDOW_HEIGHT = 510
-WINDOW_HEIGHT_FORWARD = 530  # Room for the "Forward Mode" banner above the buttons
+WINDOW_HEIGHT = 494
+WINDOW_HEIGHT_FORWARD = 514  # Room for the "Forward Mode" banner above the buttons
 MESSAGE_MAX_RADIO = 500
 MESSAGE_MAX_INTERNET = 500
 NEWLINE_PLACEHOLDER = "||"
@@ -131,7 +131,7 @@ class GroupEventDialog(QDialog):
         self.module_background = module_background
         self.data_background = data_background
 
-        apply_standard_dialog_chrome(self, "Group Event", WINDOW_WIDTH, WINDOW_HEIGHT)
+        apply_standard_dialog_chrome(self, "Event", WINDOW_WIDTH, WINDOW_HEIGHT)
 
         self._commsrvr_error.connect(self._on_commsrvr_error)
 
@@ -564,7 +564,7 @@ class GroupEventDialog(QDialog):
 
         subtitle = QtWidgets.QLabel(
             "An Event is an ongoing, developing, or planned situation that could "
-            "escalate into civil unrest, protests, rioting, violence, anarchy, or revolution."
+            "escalate into\ncivil unrest, protests, rioting, violence, anarchy, or revolution."
         )
         subtitle.setAlignment(Qt.AlignCenter)
         subtitle.setWordWrap(True)
@@ -675,7 +675,7 @@ class GroupEventDialog(QDialog):
         self.pin_combo.addItem("No")
         self.pin_combo.setCurrentIndex(0)  # Default to "Yes"
         _apply_combo_popup_style(self.pin_combo)
-        _add_header_cell(3, "Persistant Map Pin:", self.pin_combo)
+        _add_header_cell(3, "Persistent Map Pin:", self.pin_combo)
 
         layout.addLayout(header_grid)
 

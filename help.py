@@ -85,7 +85,7 @@ class HelpDialog(QtWidgets.QDialog):
         layout.addLayout(btn_row)
 
 
-# ── Filter menu ▸ Alerts, Messages & Videos ▸ Help ─────────────────────────────
+# ── Settings menu ▸ Alerts, Messages & StatReps ▸ Help ─────────────────────────
 
 _ALERTS_MESSAGES_HTML = """
 <div style="font-family: Roboto; font-size: 13px; color: #333333;">
@@ -99,14 +99,24 @@ when sent to <b>any</b> group.</p>
 
 <p>These options only affect group traffic. They never let you see alerts,
 messages, or videos that are addressed to other callsigns.</p>
+
+<p><b>Status Reports are different:</b> CommStat always saves a StatRep sent
+to <b>any</b> group, whether or not it's in your Groups menu — there is no
+"Save all" toggle for them, because that's simply how they're captured.</p>
+
+<p>What you <i>see</i> in the StatRep table is controlled separately, from the
+<b>Filter</b> menu's <b>Status Reports</b> section: check or uncheck any of
+your own groups to show or hide its reports, and use <b>Show Other Groups</b>
+to reveal (or hide) StatReps sent to groups you haven't added.</p>
 </div>
 """
 
 
 def show_alerts_messages_help(parent=None, **colors) -> None:
-    """Explain the Save all Alerts / Messages / Videos Config checkboxes."""
-    show_help_dialog(parent, "Alerts, Messages & Videos",
-                     _ALERTS_MESSAGES_HTML, width=470, height=330, **colors)
+    """Explain the Save all Alerts / Messages / Videos checkboxes and how
+    Status Reports are saved and filtered."""
+    show_help_dialog(parent, "Alerts, Messages & StatReps",
+                     _ALERTS_MESSAGES_HTML, width=470, height=430, **colors)
 
 
 # ── Map ▸ Filter dropdown ▸ Help ───────────────────────────────────────────────

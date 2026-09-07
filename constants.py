@@ -111,14 +111,16 @@ DEFAULT_COLORS: Dict[str, str] = {
 # Display name -> hex. The friendly names are what users see and what the
 # watchlists table stores.
 WATCHLIST_OBJECT_COLORS: Dict[str, str] = {
+    'BLACK':  '#000000',
     'BLUE':   '#0000FF',
+    'GRAY':   '#808080',
     'GREEN':  '#00FF00',
     'ORANGE': '#f07800',
     'PINK':   '#ff66ff',
     'PURPLE': '#8000ff',
     'RED':    '#FF0000',
+    'WHITE':  '#FFFFFF',
     'YELLOW': '#ffff00',
-
 }
 WATCHLIST_OBJECT_SHAPES = ['CIRCLE', 'SQUARE', 'TRIANGLE']
 DEFAULT_OBJECT_COLOR = 'PINK'

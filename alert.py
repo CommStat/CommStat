@@ -30,7 +30,7 @@ from constants import (
     COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_RED,
 )
 from id_utils import generate_time_based_id
-from little_gucci import create_verified_ssl_context
+from little_gucci import create_verified_ssl_context, UpperCaseLineEdit
 from ui_helpers import make_button, label_font, apply_standard_dialog_chrome, connect_single
 
 if TYPE_CHECKING:
@@ -81,19 +81,6 @@ _READONLY_STYLE = (
 
 
 # =============================================================================
-# Helpers
-# =============================================================================
-
-def make_uppercase(field: QLineEdit) -> None:
-    def to_upper(text):
-        if text != text.upper():
-            pos = field.cursorPosition()
-            field.setText(text.upper())
-            field.setCursorPosition(pos)
-    field.textEdited.connect(to_upper)
-
-
-# =============================================================================
 # Dialog
 # =============================================================================
 
@@ -131,9 +118,6 @@ class AlertDialog(QDialog):
 
         self.rig_combo.currentTextChanged.connect(self._on_rig_changed)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        self.group_combo.currentTextChanged.connect(self._on_group_changed)
-        self.target_call_field.textChanged.connect(self._on_target_callsign_changed)
-        make_uppercase(self.target_call_field)
 
     # =========================================================================
     # UI Construction
@@ -219,28 +203,24 @@ class AlertDialog(QDialog):
         body.addLayout(settings_row)
 
         # ── Target ────────────────────────────────────────────────────────────
-        target_lbl = QLabel("Group:")
+        target_lbl = QLabel("Group or Callsign:")
         target_lbl.setFont(label_font())
         body.addWidget(target_lbl)
 
         target_row = QHBoxLayout()
         target_row.setSpacing(8)
 
-        self.group_combo = QComboBox()
-        self.group_combo.setMinimumWidth(150)
-        self.group_combo.setMaxVisibleItems(30)
-        self.group_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.group_combo))
-        target_row.addWidget(self.group_combo)
-
-        or_lbl = QLabel("OR Callsign")
-        or_lbl.setFont(label_font())
-        target_row.addWidget(or_lbl)
-
-        self.target_call_field = QLineEdit()
-        self.target_call_field.setMaxLength(12)
-        self.target_call_field.setPlaceholderText("e.g. N0CALL")
-        self.target_call_field.setFixedWidth(150)
-        target_row.addWidget(self.target_call_field)
+        self.to_combo = QComboBox()
+        self.to_combo.setMinimumWidth(200)
+        self.to_combo.setMaxVisibleItems(30)
+        self.to_combo.setEditable(True)
+        self.to_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.to_combo.setCompleter(None)
+        # setLineEdit() must come after setEditable(True) — it replaces the
+        # combo's editor, so signals must be wired to the new editor afterward.
+        self.to_combo.setLineEdit(UpperCaseLineEdit(self.to_combo))
+        self.to_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.to_combo))
+        target_row.addWidget(self.to_combo)
         target_row.addStretch()
         body.addLayout(target_row)
 
@@ -308,9 +288,12 @@ class AlertDialog(QDialog):
     def _load_config(self) -> None:
         self.selected_group = self._get_active_group_from_db()
         all_groups = self._get_all_groups_from_db()
-        self.group_combo.addItem("")
-        for group in all_groups:
-            self.group_combo.addItem(group)
+        if len(all_groups) == 1:
+            self.to_combo.addItem(all_groups[0])
+        else:
+            self.to_combo.addItem("")
+            for group in all_groups:
+                self.to_combo.addItem(group)
 
     def _load_rigs(self) -> None:
         self.rig_combo.blockSignals(True)
@@ -467,18 +450,6 @@ class AlertDialog(QDialog):
             print(f"Error reading groups from database: {e}")
         return []
 
-    def _on_group_changed(self, group: str) -> None:
-        if group:
-            self.target_call_field.blockSignals(True)
-            self.target_call_field.clear()
-            self.target_call_field.blockSignals(False)
-
-    def _on_target_callsign_changed(self, text: str) -> None:
-        if text:
-            self.group_combo.blockSignals(True)
-            self.group_combo.setCurrentIndex(0)
-            self.group_combo.blockSignals(False)
-
     def _enforce_message_limit(self) -> None:
         text = self.message_field.toPlainText()
         if len(text) > MAX_MESSAGE_LENGTH:
@@ -505,13 +476,18 @@ class AlertDialog(QDialog):
         )
 
     def _get_target(self) -> str:
-        call_target = self.target_call_field.text().strip().upper()
-        if call_target:
-            return call_target
-        group = self.group_combo.currentText()
-        if group:
-            return "@" + group
-        return ""
+        """Build the transmit/DB target from the Group-or-Callsign field.
+
+        A saved group is prefixed with '@' (matches the '@GROUP' convention
+        parsed app-wide); an unrecognized entry is treated as a manually
+        typed callsign and sent bare, same as StatRep's '_get_group_target'."""
+        text = self.to_combo.currentText().strip()
+        if not text:
+            return ""
+        known_groups = {g.strip().upper() for g in self._get_all_groups_from_db()}
+        if text.upper() in known_groups:
+            return f"@{text.upper()}"
+        return text.upper()
 
     def _show_error(self, message: str) -> None:
         msg = QMessageBox(self)
@@ -538,7 +514,7 @@ class AlertDialog(QDialog):
 
         if not self._get_target():
             self._show_error("Please select a Group or enter a Target Callsign")
-            self.group_combo.setFocus()
+            self.to_combo.setFocus()
             return None
 
         color_value = self.color_combo.currentData()
