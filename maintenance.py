@@ -25,7 +25,7 @@ import urllib.request
 
 from PyQt5 import QtGui, QtWidgets
 from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QWidget
 
 from constants import (
     DEFAULT_COLORS, COLOR_BTN_GREEN, COLOR_BTN_CLOSE, DATABASE_FILE,
@@ -45,7 +45,7 @@ _BOX_BG = QtGui.QColor(_PANEL_BG).lighter(110).name()
 _MAINTENANCE_URL = _COMMSRVR + "/maintenance-808585.php"
 
 _WIN_W = 720
-_WIN_H = 540
+_WIN_H = 400
 
 _PRESET_CODES = [
     ("GY9875", "Install Dark Map API Key",
@@ -66,6 +66,13 @@ _PRESET_CODES = [
      "<b><span style='color:#CC0000;'>Note:</span></b> This update may take "
      "up to 10 minutes to complete, depending on the number of records "
      "being updated."),
+    ("AC1984", "Download Latest Version of CommStat",
+     "You can check the latest version of <b>CommStat</b> here: "
+     "<a href='https://commstat.app/downloads.php'>https://commstat.app/downloads.php</a>."
+     "<br><br>"
+     "If you missed this version, use this code to retrieve it again.<br><br>"
+     "<b><span style='color:#CC0000;'>Note:</span></b> The download trigger "
+     "may take up to three minutes to complete."),
 ]
 
 
@@ -197,10 +204,21 @@ class MaintenanceDialog(QDialog):
         )
         layout.addWidget(lbl_presets_heading)
 
+        presets_container = QWidget()
+        presets_container.setStyleSheet(f"QWidget {{ background-color:{_PANEL_BG}; }}")
+        presets_layout = QVBoxLayout(presets_container)
+        presets_layout.setContentsMargins(0, 0, 0, 0)
+        presets_layout.setSpacing(8)
         for code, title, description in _PRESET_CODES:
-            layout.addWidget(self._build_preset_code_box(code, title, description))
+            presets_layout.addWidget(self._build_preset_code_box(code, title, description))
+        presets_layout.addStretch()
 
-        layout.addStretch()
+        presets_scroll = QScrollArea()
+        presets_scroll.setWidgetResizable(True)
+        presets_scroll.setFrameShape(QFrame.NoFrame)
+        presets_scroll.setWidget(presets_container)
+        presets_scroll.setStyleSheet(f"QScrollArea {{ background-color:{_PANEL_BG}; border:none; }}")
+        layout.addWidget(presets_scroll, 1)
 
     def _build_preset_code_box(self, code: str, title: str, description: str) -> QFrame:
         """Builds a bordered "code + title + description" box for the Available Codes section."""
@@ -224,8 +242,11 @@ class MaintenanceDialog(QDialog):
 
         lbl_description = QLabel(description)
         lbl_description.setWordWrap(True)
+        lbl_description.setOpenExternalLinks(True)
+        lbl_description.setTextInteractionFlags(Qt.TextBrowserInteraction)
         lbl_description.setStyleSheet(
             "QLabel { font-family:Roboto; font-size:13px; color:#333333; border:none; }"
+            f"QLabel a {{ color:{COLOR_BTN_BLUE}; }}"
         )
         row.addWidget(lbl_description)
 

@@ -161,7 +161,7 @@ CONTACTS_RETENTION_HOURS   = 6
 # =============================================================================
 
 STATREP_HEADERS = [
-    "", "Date Time", "Freq", "From", "To", "ID", "Grid", "Scope", "Map",
+    "", "Date Time", "Freq", "From", "To", "GID", "TID", "Grid", "Scope", "Map",
     "Powr", "H2O", "Med", "Comm", "Trvl", "Inet", "Fuel", "Food",
     "Crime", "Civil", "Pol", "Remarks"
 ]

@@ -104,7 +104,7 @@ _PING = _COMMSRVR + "/heartbeat-808585.php"
 _DELIVERY_CONFIRM = _COMMSRVR + "/delivery-confirmation-808585.php"
 
 # Default hyperlink blue - used to style the StatRep table's clickable
-# From/ID columns like links (color + underline, always on, not just hover).
+# From/TID columns like links (color + underline, always on, not just hover).
 _LINK_COLOR = "#0000CC"
 
 # Backoff interval after repeated commsrvr heartbeat failures.
@@ -1751,9 +1751,9 @@ class DatabaseManager:
                         excl_with_at = ["@" + g for g in exclude_groups]
                         placeholders = ",".join("?" * len(excl_with_at))
                         query = f"""
-                            SELECT db, datetime, freq, from_callsign, target, sr_id, grid, scope, map,
+                            SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
                                    power, water, med, telecom, travel, internet,
-                                   fuel, food, crime, civil, political, comments, source, id, global_id
+                                   fuel, food, crime, civil, political, comments, source, id
                             FROM statrep
                             WHERE target NOT IN ({placeholders})
                               AND ({date_condition} OR pinned = 1)
@@ -1762,9 +1762,9 @@ class DatabaseManager:
                         params = excl_with_at + date_params
                     else:
                         query = f"""
-                            SELECT db, datetime, freq, from_callsign, target, sr_id, grid, scope, map,
+                            SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
                                    power, water, med, telecom, travel, internet,
-                                   fuel, food, crime, civil, political, comments, source, id, global_id
+                                   fuel, food, crime, civil, political, comments, source, id
                             FROM statrep
                             WHERE {date_condition} OR pinned = 1
                             ORDER BY datetime DESC
@@ -1780,9 +1780,9 @@ class DatabaseManager:
                         return []
                     placeholders = ",".join("?" * len(target_list))
                     query = f"""
-                        SELECT db, datetime, freq, from_callsign, target, sr_id, grid, scope, map,
+                        SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
                                power, water, med, telecom, travel, internet,
-                               fuel, food, crime, civil, political, comments, source, id, global_id
+                               fuel, food, crime, civil, political, comments, source, id
                         FROM statrep
                         WHERE target IN ({placeholders}) AND ({date_condition} OR pinned = 1)
                         ORDER BY datetime DESC
@@ -1828,7 +1828,7 @@ class DatabaseManager:
 
                 if show_all:
                     # Show all messages regardless of group
-                    query = f"""SELECT db, datetime, freq, from_callsign, target, msg_id, message, source, delivered, global_id
+                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered
                                FROM messages
                                WHERE {date_condition}
                                ORDER BY datetime DESC"""
@@ -1837,7 +1837,7 @@ class DatabaseManager:
                     # Filter by active groups (add @ prefix for matching)
                     groups_with_at = ["@" + g for g in groups]
                     placeholders = ",".join("?" * len(groups_with_at))
-                    query = f"""SELECT db, datetime, freq, from_callsign, target, msg_id, message, source, delivered, global_id
+                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered
                                FROM messages
                                WHERE target IN ({placeholders}) AND {date_condition}
                                ORDER BY datetime DESC"""
@@ -4351,7 +4351,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Create the StatRep data table."""
         self.statrep_table = QtWidgets.QTableWidget(self.central_widget)
         self.statrep_table.setObjectName("statrepTable")
-        self.statrep_table.setColumnCount(21)
+        self.statrep_table.setColumnCount(22)
         self.statrep_table.setRowCount(0)
 
         self._setup_table_widget(self.statrep_table, STATREP_HEADERS)
@@ -4740,8 +4740,8 @@ class MainWindow(QtWidgets.QMainWindow):
         pairs = [
             (self._cf_inputs["from"].text(),    row[3]),
             (self._cf_inputs["to"].text(),      row[4]),
-            (self._cf_inputs["grid"].text(),    row[6]),
-            (self._cf_inputs["remarks"].text(), row[20]),
+            (self._cf_inputs["grid"].text(),    row[7]),
+            (self._cf_inputs["remarks"].text(), row[21]),
         ]
         results = []
         for raw, field in pairs:
@@ -4989,7 +4989,7 @@ class MainWindow(QtWidgets.QMainWindow):
     def _reposition_message_filter_btn(self) -> None:
         """Pin the Filter toggle to the message table's title bar, all the
         way to the right (left of the vertical scrollbar if visible). The
-        record counter is centered in the single gap between the "ID"
+        record counter is centered in the single gap between the "GID"
         column and the FILTER link."""
         if not hasattr(self, 'message_filter_btn'):
             return
@@ -6721,7 +6721,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """Create the message data table."""
         self.message_table = QtWidgets.QTableWidget(self.central_widget)
         self.message_table.setObjectName("messageTable")
-        self.message_table.setColumnCount(7)
+        self.message_table.setColumnCount(8)
         self.message_table.setRowCount(0)
 
         # Custom header so the FILTER row can be pinned beneath the column
@@ -6735,15 +6735,15 @@ class MainWindow(QtWidgets.QMainWindow):
         self.message_table.setHorizontalHeader(header)
 
         self._setup_table_widget(self.message_table, [
-            "", "Date Time", "Freq", "From", "To", "ID", ""
+            "", "Date Time", "Freq", "From", "To", "GID", "TID", ""
         ])
 
         # Per-column filter boxes, mirroring the contacts table's filter row.
-        # No box for Date Time, Freq, or ID (not useful to free-text filter),
-        # nor for the blank SNR-color column (col 0, which never has text).
-        # Created once and kept for the life of the table; the header shows
-        # and hides them with the filter toggle.
-        _EXCLUDED_COLS = {0, 1, 2, 5}  # "", Date Time, Freq, ID
+        # No box for Date Time, Freq, GID, or TID (not useful to free-text
+        # filter), nor for the blank SNR-color column (col 0, which never
+        # has text). Created once and kept for the life of the table; the
+        # header shows and hides them with the filter toggle.
+        _EXCLUDED_COLS = {0, 1, 2, 5, 6}  # "", Date Time, Freq, GID, TID
         filter_font = QtGui.QFont("Kode Mono", -1)
         filter_font.setPixelSize(13)
         filter_style = (
@@ -6790,7 +6790,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.message_filter_btn.adjustSize()
 
         # Record counter - floating label centered in the single gap between
-        # the "ID" column and the FILTER link (mirrors the StatRep table's
+        # the "GID" column and the FILTER link (mirrors the StatRep table's
         # counter). Text is updated in _populate_table() to track the
         # current filter; position tracked in _reposition_message_filter_btn().
         self.message_count_label = QtWidgets.QLabel("0 Messages", self.message_table)
@@ -7758,11 +7758,11 @@ class MainWindow(QtWidgets.QMainWindow):
             gridlist = []
             for row in data:
                 callsign = row[3]   # from_callsign
-                srid = row[5]       # sr_id (display only)
-                grid = row[6]       # grid
-                scope = row[7]      # scope (text); drives pin radius
-                status = str(row[8])  # map (status)
-                statrep_id = row[22]  # database primary key (unique)
+                srid = row[6]       # sr_id (display only)
+                grid = row[7]       # grid
+                scope = row[8]      # scope (text); drives pin radius
+                status = str(row[9])  # map (status)
+                statrep_id = row[23]  # database primary key (unique)
 
                 # Custom Filtering bar drops non-matching rows before any of
                 # the per-pin work below (and before the duplicate-grid jitter
@@ -7852,7 +7852,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             continue
 
                         # Skip internet-sourced statreps when filter is active
-                        if self._hide_internet_statrep and row[21] != 1:
+                        if self._hide_internet_statrep and row[22] != 1:
                             continue
 
                     # Count this pin against any region whose bounding box contains it
@@ -8367,16 +8367,16 @@ window.commstatBouncePin = function(srid) {
             if self._hide_all_pins:
                 data = []
             if self._hide_internet_statrep:
-                data = [row for row in data if row[21] == 1]
+                data = [row for row in data if row[22] == 1]
             if self._hide_green_pins:
-                data = [row for row in data if str(row[8]) != "1"]
+                data = [row for row in data if str(row[9]) != "1"]
         elif state == "map":
             if self._map_bounds:
                 # Only records whose pin currently falls inside the map's
                 # visible viewport - panning/zooming the map live-narrows this.
                 south, west, north, east = self._map_bounds
                 def _pin_in_view(row):
-                    coords = self._grid_to_latlon(row[6])
+                    coords = self._grid_to_latlon(row[7])
                     return coords is not None and south <= coords[0] <= north and west <= coords[1] <= east
                 data = [row for row in data if _pin_in_view(row)]
         elif state == "custom":
@@ -8400,9 +8400,9 @@ window.commstatBouncePin = function(srid) {
             self._reposition_statrep_filter_btn()
 
     def _on_statrep_click(self, item: QTableWidgetItem) -> None:
-        """From callsign (col 3) opens detail view; ID (col 5) bounces map pin; others copy text."""
+        """From callsign (col 3) opens detail view; TID (col 6) bounces map pin; others copy text."""
         _FROM_COL = 3
-        _ID_COL   = 5
+        _ID_COL   = 6
         row = item.row()
 
         if item.column() == _FROM_COL:
@@ -8468,12 +8468,12 @@ window.commstatBouncePin = function(srid) {
 
         if item.column() == _FROM_COL:
             callsign_item = self.message_table.item(row, _FROM_COL)
-            message_item  = self.message_table.item(row, 6)
-            msg_id_item   = self.message_table.item(row, 5)
+            message_item  = self.message_table.item(row, 7)
+            msg_id_item   = self.message_table.item(row, 6)
             if callsign_item:
                 callsign = callsign_item.text().strip()
                 message_text = (message_item.data(QtCore.Qt.UserRole) or message_item.text()) if message_item else ""
-                msg_id = str(msg_id_item.data(QtCore.Qt.UserRole)).strip() if msg_id_item and msg_id_item.data(QtCore.Qt.UserRole) is not None else ""
+                msg_id = msg_id_item.text().strip() if msg_id_item else ""
                 from qrz_lookup import MessageDetailDialog
                 dlg = MessageDetailDialog(
                     callsign, message_text, self._internet_available,
@@ -9507,10 +9507,10 @@ window.commstatBouncePin = function(srid) {
 
                 # Decode || newline placeholders in statrep remarks and messages
                 raw_message = None
-                if is_statrep_table and col_num == 20 and "||" in display_value:
+                if is_statrep_table and col_num == 21 and "||" in display_value:
                     decoded_remarks = display_value.replace("||", "\n")
                     display_value = display_value.replace("||", " ")
-                elif is_message_table and col_num == 6 and "||" in display_value:
+                elif is_message_table and col_num == 7 and "||" in display_value:
                     raw_message = display_value          # preserve for detail dialog
                     display_value = display_value.replace("||", " ")
                     decoded_remarks = None
@@ -9524,10 +9524,10 @@ window.commstatBouncePin = function(srid) {
                     try:
                         # Check if source = 2 (Internet source)
                         source_value = None
-                        if is_statrep_table and len(row_data) > 21:
-                            source_value = int(row_data[21]) if row_data[21] is not None else 0
-                        elif is_message_table and len(row_data) > 7:
-                            source_value = int(row_data[7]) if row_data[7] is not None else 0
+                        if is_statrep_table and len(row_data) > 22:
+                            source_value = int(row_data[22]) if row_data[22] is not None else 0
+                        elif is_message_table and len(row_data) > 8:
+                            source_value = int(row_data[8]) if row_data[8] is not None else 0
 
                         if source_value == 2:
                             item.setToolTip("   Internet")
@@ -9574,29 +9574,28 @@ window.commstatBouncePin = function(srid) {
                     except (ValueError, TypeError):
                         pass
 
-                # ID column (col 5) shows the server-assigned global_id, falling
-                # back to sr_id when no global_id has been assigned (0/None) —
-                # the map pin/bounce click still keys off the row's internal db
-                # id (row_data[22]), set as UserRole data below.
-                if is_statrep_table and col_num == 5 and len(row_data) > 23:
-                    global_id_value = row_data[23]
-                    display_value = str(global_id_value) if global_id_value else display_value
+                # StatRep GID column (col 5) shows only the server-assigned
+                # global_id — blank until commsrvr assigns one (0/None). The
+                # raw sr_id is shown separately in the adjacent TID column;
+                # the map pin/bounce click keys off the row's internal db id
+                # (row_data[23]), set as UserRole data on the TID cell below.
+                if is_statrep_table and col_num == 5:
+                    display_value = display_value if value else ""
 
-                # Message ID column (col 5) shows the server-assigned global_id,
-                # falling back to msg_id when no global_id has been assigned (0/None).
-                if is_message_table and col_num == 5 and len(row_data) > 9:
-                    global_id_value = row_data[9]
-                    display_value = str(global_id_value) if global_id_value else display_value
-
+                # Message GID column (col 5) shows only the server-assigned
+                # global_id — blank until commsrvr assigns one (0/None). The
+                # raw msg_id is shown separately in the adjacent TID column.
+                if is_message_table and col_num == 5:
+                    display_value = display_value if value else ""
 
                 item = QTableWidgetItem(display_value)
 
                 # Use Kode Mono for remarks/message text columns and StatRep's
-                # Grid column. Freq (both tables) and both tables' From/ID
-                # columns use Roboto.
-                if (is_statrep_table and col_num in (6, 20)) or (is_message_table and col_num == 6):
+                # Grid column. Freq (both tables) and both tables' From/GID
+                # columns (plus each table's TID) use Roboto.
+                if (is_statrep_table and col_num in (7, 21)) or (is_message_table and col_num == 7):
                     item.setFont(QtGui.QFont("Kode Mono", -1))
-                elif (is_statrep_table or is_message_table) and col_num in (2, 3, 5):
+                elif (is_statrep_table and col_num in (2, 3, 5, 6)) or (is_message_table and col_num in (2, 3, 5, 6)):
                     item.setFont(QtGui.QFont("Roboto", -1))
 
                 # Add tooltip for multi-line remarks
@@ -9604,7 +9603,7 @@ window.commstatBouncePin = function(srid) {
                     item.setToolTip(decoded_remarks)
 
                 # Store raw message text (with ||) so detail dialog can show newlines
-                if raw_message is not None and is_message_table and col_num == 6:
+                if raw_message is not None and is_message_table and col_num == 7:
                     item.setData(QtCore.Qt.UserRole, raw_message)
 
                 # Bold From callsign (col 3) if callsign is in QRZ cache
@@ -9629,17 +9628,22 @@ window.commstatBouncePin = function(srid) {
                         font = item.font()
                         font.setBold(True)
                         item.setFont(font)
-                # Bold the statrep ID (col 5) — clickable for map bounce/pan —
-                # and style it like a hyperlink to match the From column.
-                elif is_statrep_table and col_num == 5:
+                # Bold the statrep TID (col 6) — clickable for map bounce/pan —
+                # and style it like a hyperlink to match the From column. GID
+                # (col 5) is plain text now that this styling lives on TID.
+                elif is_statrep_table and col_num == 6:
                     font = item.font()
                     font.setBold(True)
                     font.setUnderline(True)
                     item.setFont(font)
                     item.setForeground(QColor(_LINK_COLOR))
-                # Bold the message ID (col 5) with a "Delivered" tooltip once the
+
+                # TID column is centered in both tables.
+                if (is_statrep_table or is_message_table) and col_num == 6:
+                    item.setTextAlignment(Qt.AlignCenter)
+                # Bold the message GID (col 5) with a "Delivered" tooltip once the
                 # commsrvr confirms delivery (delivered = 1 in the messages table).
-                elif is_message_table and col_num == 5 and len(row_data) > 8 and row_data[8]:
+                elif is_message_table and col_num == 5 and len(row_data) > 9 and row_data[9]:
                     font = item.font()
                     font.setBold(True)
                     item.setFont(font)
@@ -9653,23 +9657,15 @@ window.commstatBouncePin = function(srid) {
                 table.setItem(row_num, col_num, item)
 
             # Store database id on the callsign cell for statrep rows
-            if is_statrep_table and len(row_data) > 22:
+            if is_statrep_table and len(row_data) > 23:
                 cs_item = table.item(row_num, 3)
                 if cs_item:
-                    cs_item.setData(QtCore.Qt.UserRole, row_data[22])
-                # sr_id (col 5, displayed) is not unique across records; the map
+                    cs_item.setData(QtCore.Qt.UserRole, row_data[23])
+                # sr_id (col 6, displayed) is not unique across records; the map
                 # pin bounce must key off the unique statrep primary key instead.
-                id_item = table.item(row_num, 5)
+                id_item = table.item(row_num, 6)
                 if id_item:
-                    id_item.setData(QtCore.Qt.UserRole, row_data[22])
-
-            # The message ID cell (col 5) may now display global_id instead of
-            # msg_id; stash the real msg_id so lookups/deletes keyed on it
-            # (MessageDetailDialog) still work regardless of what's shown.
-            if is_message_table and len(row_data) > 5:
-                msg_id_item = table.item(row_num, 5)
-                if msg_id_item:
-                    msg_id_item.setData(QtCore.Qt.UserRole, row_data[5])
+                    id_item.setData(QtCore.Qt.UserRole, row_data[23])
 
         # Alert table (non-statrep, non-message): sort by first column descending
         if not is_message_table and not is_statrep_table:
@@ -10383,12 +10379,12 @@ window.commstatBouncePin = function(srid) {
             # callsign.
             if source == 1 and target:
                 ack_addressee = target if target.startswith("@") else from_callsign
-                self._send_statrep_ack(rig_name, ack_addressee, from_callsign, sr_id)
+                self._send_statrep_ack(rig_name, ack_addressee, from_callsign, sr_id, date_only)
             return (result, None)
 
         return ("", None)
 
-    def _send_statrep_ack(self, rig_name: str, group: str, from_callsign: str, sr_id: str) -> None:
+    def _send_statrep_ack(self, rig_name: str, group: str, from_callsign: str, sr_id: str, date_only: str) -> None:
         """
         Auto-transmit a JS8 RR acknowledgment for a status report just saved
         from the JS8 TCP feed: "{my callsign}: {group} RR {from_callsign},{sr_id}".
@@ -10397,6 +10393,9 @@ window.commstatBouncePin = function(srid) {
 
         Gated on the connector's rf_ack flag — only transmits if the rig
         used to receive this STATREP has rf_ack = 1.
+
+        On successful transmit, also appends a note to the just-saved
+        statrep row's own comments/remarks recording that the ack went out.
         """
         connector = self.connector_manager.get_connector_by_name(rig_name)
         if not connector or not connector.get("rf_ack", 1):
@@ -10412,9 +10411,29 @@ window.commstatBouncePin = function(srid) {
         if not client or not client.is_connected():
             return
 
-        ack_message = f"{my_callsign.upper()}: {group} RR {from_callsign.upper()},{sr_id}"
+        my_callsign = my_callsign.upper()
+        ack_message = f"{my_callsign}: {group} RR {from_callsign.upper()},{sr_id}"
         client.send_tx_message(ack_message)
         print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
+
+        ack_note = f"||||ACK sent to {group} by {my_callsign}"
+        try:
+            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, comments FROM statrep WHERE date = ? AND sr_id = ? AND from_callsign = ?",
+                    (date_only, sr_id, from_callsign)
+                )
+                row = cursor.fetchone()
+                if row:
+                    row_id, existing_comments = row
+                    cursor.execute(
+                        "UPDATE statrep SET comments = ? WHERE id = ?",
+                        (f"{existing_comments or ''}{ack_note}", row_id)
+                    )
+                    conn.commit()
+        except sqlite3.Error as e:
+            print(f"[{rig_name}] DB error appending ack note to statrep {from_callsign}/{sr_id} on {date_only}: {e}")
 
     def _parse_group_event(
         self,
