@@ -204,7 +204,7 @@ class ConnectorManager:
             server: IP address or hostname of the JS8Call computer (default 127.0.0.1).
             auto_connect: If True (default), CommStat reconnects this row at startup.
                 False marks it as manual-only (e.g. the TCP test tool).
-            rf_ack: If True (default), CommStat auto-transmits an RF RR-ack
+            rf_ack: If True (default), CommStat auto-transmits an RF RRSR-ack
                 for STATREPs received live on this connector.
 
         Returns:

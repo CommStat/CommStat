@@ -53,7 +53,7 @@ _TABLE_COLS = ["Rig Name", "Server", "Port", "State", "Status", "Auto", "RF Ack"
 
 _STATUS_COL  = 4   # live read-only column — never gets setCellWidget
 _AUTO_COL    = 5   # auto-connect-at-startup flag (Yes/No, QCheckBox in edit mode)
-_RF_ACK_COL  = 6   # RF RR-ack-on-receipt flag (Yes/No, QCheckBox in edit mode)
+_RF_ACK_COL  = 6   # RF RRSR-ack-on-receipt flag (Yes/No, QCheckBox in edit mode)
 _COMMENT_COL = 7
 
 

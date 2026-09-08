@@ -9998,7 +9998,7 @@ window.commstatBouncePin = function(srid) {
             _clean = self._preprocess_message_value(value, from_call)
             _user_call = self.get_callsign_for_rig(rig_name)
 
-            # RR status-report acknowledgment: "RR CALLSIGN,SRID." — net-wide,
+            # RRSR status-report acknowledgment: "RRSR CALLSIGN,SRID." — net-wide,
             # not gated to messages addressed to us. See _process_rr_ack.
             if self._process_rr_ack(rig_name, from_call, _clean, utc_db):
                 self._load_statrep_data()
@@ -10184,9 +10184,9 @@ window.commstatBouncePin = function(srid) {
 
     def _process_rr_ack(self, rig_name: str, from_call: str, value: str, utc_db: str) -> bool:
         """
-        Detect a JS8 'RR' status-report acknowledgment: "RR CALLSIGN,SRID.",
-        addressed to a group, e.g. "@AMRRON RR N0DDK,Y26", or directly to a
-        station, e.g. "KI5ABC RR N0DDK,Y26". JS8Call requires a directed
+        Detect a JS8 'RRSR' status-report acknowledgment: "RRSR CALLSIGN,SRID.",
+        addressed to a group, e.g. "@AMRRON RRSR N0DDK,Y26", or directly to a
+        station, e.g. "KI5ABC RRSR N0DDK,Y26". JS8Call requires a directed
         message to carry this addressee, so it's always present here.
         Appends "||ACK <from_call>" to the matching statrep row's comments.
 
@@ -10195,10 +10195,10 @@ window.commstatBouncePin = function(srid) {
         callsign — one addressed to some other callsign isn't ours to act
         on and is discarded.
 
-        Returns True if the RR pattern matched (fully handled), else False.
+        Returns True if the RRSR pattern matched (fully handled), else False.
         """
         match = re.match(
-            r'^(?:\w+:\s+)?(@?\w+)\s+RR\s+([A-Z0-9/]{3,12}),(\w{3})\.?\s*$',
+            r'^(?:\w+:\s+)?(@?\w+)\s+RRSR\s+([A-Z0-9/]{3,12}),(\w{3})\.?\s*$',
             value, re.IGNORECASE
         )
         if not match:
@@ -10242,7 +10242,7 @@ window.commstatBouncePin = function(srid) {
                     )
                     conn.commit()
         except sqlite3.Error as e:
-            print(f"[RR ack] DB error matching statrep {target_callsign}/{sr_id} on {date_only}: {e}")
+            print(f"[RRSR ack] DB error matching statrep {target_callsign}/{sr_id} on {date_only}: {e}")
 
         return True
 
@@ -10386,8 +10386,8 @@ window.commstatBouncePin = function(srid) {
 
     def _send_statrep_ack(self, rig_name: str, group: str, from_callsign: str, sr_id: str, date_only: str) -> None:
         """
-        Auto-transmit a JS8 RR acknowledgment for a status report just saved
-        from the JS8 TCP feed: "{my callsign}: {group} RR {from_callsign},{sr_id}".
+        Auto-transmit a JS8 RRSR acknowledgment for a status report just saved
+        from the JS8 TCP feed: "{my callsign}: {group} RRSR {from_callsign},{sr_id}".
         Mirrors the pattern _process_rr_ack looks for, so other stations
         (and our own database) can record that the report was copied.
 
@@ -10412,7 +10412,7 @@ window.commstatBouncePin = function(srid) {
             return
 
         my_callsign = my_callsign.upper()
-        ack_message = f"{my_callsign}: {group} RR {from_callsign.upper()},{sr_id}"
+        ack_message = f"{my_callsign}: {group} RRSR {from_callsign.upper()},{sr_id}"
         client.send_tx_message(ack_message)
         print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
 
