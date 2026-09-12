@@ -508,13 +508,15 @@ class GroupMessageDialog(QDialog):
     # Commsrvr / database
     # -------------------------------------------------------------------------
 
-    def _submit_to_commsrvr_async(self, frequency: int, callsign: str, message_data: str, now: str, on_complete=None) -> None:
+    def _submit_to_commsrvr_async(self, frequency: int, callsign: str, message_data: str, now: str, on_complete=None, dm_prefix: bool = False) -> None:
         """Start background thread to submit the message to commsrvr.
 
         Args:
             on_complete: Optional callable(global_id: int) invoked after the
                 request completes (success or failure). global_id is 0 on
                 failure or when the server returns a non-numeric response.
+            dm_prefix: Prepend "DM:" to the submitted data string, marking
+                it as an internet-only submission rather than an RF capture.
         """
         def submit_thread():
             import netguard
@@ -525,7 +527,8 @@ class GroupMessageDialog(QDialog):
                     on_complete(global_id)
                 return
             try:
-                data_string = f"{now}\t{frequency}\t0\t30\t{message_data}"
+                prefix = "DM:" if dm_prefix else ""
+                data_string = f"{prefix}{now}\t{frequency}\t0\t30\t{message_data}"
                 post_data = urllib.parse.urlencode({'cs': callsign, 'data': data_string}).encode('utf-8')
                 print(f"[Commsrvr] POST data: {post_data}")
                 req = urllib.request.Request(_DATAFEED, data=post_data, method='POST')
@@ -657,7 +660,7 @@ class GroupMessageDialog(QDialog):
                 self._save_to_database(self._pending_save_data, global_id)
                 QtCore.QTimer.singleShot(0, self._refresh_and_close)
 
-            self._submit_to_commsrvr_async(0, callsign, message_data, now, on_complete=_on_internet_commsrvr_complete)
+            self._submit_to_commsrvr_async(0, callsign, message_data, now, on_complete=_on_internet_commsrvr_complete, dm_prefix=True)
             return
 
         if "(disconnected)" in rig_name:

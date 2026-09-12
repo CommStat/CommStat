@@ -1047,7 +1047,7 @@ class QRZLookupDialog(QDialog):
         now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         msg_id = generate_time_based_id()
         message_data = f"{my_cs}: {cs} MSG ,{msg_id},{text},{{^%3}}"
-        data_string  = f"{now}\t0\t0\t30\t{message_data}"
+        data_string  = f"DM:{now}\t0\t0\t30\t{message_data}"
         self._pending_dm = (my_cs, cs, text, msg_id, now)
         threading.Thread(
             target=self._submit_internet, args=(my_cs, data_string), daemon=True
@@ -2450,7 +2450,7 @@ class MessageDetailDialog(QDialog):
 
     record_deleted = pyqtSignal()
 
-    def __init__(self, callsign: str, message_text: str,
+    def __init__(self, record_id, callsign: str, message_text: str,
                  internet_available: bool = True,
                  commsrvr_url: str = "",
                  module_background: str = "#f5f5f5",
@@ -2464,6 +2464,7 @@ class MessageDetailDialog(QDialog):
                  refresh_callback=None,
                  parent=None):
         super().__init__(parent)
+        self._record_id = record_id
         self.setWindowFlags(
             Qt.Window |
             Qt.CustomizeWindowHint |
@@ -2618,21 +2619,22 @@ class MessageDetailDialog(QDialog):
             self.reject()
 
     def _fetch_message_details(self) -> None:
-        if not self._msg_id:
+        if self._record_id is None:
             self._populate_message_labels("", None, "", None)
             return
         try:
             with sqlite3.connect(DB_PATH, timeout=10) as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT datetime, freq, target, source, global_id FROM messages WHERE msg_id = ?",
-                    (self._msg_id,)
+                    "SELECT datetime, freq, target, source, global_id, msg_id FROM messages WHERE id = ?",
+                    (self._record_id,)
                 )
                 row = cur.fetchone()
         except sqlite3.Error:
             row = None
         if row:
             self._msg_datetime = row[0] or ""
+            self._msg_id = row[5] or self._msg_id
             self._populate_message_labels(row[0] or "", row[1], row[2] or "", row[3], row[4] or 0)
         else:
             self._populate_message_labels(self._msg_datetime, None, "", None)
@@ -2703,8 +2705,8 @@ class MessageDetailDialog(QDialog):
             f'<span style="{_k}">Delivered To:</span>  {count_str} CommStat users'
         )
 
-    def _reload(self, msg_id: str, callsign: str, message_text: str, msg_datetime: str,
-                freq=None, target: str = "", source=None, global_id: int = 0) -> None:
+    def _reload(self, record_id, callsign: str, message_text: str, msg_datetime: str,
+                msg_id: str = "", freq=None, target: str = "", source=None, global_id: int = 0) -> None:
         self._reload_token += 1
         self.btn_newer.setEnabled(False)
         self.btn_older.setEnabled(False)
@@ -2714,6 +2716,7 @@ class MessageDetailDialog(QDialog):
             except (TypeError, RuntimeError):
                 pass
             self._rc_thread = None
+        self._record_id = record_id
         self._msg_id = msg_id
         self.callsign = callsign
         self.message_text = message_text
@@ -2739,18 +2742,18 @@ class MessageDetailDialog(QDialog):
     def _update_nav_buttons(self) -> None:
         has_newer = False
         has_older = False
-        if self._msg_datetime:
+        if self._record_id is not None:
             try:
                 with sqlite3.connect(DB_PATH, timeout=10) as conn:
                     cur = conn.cursor()
                     cur.execute(
-                        "SELECT 1 FROM messages WHERE datetime > ? LIMIT 1",
-                        (self._msg_datetime,)
+                        "SELECT 1 FROM messages WHERE id > ? LIMIT 1",
+                        (self._record_id,)
                     )
                     has_newer = cur.fetchone() is not None
                     cur.execute(
-                        "SELECT 1 FROM messages WHERE datetime < ? LIMIT 1",
-                        (self._msg_datetime,)
+                        "SELECT 1 FROM messages WHERE id < ? LIMIT 1",
+                        (self._record_id,)
                     )
                     has_older = cur.fetchone() is not None
             except sqlite3.Error:
@@ -2767,7 +2770,11 @@ class MessageDetailDialog(QDialog):
         self._navigate("older")
 
     def _navigate(self, direction: str) -> None:
-        if not self._msg_datetime:
+        # Ordered by the messages table's own primary key (id), not msg_id
+        # (a 3-char hour+minute code recycled daily, not unique across
+        # senders/days) or datetime (which can tie) — id is the only column
+        # guaranteed to identify this exact row and order unambiguously.
+        if self._record_id is None:
             self._update_nav_buttons()
             return
         try:
@@ -2775,15 +2782,15 @@ class MessageDetailDialog(QDialog):
                 cur = conn.cursor()
                 if direction == "newer":
                     cur.execute(
-                        "SELECT msg_id, from_callsign, message, datetime, freq, target, source, global_id "
-                        "FROM messages WHERE datetime > ? ORDER BY datetime ASC LIMIT 1",
-                        (self._msg_datetime,)
+                        "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                        "FROM messages WHERE id > ? ORDER BY id ASC LIMIT 1",
+                        (self._record_id,)
                     )
                 else:
                     cur.execute(
-                        "SELECT msg_id, from_callsign, message, datetime, freq, target, source, global_id "
-                        "FROM messages WHERE datetime < ? ORDER BY datetime DESC LIMIT 1",
-                        (self._msg_datetime,)
+                        "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                        "FROM messages WHERE id < ? ORDER BY id DESC LIMIT 1",
+                        (self._record_id,)
                     )
                 row = cur.fetchone()
         except sqlite3.Error as e:
@@ -2792,35 +2799,34 @@ class MessageDetailDialog(QDialog):
         if not row:
             self._update_nav_buttons()
             return
-        self._reload(row[0], row[1] or "", row[2] or "", row[3] or "",
-                     freq=row[4], target=row[5] or "", source=row[6], global_id=row[7] or 0)
+        self._reload(row[0], row[2] or "", row[3] or "", row[4] or "",
+                     msg_id=row[1] or "", freq=row[5], target=row[6] or "", source=row[7], global_id=row[8] or 0)
 
     def _on_delete(self) -> None:
-        deleted_dt = self._msg_datetime
+        # Delete by the unique primary key — msg_id is not unique (see
+        # _navigate), so keying the DELETE off it could remove unrelated
+        # rows from other days/senders that happen to share the same code.
+        deleted_id = self._record_id
+        direction = self._last_nav
         try:
             with sqlite3.connect(DB_PATH, timeout=10) as conn:
                 cur = conn.cursor()
-                if not deleted_dt:
-                    cur.execute("SELECT datetime FROM messages WHERE msg_id = ?", (self._msg_id,))
-                    row = cur.fetchone()
-                    deleted_dt = row[0] if row else ""
-                cur.execute("DELETE FROM messages WHERE msg_id = ?", (self._msg_id,))
+                cur.execute("DELETE FROM messages WHERE id = ?", (deleted_id,))
                 conn.commit()
                 self._deleted_any = True
                 next_row = None
-                if deleted_dt:
-                    direction = self._last_nav
+                if deleted_id is not None:
                     if direction == "newer":
                         cur.execute(
-                            "SELECT msg_id, from_callsign, message, datetime, freq, target, source, global_id "
-                            "FROM messages WHERE datetime > ? ORDER BY datetime ASC LIMIT 1",
-                            (deleted_dt,)
+                            "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                            "FROM messages WHERE id > ? ORDER BY id ASC LIMIT 1",
+                            (deleted_id,)
                         )
                     else:
                         cur.execute(
-                            "SELECT msg_id, from_callsign, message, datetime, freq, target, source, global_id "
-                            "FROM messages WHERE datetime < ? ORDER BY datetime DESC LIMIT 1",
-                            (deleted_dt,)
+                            "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                            "FROM messages WHERE id < ? ORDER BY id DESC LIMIT 1",
+                            (deleted_id,)
                         )
                     next_row = cur.fetchone()
         except sqlite3.Error:
@@ -2830,9 +2836,9 @@ class MessageDetailDialog(QDialog):
         if not next_row:
             self.accept()
             return
-        self._reload(next_row[0], next_row[1] or "", next_row[2] or "", next_row[3] or "",
-                     freq=next_row[4], target=next_row[5] or "", source=next_row[6],
-                     global_id=next_row[7] or 0)
+        self._reload(next_row[0], next_row[2] or "", next_row[3] or "", next_row[4] or "",
+                     msg_id=next_row[1] or "", freq=next_row[5], target=next_row[6] or "", source=next_row[7],
+                     global_id=next_row[8] or 0)
 
     def _start_qrz(self) -> None:
         cached_fresh = get_qrz_cached(self.callsign)

@@ -1828,7 +1828,7 @@ class DatabaseManager:
 
                 if show_all:
                     # Show all messages regardless of group
-                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered
+                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id
                                FROM messages
                                WHERE {date_condition}
                                ORDER BY datetime DESC"""
@@ -1837,7 +1837,7 @@ class DatabaseManager:
                     # Filter by active groups (add @ prefix for matching)
                     groups_with_at = ["@" + g for g in groups]
                     placeholders = ",".join("?" * len(groups_with_at))
-                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered
+                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id
                                FROM messages
                                WHERE target IN ({placeholders}) AND {date_condition}
                                ORDER BY datetime DESC"""
@@ -5451,29 +5451,31 @@ class MainWindow(QtWidgets.QMainWindow):
             if not callsign:
                 callsign = "UNKNOWN"
 
-            # Get db_version, build_number, data_id, and qrz_id from controls table
+            # Get db_version, build_number, data_id, msg_id, and qrz_id from controls table
             db_version = 0
             build_number = 500  # Default fallback
             data_id = 0  # Default fallback
+            msg_id = 0  # Default fallback
             qrz_id = 0  # Default fallback
             try:
                 with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
                     cursor = conn.cursor()
-                    cursor.execute("SELECT db_version, build_number, data_id, qrz_id FROM controls WHERE id = 1")
+                    cursor.execute("SELECT db_version, build_number, data_id, msg_id, qrz_id FROM controls WHERE id = 1")
                     result = cursor.fetchone()
                     if result:
                         db_version = result[0]
                         build_number = result[1] if len(result) > 1 else 500
                         data_id = result[2] if len(result) > 2 else 0
-                        qrz_id = result[3] if len(result) > 3 and result[3] is not None else 0
+                        msg_id = result[3] if len(result) > 3 and result[3] is not None else 0
+                        qrz_id = result[4] if len(result) > 4 and result[4] is not None else 0
             except sqlite3.Error:
                 pass  # Use default values if query fails
 
             # Only report qrz_id when at least one JS8 connector is in "Connected" status
             qrz_value = qrz_id if self.tcp_pool.get_connected_rig_names() else 0
 
-            # Build heartbeat URL with callsign, data_id, qrz_id, db_version, and build_number parameters
-            heartbeat_url = f"{_PING}?cs={callsign}&id={data_id}&qrz={qrz_value}&db={db_version}&build={build_number}&version={VERSION}"
+            # Build heartbeat URL with callsign, data_id, msg_id, qrz_id, db_version, and build_number parameters
+            heartbeat_url = f"{_PING}?cs={callsign}&id={data_id}&msg={msg_id}&qrz={qrz_value}&db={db_version}&build={build_number}&version={VERSION}"
 
             request = urllib.request.Request(heartbeat_url)
             with urllib.request.urlopen(request, timeout=10, context=create_verified_ssl_context()) as response:
@@ -5951,9 +5953,11 @@ class MainWindow(QtWidgets.QMainWindow):
             extra_info: Optional extra info for success message (e.g., " (FORWARDED)")
             raw_line: Data line as received (verbatim for commsrvr traffic, an
                 equivalent built from JS8Call params for TCP traffic). When set
-                and this insert is a direct message to one of our callsigns,
-                it's echoed back to the server as a delivery confirmation
-                alongside the new-message popup.
+                and this insert is a direct message to one of our callsigns
+                received over the Internet (source=2), it's echoed back to the
+                server as a delivery confirmation alongside the new-message
+                popup. Radio/TCP-received messages (source=1) never trigger a
+                confirmation, since the commsrvr has no way to know about them.
 
         Returns:
             msg_type on success, empty string on failure
@@ -5983,7 +5987,8 @@ class MainWindow(QtWidgets.QMainWindow):
         query = f"INSERT INTO {table} ({columns}) VALUES({placeholders})"
         try:
             with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                conn.execute(query, tuple(data.values()))
+                cur = conn.execute(query, tuple(data.values()))
+                new_row_id = cur.lastrowid
                 conn.commit()
             print(f"{ConsoleColors.SUCCESS}[{rig_name}] Added {msg_type.upper()} {data.get(id_field, '')}{extra_info} from: {from_callsign} (Global ID: {data.get('global_id', 0)}){ConsoleColors.RESET}")
             QtCore.QMetaObject.invokeMethod(
@@ -6002,8 +6007,9 @@ class MainWindow(QtWidgets.QMainWindow):
                     QtCore.Q_ARG(str, str(data.get('msg_id', ''))),
                     QtCore.Q_ARG(str, str(data.get('message', ''))),
                     QtCore.Q_ARG(str, str(data.get('global_id', 0))),
+                    QtCore.Q_ARG(str, str(new_row_id)),
                 )
-                if raw_line:
+                if raw_line and data.get('source') == 2:
                     self._send_delivery_confirmation(raw_line)
             return msg_type
         except sqlite3.IntegrityError as e:
@@ -6124,7 +6130,7 @@ class MainWindow(QtWidgets.QMainWindow):
             rig_name, "statrep", data, "sr_id", "statrep", from_callsign
         )
 
-    def _handle_commsrvr_data_messages(self, content: str) -> bool:
+    def _handle_commsrvr_data_messages(self, content: str, controls_column: str = "data_id") -> bool:
         """Handle commsrvr server data messages with ID prefixes.
 
         Expected format (one or more lines):
@@ -6136,6 +6142,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
         Args:
             content: The commsrvr response content with ID-prefixed messages
+            controls_column: Which controls-table column to advance to the
+                highest ID seen — "data_id" for the primary feed (default),
+                "msg_id" for a standalone "MESSAGES::" reply. Always an
+                internal literal chosen by the caller, never server/user
+                input, so it's safe to interpolate into the UPDATE statement.
 
         Returns:
             True if at least one message was processed, False otherwise
@@ -6231,11 +6242,11 @@ class MainWindow(QtWidgets.QMainWindow):
                     )
                     try:
                         with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                            conn.execute("UPDATE controls SET data_id = ? WHERE id = 1", (data_id,))
+                            conn.execute(f"UPDATE controls SET {controls_column} = ? WHERE id = 1", (data_id,))
                             conn.commit()
-                        print(f"Updated data_id to {data_id} in controls table (delete)")
+                        print(f"Updated {controls_column} to {data_id} in controls table (delete)")
                     except sqlite3.Error as e:
-                        print(f"Warning: Failed to update data_id in controls table (delete): {e}")
+                        print(f"Warning: Failed to update {controls_column} in controls table (delete): {e}")
                     continue
 
                 # Parse the data line: date time freq_hz unused snr callsign: message
@@ -6300,15 +6311,16 @@ class MainWindow(QtWidgets.QMainWindow):
                     traceback.print_exc()
                     continue
 
-            # Update data_id in controls table if we processed any messages
+            # Update controls_column (data_id, or msg_id for a "MESSAGES::"
+            # reply) if we processed any messages
             if last_data_id > 0:
                 try:
                     with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                        conn.execute("UPDATE controls SET data_id = ? WHERE id = 1", (last_data_id,))
+                        conn.execute(f"UPDATE controls SET {controls_column} = ? WHERE id = 1", (last_data_id,))
                         conn.commit()
-                    print(f"Updated data_id to {last_data_id} in controls table")
+                    print(f"Updated {controls_column} to {last_data_id} in controls table")
                 except sqlite3.Error as e:
-                    print(f"Warning: Failed to update data_id in controls table: {e}")
+                    print(f"Warning: Failed to update {controls_column} in controls table: {e}")
 
             # Trigger UI refresh for processed data types (on main thread)
             if data_types_processed:
@@ -6386,8 +6398,8 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         dlg.exec_()
 
-    @QtCore.pyqtSlot(str, str, str, str)
-    def _show_new_message_popup(self, callsign: str, msg_id: str, message_text: str, global_id: str) -> None:
+    @QtCore.pyqtSlot(str, str, str, str, str)
+    def _show_new_message_popup(self, callsign: str, msg_id: str, message_text: str, global_id: str, record_id: str) -> None:
         """Show a notification popup when a message arrives addressed to
         one of our own callsigns, unless the user has disabled it in
         User Settings (controls.mssgNotify). "Open" closes the popup and
@@ -6400,7 +6412,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if dlg.exec_() == NewMessagePopupDialog.Opened:
             from qrz_lookup import MessageDetailDialog
             detail = MessageDetailDialog(
-                callsign, message_text, self._internet_available,
+                record_id, callsign, message_text, self._internet_available,
                 commsrvr_url=_COMMSRVR,
                 module_background=self.config.get_color('module_background'),
                 module_foreground=self.config.get_color('module_foreground'),
@@ -6419,14 +6431,13 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _send_delivery_confirmation(self, raw_line: str) -> None:
         """POST the exact data line back to the server as delivery confirmation
-        for a direct message addressed to one of our callsigns — commsrvr
-        (Internet) traffic passes the raw server line verbatim; TCP (Radio)
-        traffic passes an equivalent line built from the JS8Call params.
+        for a direct message addressed to one of our callsigns, received over
+        the Internet (commsrvr). _insert_message_data gates the call to
+        source=2 only — Radio/TCP-received messages never reach here, since
+        the commsrvr has no record of traffic it didn't relay.
 
-        Callers include the main/UI thread (TCP messages arrive via a Qt
-        socket signal, see _handle_tcp_message/_process_directed_message) as
-        well as the background thread already used for commsrvr polling, so
-        the actual network call always runs on its own daemon thread to
+        Called from the background thread already used for commsrvr polling,
+        so the actual network call always runs on its own daemon thread to
         never block the UI. Never raises — a failure here only logs and does
         not affect the message insert or popup that triggered it.
         """
@@ -6645,6 +6656,22 @@ class MainWindow(QtWidgets.QMainWindow):
                 return
             elif content_stripped.startswith('qrz_update'):
                 self._handle_qrz_update(content_stripped)
+                return
+            elif content_stripped.startswith('MESSAGES::'):
+                # The reply may carry a "MESSAGES::" block followed by a
+                # second, unlabeled block for everything else (STATREPs/
+                # alerts/videos), the two separated by one or more blank
+                # lines. Same ID-prefixed line format and parser either way
+                # — only the controls-table checkpoint advanced at the end
+                # differs.
+                inner = content_stripped[len('MESSAGES::'):].lstrip('\r\n')
+                parts = re.split(r'\n[ \t]*\n+', inner, maxsplit=1)
+                messages_block = parts[0].strip()
+                remainder = parts[1].strip() if len(parts) > 1 else ""
+                if messages_block:
+                    self._handle_commsrvr_data_messages(messages_block, controls_column="msg_id")
+                if remainder:
+                    self._handle_commsrvr_data_messages(remainder, controls_column="data_id")
                 return
 
             if "::DELIVERED::" in content_stripped:
@@ -8474,9 +8501,10 @@ window.commstatBouncePin = function(srid) {
                 callsign = callsign_item.text().strip()
                 message_text = (message_item.data(QtCore.Qt.UserRole) or message_item.text()) if message_item else ""
                 msg_id = msg_id_item.text().strip() if msg_id_item else ""
+                record_id = callsign_item.data(QtCore.Qt.UserRole)
                 from qrz_lookup import MessageDetailDialog
                 dlg = MessageDetailDialog(
-                    callsign, message_text, self._internet_available,
+                    record_id, callsign, message_text, self._internet_available,
                     commsrvr_url=_COMMSRVR,
                     module_background=self.config.get_color('module_background'),
                     module_foreground=self.config.get_color('module_foreground'),
@@ -9667,6 +9695,15 @@ window.commstatBouncePin = function(srid) {
                 if id_item:
                     id_item.setData(QtCore.Qt.UserRole, row_data[23])
 
+            # Store database id on the callsign cell for message rows — msg_id
+            # (col 6, displayed) is only a 3-char hour+minute code, recycled
+            # daily and not unique across senders, so the detail dialog must
+            # key off the unique messages primary key instead.
+            if is_message_table and len(row_data) > 10:
+                cs_item = table.item(row_num, 3)
+                if cs_item:
+                    cs_item.setData(QtCore.Qt.UserRole, row_data[10])
+
         # Alert table (non-statrep, non-message): sort by first column descending
         if not is_message_table and not is_statrep_table:
             table.sortItems(0, QtCore.Qt.DescendingOrder)
@@ -10314,7 +10351,11 @@ window.commstatBouncePin = function(srid) {
         # Comments — same parsing for both standard and forwarded
         # ("Forwarded By:" is already embedded in the remarks text by the sender)
         comments_raw = ",".join([f for f in fields[4:] if f.strip()]).strip() if len(fields) > 4 else ""
-        comments = sanitize_ascii(comments_raw)
+        # Trailing "||" mirrors the placeholder manually-created StatReps get
+        # (statrep.py's NEWLINE_PLACEHOLDER) so later appends to this row's
+        # comments (e.g. "||ACK <call>" from _process_rr_ack) have a clean
+        # separator from the received remarks.
+        comments = sanitize_ascii(comments_raw) + "||"
 
         # Map scope (DB-persisted text, not the UI display text)
         scope = scope_db_text_for_code(prec_num)
@@ -10394,6 +10435,12 @@ window.commstatBouncePin = function(srid) {
         Gated on the connector's rf_ack flag — only transmits if the rig
         used to receive this STATREP has rf_ack = 1.
 
+        Before transmitting, asks JS8Call whether it currently has a call
+        selected and discards the ack if so — mirrors the guard every
+        interactive send path in this app already performs, since JS8Call
+        splices a selected call into the next TX.SEND_MESSAGE, corrupting
+        the ack.
+
         On successful transmit, also appends a note to the just-saved
         statrep row's own comments/remarks recording that the ack went out.
         """
@@ -10412,28 +10459,58 @@ window.commstatBouncePin = function(srid) {
             return
 
         my_callsign = my_callsign.upper()
-        ack_message = f"{my_callsign}: {group} RRSR {from_callsign.upper()},{sr_id}"
-        client.send_tx_message(ack_message)
-        print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
 
-        ack_note = f"||||ACK sent to {group} by {my_callsign}"
-        try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT id, comments FROM statrep WHERE date = ? AND sr_id = ? AND from_callsign = ?",
-                    (date_only, sr_id, from_callsign)
-                )
-                row = cursor.fetchone()
-                if row:
-                    row_id, existing_comments = row
+        def _on_selected(emitted_rig: str, selected_call: str) -> None:
+            if emitted_rig != rig_name:
+                return
+            try:
+                client.call_selected_received.disconnect(_on_selected)
+            except TypeError:
+                pass
+
+            if selected_call:
+                print(f"[{rig_name}] Skipped STATREP ack — JS8Call has {selected_call} selected")
+                return
+
+            ack_message = f"{my_callsign}: {group} RRSR {from_callsign.upper()},{sr_id}"
+
+            # Only transmit if the constructed ack matches the single-addressee
+            # RRSR shape _process_rr_ack expects on receipt (mirrors that regex).
+            # `group` is echoed verbatim from the incoming STATREP's TO field, so
+            # a malformed/compound addressee (e.g. a STATREP directed to
+            # "@MR05 @MR06") would otherwise produce a reply no station's RRSR
+            # parser recognizes.
+            if not re.match(
+                r'^\w+:\s+@?\w+\s+RRSR\s+[A-Z0-9/]{3,12},\w{3}\.?\s*$',
+                ack_message, re.IGNORECASE
+            ):
+                print(f"[{rig_name}] Skipped STATREP ack — malformed addressee: {ack_message!r}")
+                return
+
+            client.send_tx_message(ack_message)
+            print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
+
+            ack_note = f"||||ACK sent to {group} by {my_callsign}"
+            try:
+                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                    cursor = conn.cursor()
                     cursor.execute(
-                        "UPDATE statrep SET comments = ? WHERE id = ?",
-                        (f"{existing_comments or ''}{ack_note}", row_id)
+                        "SELECT id, comments FROM statrep WHERE date = ? AND sr_id = ? AND from_callsign = ?",
+                        (date_only, sr_id, from_callsign)
                     )
-                    conn.commit()
-        except sqlite3.Error as e:
-            print(f"[{rig_name}] DB error appending ack note to statrep {from_callsign}/{sr_id} on {date_only}: {e}")
+                    row = cursor.fetchone()
+                    if row:
+                        row_id, existing_comments = row
+                        cursor.execute(
+                            "UPDATE statrep SET comments = ? WHERE id = ?",
+                            (f"{existing_comments or ''}{ack_note}", row_id)
+                        )
+                        conn.commit()
+            except sqlite3.Error as e:
+                print(f"[{rig_name}] DB error appending ack note to statrep {from_callsign}/{sr_id} on {date_only}: {e}")
+
+        client.call_selected_received.connect(_on_selected)
+        client.get_call_selected()
 
     def _parse_group_event(
         self,
@@ -10777,8 +10854,8 @@ window.commstatBouncePin = function(srid) {
             raw_line: Data line as received (verbatim for commsrvr traffic, an
                 equivalent built from JS8Call params for TCP traffic), forwarded
                 to _insert_message_data so a direct message to one of our
-                callsigns can be echoed back to the server as a delivery
-                confirmation.
+                callsigns received over the Internet (source=2) can be echoed
+                back to the server as a delivery confirmation.
 
         Returns:
             (message_type, None) where message_type is "message" or ""
@@ -11088,8 +11165,9 @@ window.commstatBouncePin = function(srid) {
                 (date/time/freq/0/snr/callsign: message, minus only the leading
                 "ID:" prefix) for Internet traffic, or an equivalent line built
                 from JS8Call params for Radio (TCP) traffic — forwarded to the
-                MESSAGE parser so a direct message can echo it back to the
-                server as a delivery confirmation.
+                MESSAGE parser so a direct message received over the Internet
+                (source=2) can echo it back to the server as a delivery
+                confirmation.
 
         Returns:
             (message_type, data_dict) where:
