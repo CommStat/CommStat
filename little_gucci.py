@@ -5459,16 +5459,22 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
                     cursor = conn.cursor()
-                    cursor.execute("SELECT db_version, build_number, data_id, msg_id, qrz_id FROM controls WHERE id = 1")
+                    # Select * and map by column name so a stale local schema (e.g. a
+                    # DB that hasn't received a migration yet) degrades gracefully per
+                    # missing column instead of failing the whole query and silently
+                    # reporting fallback values (previously masked by a bare except).
+                    cursor.execute("SELECT * FROM controls WHERE id = 1")
                     result = cursor.fetchone()
                     if result:
-                        db_version = result[0]
-                        build_number = result[1] if len(result) > 1 else 500
-                        data_id = result[2] if len(result) > 2 else 0
-                        msg_id = result[3] if len(result) > 3 and result[3] is not None else 0
-                        qrz_id = result[4] if len(result) > 4 and result[4] is not None else 0
-            except sqlite3.Error:
-                pass  # Use default values if query fails
+                        columns = [d[0] for d in cursor.description]
+                        row = dict(zip(columns, result))
+                        db_version = row.get("db_version", 0)
+                        build_number = row.get("build_number", 500)
+                        data_id = row.get("data_id", 0) or 0
+                        msg_id = row.get("msg_id", 0) or 0
+                        qrz_id = row.get("qrz_id", 0) or 0
+            except sqlite3.Error as e:
+                print(f"Error reading controls table for heartbeat: {type(e).__name__}: {e}")
 
             # Only report qrz_id when at least one JS8 connector is in "Connected" status
             qrz_value = qrz_id if self.tcp_pool.get_connected_rig_names() else 0
