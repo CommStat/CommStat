@@ -101,7 +101,6 @@ import netguard
 # This allows the developer to push messages/images to all CommStat users
 _COMMSRVR = base64.b64decode("aHR0cHM6Ly9jb21tc3RhdC5hcHA=").decode()
 _PING = _COMMSRVR + "/heartbeat-808585.php"
-_DELIVERY_CONFIRM = _COMMSRVR + "/delivery-confirmation-808585.php"
 
 # Default hyperlink blue - used to style the StatRep table's clickable
 # From/TID columns like links (color + underline, always on, not just hover).
@@ -5937,8 +5936,7 @@ class MainWindow(QtWidgets.QMainWindow):
         id_field: str,
         msg_type: str,
         from_callsign: str,
-        extra_info: str = "",
-        raw_line: str = ""
+        extra_info: str = ""
     ) -> str:
         """
         Generic database insert with standardized error handling.
@@ -5951,13 +5949,6 @@ class MainWindow(QtWidgets.QMainWindow):
             msg_type: Return value on success (e.g., "statrep", "message")
             from_callsign: Sender callsign for logging
             extra_info: Optional extra info for success message (e.g., " (FORWARDED)")
-            raw_line: Data line as received (verbatim for commsrvr traffic, an
-                equivalent built from JS8Call params for TCP traffic). When set
-                and this insert is a direct message to one of our callsigns
-                received over the Internet (source=2), it's echoed back to the
-                server as a delivery confirmation alongside the new-message
-                popup. Radio/TCP-received messages (source=1) never trigger a
-                confirmation, since the commsrvr has no way to know about them.
 
         Returns:
             msg_type on success, empty string on failure
@@ -6009,8 +6000,6 @@ class MainWindow(QtWidgets.QMainWindow):
                     QtCore.Q_ARG(str, str(data.get('global_id', 0))),
                     QtCore.Q_ARG(str, str(new_row_id)),
                 )
-                if raw_line and data.get('source') == 2:
-                    self._send_delivery_confirmation(raw_line)
             return msg_type
         except sqlite3.IntegrityError as e:
             if id_field in str(e) or "UNIQUE" in str(e):
@@ -6223,7 +6212,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 data_id = int(id_match.group(1))
                 data = id_match.group(2).strip()
-                raw_data_line = data
 
                 # Track the highest ID we've seen
                 if data_id > last_data_id:
@@ -6252,8 +6240,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 # Parse the data line: date time freq_hz unused snr callsign: message
                 # Example: 2026-02-06 18:32:32    14118000    0    30    N0DDK: @MAGNET ,EM83CV,3,T31,321311111331,GA,{&%}
                 # Fields: date(0) time(1) freq_hz(2) unused/0(3) snr/db(4) callsign:message(5)
-                if data.startswith("DM:"):
-                    data = data[3:]
                 parts = data.split(None, 5)  # Split on whitespace, max 6 parts
                 if len(parts) < 6:
                     print(f"Skipping malformed data line (ID {data_id}): insufficient fields")
@@ -6297,8 +6283,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
                     # Parse using unified parser (source=2 for Internet)
                     msg_type, _ = self._parse_commstat_message(
-                        "COMMSRVR", from_callsign, message_value, target, "", freq, db, utc, source=2, global_id=data_id,
-                        raw_line=raw_data_line
+                        "COMMSRVR", from_callsign, message_value, target, "", freq, db, utc, source=2, global_id=data_id
                     )
 
                     if msg_type:
@@ -6428,34 +6413,6 @@ class MainWindow(QtWidgets.QMainWindow):
             detail.record_deleted.connect(self._load_message_data)
             if detail.exec_() == 1:
                 self._load_message_data()
-
-    def _send_delivery_confirmation(self, raw_line: str) -> None:
-        """POST the exact data line back to the server as delivery confirmation
-        for a direct message addressed to one of our callsigns, received over
-        the Internet (commsrvr). _insert_message_data gates the call to
-        source=2 only — Radio/TCP-received messages never reach here, since
-        the commsrvr has no record of traffic it didn't relay.
-
-        Called from the background thread already used for commsrvr polling,
-        so the actual network call always runs on its own daemon thread to
-        never block the UI. Never raises — a failure here only logs and does
-        not affect the message insert or popup that triggered it.
-        """
-        if not netguard.guard("Delivery confirmation"):
-            return
-
-        def _send():
-            try:
-                post_data = urllib.parse.urlencode({'data': raw_line}).encode('utf-8')
-                print(f"[Delivery Confirmation] POST data: {post_data}")
-                req = urllib.request.Request(_DELIVERY_CONFIRM, data=post_data, method='POST')
-                with urllib.request.urlopen(req, timeout=10, context=create_verified_ssl_context()) as response:
-                    result = response.read().decode('utf-8').strip()
-                print(f"[Delivery Confirmation] Server response: {result!r}")
-            except Exception as e:
-                print(f"[Delivery Confirmation] Failed to send: {type(e).__name__}: {e}")
-
-        threading.Thread(target=_send, daemon=True).start()
 
     @QtCore.pyqtSlot(set)
     def _refresh_commsrvr_data(self, data_types: set) -> None:
@@ -10832,8 +10789,7 @@ window.commstatBouncePin = function(srid) {
         snr: int,
         utc: str,
         source: int,
-        global_id: int = 0,
-        raw_line: str = ""
+        global_id: int = 0
     ) -> tuple:
         """
         Parse MESSAGE format.
@@ -10851,11 +10807,6 @@ window.commstatBouncePin = function(srid) {
             utc: UTC timestamp string "YYYY-MM-DD HH:MM:SS"
             source: 1=Radio (TCP), 2=Internet (commsrvr)
             global_id: Server-assigned message ID from commsrvr (0 for Radio/unknown)
-            raw_line: Data line as received (verbatim for commsrvr traffic, an
-                equivalent built from JS8Call params for TCP traffic), forwarded
-                to _insert_message_data so a direct message to one of our
-                callsigns received over the Internet (source=2) can be echoed
-                back to the server as a delivery confirmation.
 
         Returns:
             (message_type, None) where message_type is "message" or ""
@@ -10958,7 +10909,7 @@ window.commstatBouncePin = function(srid) {
         }
 
         result = self._insert_message_data(
-            rig_name, "messages", data, "msg_id", "message", from_callsign, raw_line=raw_line
+            rig_name, "messages", data, "msg_id", "message", from_callsign
         )
         if result:
             return (result, None)
@@ -11136,8 +11087,7 @@ window.commstatBouncePin = function(srid) {
         snr: int,
         utc: str,
         source: int,  # 1=Radio, 2=Internet
-        global_id: int = 0,
-        raw_line: str = ""
+        global_id: int = 0
     ) -> tuple:
         """
         Parse and validate CommStat message in any format.
@@ -11161,13 +11111,6 @@ window.commstatBouncePin = function(srid) {
             snr: Signal-to-noise ratio in dB
             utc: UTC timestamp string "YYYY-MM-DD HH:MM:SS"
             source: 1=Radio (TCP), 2=Internet (commsrvr)
-            raw_line: Data line as received — the raw commsrvr line verbatim
-                (date/time/freq/0/snr/callsign: message, minus only the leading
-                "ID:" prefix) for Internet traffic, or an equivalent line built
-                from JS8Call params for Radio (TCP) traffic — forwarded to the
-                MESSAGE parser so a direct message received over the Internet
-                (source=2) can echo it back to the server as a delivery
-                confirmation.
 
         Returns:
             (message_type, data_dict) where:
@@ -11234,7 +11177,7 @@ window.commstatBouncePin = function(srid) {
 
         # PRIORITY 7: MESSAGE
         result = self._parse_message(
-            rig_name, message_value, from_callsign, target, freq, snr, utc, source, global_id, raw_line
+            rig_name, message_value, from_callsign, target, freq, snr, utc, source, global_id
         )
         if result[0]:
             return result
@@ -11279,12 +11222,6 @@ window.commstatBouncePin = function(srid) {
         Returns:
             "statrep", "message", "alert", "video", or empty string
         """
-        # Build an equivalent of the commsrvr raw line — date time, freq_hz,
-        # unused/0, snr, "callsign: message" — from the as-received JS8Call
-        # params, before preprocessing touches value. Only used downstream if
-        # this turns out to be a direct message to one of our own callsigns.
-        raw_line = f"{utc}\t{freq}\t0\t{snr}\t{from_call}: {value}"
-
         # Preprocess message value
         value = self._preprocess_message_value(value, from_call)
 
@@ -11321,7 +11258,7 @@ window.commstatBouncePin = function(srid) {
 
         # Parse using unified parser (source=1 for Radio)
         msg_type, _ = self._parse_commstat_message(
-            rig_name, from_callsign, value, target, grid, freq, snr, utc, source=1, raw_line=raw_line
+            rig_name, from_callsign, value, target, grid, freq, snr, utc, source=1
         )
 
         return msg_type

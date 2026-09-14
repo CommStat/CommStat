@@ -1047,7 +1047,7 @@ class QRZLookupDialog(QDialog):
         now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
         msg_id = generate_time_based_id()
         message_data = f"{my_cs}: {cs} MSG ,{msg_id},{text},{{^%3}}"
-        data_string  = f"DM:{now}\t0\t0\t30\t{message_data}"
+        data_string  = f"{now}\t0\t0\t30\t{message_data}"
         self._pending_dm = (my_cs, cs, text, msg_id, now)
         threading.Thread(
             target=self._submit_internet, args=(my_cs, data_string), daemon=True
