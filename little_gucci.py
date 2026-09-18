@@ -6275,14 +6275,12 @@ class MainWindow(QtWidgets.QMainWindow):
                     if target_match:
                         target = target_match.group(1).upper()
                     else:
-                        # Check if statrep is addressed directly to the user's callsign
-                        _my_call = next((cs for cs in self.rig_callsigns.values() if cs), None)
-                        if not _my_call:
-                            _my_call, _, __ = self.db.get_user_settings()
-                        if _my_call:
-                            _direct = re.match(r'^\w+:\s+(\w+)\s+,', message_value, re.IGNORECASE)
-                            if _direct and _direct.group(1).upper() == _my_call.upper():
-                                target = _my_call.upper()
+                        # Direct statrep — the server now only delivers these to the
+                        # matching recipient, so the addressee is trusted as our
+                        # target without re-checking it against our own callsign.
+                        _direct = re.match(r'^\w+:\s+(\w+)\s+,', message_value, re.IGNORECASE)
+                        if _direct:
+                            target = _direct.group(1).upper()
 
                     # Preprocess message value
                     message_value = self._preprocess_message_value(message_value, from_callsign)
@@ -10886,8 +10884,10 @@ window.commstatBouncePin = function(srid) {
                 if group_name not in all_groups:
                     # Skip messages to groups we're not in
                     return ("", None)
-        else:
-            # Direct message - only save if to one of our callsigns.
+        elif source != 2:
+            # Direct message over Radio - only save if to one of our callsigns.
+            # (Commsrvr already pre-filters direct messages to our own callsign
+            # before we ever see them, so no local check is needed for source 2.)
             # Base-callsign compare so a /P operator still receives their own traffic.
             target_call = base_callsign(msg_target)
             user_callsigns = [base_callsign(c) for c in self.rig_callsigns.values() if c]

@@ -159,6 +159,10 @@ def lininstall():
     packages = [
         "branca>=0.6.0",
         "folium",
+        # numpy>=2.4 wheels default to an x86-64-v2 CPU baseline and crash on
+        # older/virtualized CPUs (RuntimeError: "doesn't support: (X86_V2)").
+        # Pin below that until numpy restores a broader default baseline.
+        "numpy<2.4",
         "pandas",
         "maidenhead",
         "pyenchant",
@@ -177,6 +181,7 @@ def macinstall():
         "PyQtWebEngine",
         "branca>=0.6.0",
         "folium",
+        "numpy<2.4",
         "pandas",
         "maidenhead",
         "pyenchant",
@@ -195,6 +200,7 @@ def wininstall():
         "PyQtWebEngine",
         "branca>=0.6.0",
         "folium",
+        "numpy<2.4",
         "pandas",
         "maidenhead",
         "pyenchant",
