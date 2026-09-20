@@ -552,6 +552,42 @@ def base_callsign(callsign: str) -> str:
     return max(callsign.upper().split("/"), key=len)
 
 
+def _append_statrep_comment(row_id: int, addition: str, retries: int = 3) -> bool:
+    """
+    Atomically append text to a statrep row's comments column.
+
+    Appends inside the UPDATE itself (comments = COALESCE(comments,'') || ?)
+    rather than reading the column in Python and writing back a computed
+    string, so a concurrent writer to the same row (e.g. a commsrvr
+    heartbeat db_update landing on a background thread) can never clobber
+    this append — whichever write runs last still builds on the other's
+    result instead of overwriting it.
+
+    Retries briefly on "database is locked" (a heartbeat-driven write
+    holding the file lock past the connection's own busy timeout) instead
+    of silently dropping the update after one failed attempt.
+    """
+    for attempt in range(retries):
+        try:
+            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                conn.execute(
+                    "UPDATE statrep SET comments = COALESCE(comments, '') || ? WHERE id = ?",
+                    (addition, row_id)
+                )
+                conn.commit()
+            return True
+        except sqlite3.OperationalError as e:
+            if "locked" in str(e).lower() and attempt < retries - 1:
+                time.sleep(0.5 * (attempt + 1))
+                continue
+            print(f"DB error appending to statrep {row_id} comments: {e}")
+            return False
+        except sqlite3.Error as e:
+            print(f"DB error appending to statrep {row_id} comments: {e}")
+            return False
+    return False
+
+
 def parse_contacts_observation(value: str) -> Optional[Tuple[str, int]]:
     """
     Parse an RX.DIRECTED body for a target-SNR observation reported by the relay.
@@ -10221,11 +10257,12 @@ window.commstatBouncePin = function(srid) {
         if not ack_callsign:
             return True
 
+        row_id = None
         try:
             with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
                 cursor = conn.cursor()
                 cursor.execute(
-                    "SELECT id, from_callsign, comments FROM statrep WHERE date = ? AND sr_id = ?",
+                    "SELECT id, from_callsign FROM statrep WHERE date = ? AND sr_id = ?",
                     (date_only, sr_id)
                 )
                 row = next(
@@ -10233,14 +10270,12 @@ window.commstatBouncePin = function(srid) {
                     None
                 )
                 if row:
-                    row_id, _, existing_comments = row
-                    cursor.execute(
-                        "UPDATE statrep SET comments = ? WHERE id = ?",
-                        (f"{existing_comments or ''}||ACK {ack_callsign}", row_id)
-                    )
-                    conn.commit()
+                    row_id = row[0]
         except sqlite3.Error as e:
             print(f"[RRSR ack] DB error matching statrep {target_callsign}/{sr_id} on {date_only}: {e}")
+
+        if row_id is not None:
+            _append_statrep_comment(row_id, f"||ACK {ack_callsign}")
 
         return True
 
@@ -10452,23 +10487,22 @@ window.commstatBouncePin = function(srid) {
             print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
 
             ack_note = f"||||ACK sent to {group} by {my_callsign}"
+            row_id = None
             try:
                 with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        "SELECT id, comments FROM statrep WHERE date = ? AND sr_id = ? AND from_callsign = ?",
+                        "SELECT id FROM statrep WHERE date = ? AND sr_id = ? AND from_callsign = ?",
                         (date_only, sr_id, from_callsign)
                     )
                     row = cursor.fetchone()
                     if row:
-                        row_id, existing_comments = row
-                        cursor.execute(
-                            "UPDATE statrep SET comments = ? WHERE id = ?",
-                            (f"{existing_comments or ''}{ack_note}", row_id)
-                        )
-                        conn.commit()
+                        row_id = row[0]
             except sqlite3.Error as e:
                 print(f"[{rig_name}] DB error appending ack note to statrep {from_callsign}/{sr_id} on {date_only}: {e}")
+
+            if row_id is not None:
+                _append_statrep_comment(row_id, ack_note)
 
         client.call_selected_received.connect(_on_selected)
         client.get_call_selected()

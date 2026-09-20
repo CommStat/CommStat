@@ -266,11 +266,12 @@ class _ReadCountThread(QThread):
     """Fetches the delivery read-count (and last-seen) from the commsrvr server."""
     count_ready = pyqtSignal(str)
 
-    def __init__(self, commsrvr_url: str, callsign: str, global_id: int):
+    def __init__(self, commsrvr_url: str, callsign: str, global_id: int, id_param: str = "id"):
         super().__init__()
         self.commsrvr_url = commsrvr_url
         self.callsign = callsign
         self.global_id = global_id
+        self.id_param = id_param
 
     def run(self) -> None:
         import netguard
@@ -279,7 +280,7 @@ class _ReadCountThread(QThread):
             return
         try:
             url = (f"{self.commsrvr_url}/get-read-count-808585.php"
-                   f"?cs={urllib.parse.quote(self.callsign)}&id={self.global_id}")
+                   f"?cs={urllib.parse.quote(self.callsign)}&{self.id_param}={self.global_id}")
             with urllib.request.urlopen(url, timeout=10, context=create_verified_ssl_context()) as resp:
                 text = resp.read().decode().strip()
             self.count_ready.emit(text)
@@ -419,6 +420,7 @@ class _QRZInfoSection(QWidget):
         self._hdr_bg = hdr_bg
         self._hdr_fg = hdr_fg
         self._skip_last_seen = skip_last_seen
+        self._last_seen_call: str = ""
         self._build()
 
     def _build(self) -> None:
@@ -670,7 +672,8 @@ class _QRZInfoSection(QWidget):
         self.lbl_county.setText(f'<span style="{_k}">County:</span> {d["county"]}' if d["county"] else "")
         self.lbl_country.setText(f'<span style="{_k}">Country:</span> {d["country"]}' if d["country"] else "")
 
-        if d["call"] and not self._skip_last_seen:
+        if d["call"] and not self._skip_last_seen and d["call"] != self._last_seen_call:
+            self._last_seen_call = d["call"]
             self.lbl_last_seen.setText(f'<span style="{_k}">Last Seen:</span> —')
             self._fetch_last_seen(d["call"])
 
@@ -2670,7 +2673,7 @@ class MessageDetailDialog(QDialog):
             )
         elif global_id and self._commsrvr_url and self.internet_available and local_cs:
             rc_token = self._reload_token
-            self._rc_thread = _ReadCountThread(self._commsrvr_url, local_cs, global_id)
+            self._rc_thread = _ReadCountThread(self._commsrvr_url, local_cs, global_id, id_param="msg_id")
             self._rc_thread.count_ready.connect(
                 lambda text, t=rc_token: self._on_read_count(text) if t == self._reload_token else None
             )
