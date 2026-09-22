@@ -3436,6 +3436,9 @@ class MainWindow(QtWidgets.QMainWindow):
             # Going Off-Grid: force offline immediately and stop all
             # background network activity, even if it's mid-cycle.
             self._internet_available = False
+            self._sync_weather_radar_action()
+            self._sync_earthquake_action()
+            self._sync_wildfire_action()
             if hasattr(self, 'internet_timer'):
                 self.internet_timer.stop()
             if hasattr(self, 'commsrvr_timer'):
@@ -3455,6 +3458,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Coming back Online: re-probe real connectivity and restart
         # everything that depends on it.
         self._internet_available = check_internet()
+        self._sync_weather_radar_action()
+        self._sync_earthquake_action()
+        self._sync_wildfire_action()
         if hasattr(self, 'internet_timer'):
             self.internet_timer.stop()
         if self._internet_available:
