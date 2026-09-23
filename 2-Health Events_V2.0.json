@@ -1,0 +1,1555 @@
+{
+  "gui_titles": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Event / Hazard:",
+    "status": "3. Phase:",
+    "severity": "4. Severity:",
+    "primary": "5. Impact:",
+    "secondary": "6. Official Response:",
+    "source": "7. Trust / Source:",
+    "station": "8. Station Status:"
+  },
+  "gui_titles_v3": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Event / Hazard:",
+    "status": "3. Phase:",
+    "primary": "5. Impact:",
+    "secondary_impact": "6. Official Response:",
+    "severity": "4. Severity:",
+    "source": "7. Trust / Source:",
+    "station": "8. Station Status:",
+    "secondary": "6. Official Response:"
+  },
+  "emergency_type": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "an unknown health emergency",
+      "default_phase": "A",
+      "default_severity": "A",
+      "default_source": "A",
+      "default_station": "B"
+    },
+    "*** Respiratory / close contact ***": {
+      "narrative": "",
+      "description": "Respiratory / close contact:\nSpread by air, droplets, or close contact. Includes flu, COVID, measles, TB, strep (including invasive disease), meningococcal disease, and unnamed respiratory clusters.\nPrevention: Stay home if ill, improve ventilation, and follow isolation guidance from public health.",
+      "order": 1,
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L"
+      ],
+      "B": {
+        "name": "COVID-19",
+        "narrative": "a COVID-19 health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "C": {
+        "name": "Influenza",
+        "narrative": "an influenza health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "D": {
+        "name": "Novel / pandemic influenza",
+        "narrative": "a novel or pandemic influenza health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "E": {
+        "name": "Avian influenza",
+        "narrative": "an avian-influenza health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "F": {
+        "name": "RSV",
+        "narrative": "an RSV health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "G": {
+        "name": "Measles",
+        "narrative": "a measles health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "H": {
+        "name": "Pertussis",
+        "narrative": "a pertussis health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "I": {
+        "name": "Tuberculosis",
+        "narrative": "a tuberculosis health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "J": {
+        "name": "Strep",
+        "narrative": "a strep health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "K": {
+        "name": "Meningococcal disease",
+        "narrative": "a meningococcal health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "L": {
+        "name": "Other",
+        "narrative": "an unspecified infection",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Food, water, and gut ***": {
+      "narrative": "",
+      "description": "Food, water, and gut:\nSpread by food, water, or feces. Includes foodborne and waterborne outbreaks, hepatitis A, and unnamed GI illness.\nPrevention: Use safe water, wash hands after the bathroom, and cook and store food properly.",
+      "order": 2,
+      "items": [
+        "M",
+        "N",
+        "O",
+        "P"
+      ],
+      "M": {
+        "name": "Foodborne outbreak",
+        "narrative": "a foodborne health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "N": {
+        "name": "Waterborne outbreak",
+        "narrative": "a waterborne health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "O": {
+        "name": "Hepatitis A",
+        "narrative": "a hepatitis A health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "P": {
+        "name": "Other",
+        "narrative": "an unspecified infection",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Blood, animal, and insect ***": {
+      "narrative": "",
+      "description": "Blood, animal, and insect:\nSpread by blood, sex, animals, or insects. Includes rabies, mosquito- and tick-borne disease, viral hemorrhagic fever, and similar.\nPrevention: Avoid bites and animal saliva, do not touch blood, and use PPE if you must give care.",
+      "order": 3,
+      "items": [
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V"
+      ],
+      "Q": {
+        "name": "Bloodborne / STI",
+        "narrative": "a bloodborne or sexually transmitted health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "R": {
+        "name": "Rabies",
+        "narrative": "a rabies health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "S": {
+        "name": "Mosquito-borne",
+        "narrative": "a mosquito-borne health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "T": {
+        "name": "Tick-borne",
+        "narrative": "a tick-borne health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "U": {
+        "name": "Viral hemorrhagic fever",
+        "narrative": "a viral-hemorrhagic-fever health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "V": {
+        "name": "Other",
+        "narrative": "an unspecified infection",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Exposure ***": {
+      "narrative": "",
+      "description": "Exposure:\nNot a normal infection. Chemical, radiation, nuclear, or an unknown biological agent.\nPrevention: Get upwind or out of the area, avoid plume and runoff, and wait for official decontamination guidance.",
+      "order": 4,
+      "items": [
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "W": {
+        "name": "Chemical exposure",
+        "narrative": "a chemical-exposure health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "X": {
+        "name": "Biological (unknown agent)",
+        "narrative": "a biological health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Y": {
+        "name": "Radiation / nuclear",
+        "narrative": "a radiation or nuclear health emergency",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Z": {
+        "name": "Other",
+        "narrative": "an unspecified exposure",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    }
+  },
+  "status_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "the phase is unknown",
+      "family": "unknown"
+    },
+    "*** Issued products ***": {
+      "items": [
+        "B",
+        "C",
+        "D"
+      ],
+      "description": "An official product has been issued.",
+      "order": 1
+    },
+    "*** Before it starts ***": {
+      "items": [
+        "E",
+        "F",
+        "G"
+      ],
+      "description": "Event has not yet started or is only threatened.",
+      "order": 2
+    },
+    "*** While it is happening ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M"
+      ],
+      "description": "Event is currently happening.",
+      "order": 3
+    },
+    "*** After / closeout ***": {
+      "items": [
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T"
+      ],
+      "description": "Event has ended, been cancelled, or all clear.",
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "description": "Placeholders for later phase codes.",
+      "order": 5
+    },
+    "B": {
+      "name": "Advisory",
+      "narrative": "advisory has been issued",
+      "family": "issued"
+    },
+    "C": {
+      "name": "Watch",
+      "narrative": "watch has been issued",
+      "family": "issued"
+    },
+    "D": {
+      "name": "Warning",
+      "narrative": "warning has been issued",
+      "family": "issued"
+    },
+    "E": {
+      "name": "Possible",
+      "narrative": "is possible",
+      "family": "state"
+    },
+    "F": {
+      "name": "Expected",
+      "narrative": "is expected",
+      "family": "state"
+    },
+    "G": {
+      "name": "Imminent",
+      "narrative": "is imminent",
+      "family": "state"
+    },
+    "H": {
+      "name": "Occurring now",
+      "narrative": "is occurring now",
+      "family": "state"
+    },
+    "I": {
+      "name": "Intensifying",
+      "narrative": "is intensifying",
+      "family": "state"
+    },
+    "J": {
+      "name": "Peak intensity",
+      "narrative": "is at peak intensity",
+      "family": "state"
+    },
+    "K": {
+      "name": "Weakening",
+      "narrative": "is weakening",
+      "family": "state"
+    },
+    "L": {
+      "name": "Continuing",
+      "narrative": "is continuing",
+      "family": "state"
+    },
+    "M": {
+      "name": "Spreading",
+      "narrative": "is spreading",
+      "family": "state"
+    },
+    "N": {
+      "name": "Concluded",
+      "narrative": "has concluded",
+      "family": "state"
+    },
+    "O": {
+      "name": "Dissipated",
+      "narrative": "has dissipated",
+      "family": "state"
+    },
+    "P": {
+      "name": "Cancelled",
+      "narrative": "has been cancelled",
+      "family": "state"
+    },
+    "Q": {
+      "name": "Downgraded",
+      "narrative": "has been downgraded",
+      "family": "state"
+    },
+    "R": {
+      "name": "All clear",
+      "narrative": "All clear has been given.",
+      "family": "standalone"
+    },
+    "S": {
+      "name": "Hoax / unfounded",
+      "narrative": "was a hoax or unfounded",
+      "family": "state"
+    },
+    "T": {
+      "name": "Prevented / stopped",
+      "narrative": "was prevented or stopped",
+      "family": "state"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    }
+  },
+  "shared_impacts": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "the impact is unknown"
+    },
+    "*** Health effects ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I"
+      ],
+      "order": 1
+    },
+    "*** Life safety ***": {
+      "items": [
+        "U"
+      ],
+      "order": 3
+    },
+    "*** Reserved ***": {
+      "items": [
+        "T",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 4
+    },
+    "B": {
+      "name": "Infections",
+      "narrative": "infections are the main concern"
+    },
+    "C": {
+      "name": "Mass illness",
+      "narrative": "mass illness is the main concern"
+    },
+    "D": {
+      "name": "Hospitalizations",
+      "narrative": "hospitalizations are the main concern"
+    },
+    "E": {
+      "name": "Fatalities",
+      "narrative": "fatalities are the main concern"
+    },
+    "F": {
+      "name": "Healthcare workforce shortage",
+      "narrative": "a healthcare workforce shortage is the main concern"
+    },
+    "G": {
+      "name": "Hospital / ED overload",
+      "narrative": "hospital or emergency-department overload is the main concern"
+    },
+    "H": {
+      "name": "Medical supply shortage",
+      "narrative": "a medical supply shortage is the main concern"
+    },
+    "I": {
+      "name": "Mental-health surge",
+      "narrative": "a mental-health surge is the main concern"
+    },
+    "J": {
+      "name": "School / gathering closed",
+      "narrative": "school or gathering closures are the main concern"
+    },
+    "K": {
+      "name": "Healthcare closed / diverted",
+      "narrative": "healthcare closure or diversion is the main concern"
+    },
+    "L": {
+      "name": "Essential services disrupted",
+      "narrative": "disruption of essential services is the main concern"
+    },
+    "M": {
+      "name": "Workforce / absenteeism",
+      "narrative": "workforce shortage or absenteeism is the main concern"
+    },
+    "N": {
+      "name": "Congregate care strain",
+      "narrative": "strain on long-term or congregate care is the main concern"
+    },
+    "O": {
+      "name": "Workplace closed",
+      "narrative": "workplace closures are the main concern"
+    },
+    "P": {
+      "name": "Childcare collapsed",
+      "narrative": "childcare or dependent-care collapse is the main concern"
+    },
+    "Q": {
+      "name": "Morgue / mortuary surge",
+      "narrative": "morgue or mortuary surge is the main concern"
+    },
+    "R": {
+      "name": "Blood supply shortage",
+      "narrative": "a blood or blood-product shortage is the main concern"
+    },
+    "S": {
+      "name": "Pharmacy / outpatient access lost",
+      "narrative": "lost pharmacy or outpatient access is the main concern"
+    },
+    "T": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "U": {
+      "name": "Missing persons",
+      "narrative": "missing persons are the main concern"
+    },
+    "V": {
+      "name": "Testing / lab backlog",
+      "narrative": "testing or lab backlog is the main concern"
+    },
+    "W": {
+      "name": "Patient transport strained",
+      "narrative": "strained patient transport is the main concern"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "*** Community / system ***": {
+      "items": [
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "V",
+        "W"
+      ],
+      "order": 2
+    }
+  },
+  "impact_overrides": {
+    "W": {
+      "label": "Chemical exposure",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Exposure effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Plume / vapor",
+          "narrative": "a plume or vapor is the main concern"
+        },
+        "C": {
+          "name": "Inhalation injuries",
+          "narrative": "inhalation injuries are the main concern"
+        },
+        "D": {
+          "name": "Skin / chemical burns",
+          "narrative": "chemical burns are the main concern"
+        },
+        "E": {
+          "name": "Eye injuries",
+          "narrative": "eye injuries are the main concern"
+        },
+        "F": {
+          "name": "Contaminated water",
+          "narrative": "contaminated water is the main concern"
+        },
+        "G": {
+          "name": "Contaminated buildings",
+          "narrative": "contaminated buildings are the main concern"
+        },
+        "H": {
+          "name": "Need for decontamination",
+          "narrative": "decontamination is the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Welfare checks / search",
+          "narrative": "welfare checks or search is the main concern"
+        },
+        "M": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "N": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "O": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        }
+      }
+    },
+    "Y": {
+      "label": "Radiation / nuclear",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Exposure effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Plume / release",
+          "narrative": "a plume or release is the main concern"
+        },
+        "C": {
+          "name": "External exposure",
+          "narrative": "external exposure is the main concern"
+        },
+        "D": {
+          "name": "Contamination of people",
+          "narrative": "contamination of people is the main concern"
+        },
+        "E": {
+          "name": "Contamination of land / water",
+          "narrative": "contamination of land or water is the main concern"
+        },
+        "F": {
+          "name": "Need for decontamination",
+          "narrative": "decontamination is the main concern"
+        },
+        "G": {
+          "name": "Potassium iodide / prophylaxis",
+          "narrative": "potassium iodide or prophylaxis is the main concern"
+        },
+        "H": {
+          "name": "Exclusion zone",
+          "narrative": "an exclusion zone is the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Welfare checks / search",
+          "narrative": "welfare checks or search is the main concern"
+        },
+        "M": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "N": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "O": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        }
+      }
+    }
+  },
+  "official_response": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "official response is unknown"
+    },
+    "B": {
+      "name": "Local public safety",
+      "narrative": "local public safety is monitoring the situation"
+    },
+    "C": {
+      "name": "Local public safety",
+      "narrative": "local public safety is responding to the situation"
+    },
+    "D": {
+      "name": "EOC",
+      "narrative": "the EOC is monitoring the situation"
+    },
+    "E": {
+      "name": "EOC",
+      "narrative": "the EOC is responding"
+    },
+    "F": {
+      "name": "State agencies/officials",
+      "narrative": "state agencies and or officials are monitoring the situation"
+    },
+    "G": {
+      "name": "State agencies/officials",
+      "narrative": "state agencies and or officials are responding to the situation"
+    },
+    "H": {
+      "name": "National Guard",
+      "narrative": "the National Guard is monitoring the situation"
+    },
+    "I": {
+      "name": "National Guard",
+      "narrative": "the National Guard is responding to the situation"
+    },
+    "J": {
+      "name": "Health dept",
+      "narrative": "the health department is monitoring the situation"
+    },
+    "K": {
+      "name": "Health dept",
+      "narrative": "the health department is responding to the situation"
+    },
+    "L": {
+      "name": "Public alerts issued",
+      "narrative": "public alerts have been issued"
+    },
+    "M": {
+      "name": "Isolation / quarantine ordered",
+      "narrative": "isolation or quarantine has been ordered"
+    },
+    "N": {
+      "name": "FEMA",
+      "narrative": "FEMA is monitoring the situation"
+    },
+    "O": {
+      "name": "FEMA",
+      "narrative": "FEMA is responding to the situation"
+    },
+    "P": {
+      "name": "Federal agencies/officials",
+      "narrative": "federal authorities are monitoring the situation"
+    },
+    "Q": {
+      "name": "Federal agencies/officials",
+      "narrative": "federal authorities are responding to the situation"
+    },
+    "R": {
+      "name": "Red Cross",
+      "narrative": "the Red Cross is monitoring the situation"
+    },
+    "S": {
+      "name": "Red Cross",
+      "narrative": "the Red Cross is responding to the situation"
+    },
+    "T": {
+      "name": "Law enforcement",
+      "narrative": "law enforcement is monitoring the situation"
+    },
+    "U": {
+      "name": "Law enforcement",
+      "narrative": "law enforcement is responding to the situation"
+    },
+    "V": {
+      "name": "CDC",
+      "narrative": "the CDC is monitoring the situation"
+    },
+    "W": {
+      "name": "CDC",
+      "narrative": "the CDC is responding to the situation"
+    },
+    "X": {
+      "name": "Boil-water / do-not-drink",
+      "narrative": "a boil-water or do-not-drink order is in effect"
+    },
+    "Y": {
+      "name": "Epidemic / PHE declared",
+      "narrative": "an epidemic or public-health emergency has been declared"
+    },
+    "Z": {
+      "name": "State of emergency",
+      "narrative": "a state of emergency has been declared"
+    },
+    "*** Monitoring ***": {
+      "items": [
+        "D",
+        "N",
+        "J",
+        "T",
+        "B",
+        "H",
+        "P",
+        "R",
+        "F",
+        "V"
+      ],
+      "order": 1
+    },
+    "*** Responding ***": {
+      "items": [
+        "E",
+        "O",
+        "K",
+        "U",
+        "C",
+        "I",
+        "Q",
+        "S",
+        "G",
+        "W"
+      ],
+      "order": 2
+    },
+    "*** Official Orders ***": {
+      "items": [
+        "L",
+        "M",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 3
+    }
+  },
+  "information_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "trust and source are unknown"
+    },
+    "*** NATO Admiralty content matrix ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
+      ],
+      "order": 1
+    },
+    "*** Trust matrix ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P"
+      ],
+      "order": 2,
+      "description": "Trust matrix:\nHigh: Confirmed by multiple credible and independent sources.\nMedium: Plausible with partial corroboration or one strong source.\nLow: Single-source, weakly supported, conflicting, or unconfirmed.",
+      "show_in_report": true
+    },
+    "*** Sources ***": {
+      "items": [
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 3
+    },
+    "B": {
+      "name": "Confirmed",
+      "narrative": "the content is confirmed"
+    },
+    "C": {
+      "name": "Probably true",
+      "narrative": "the content is probably true"
+    },
+    "D": {
+      "name": "Possibly true",
+      "narrative": "the content is possibly true"
+    },
+    "E": {
+      "name": "Doubtfully true",
+      "narrative": "the content is doubtfully true"
+    },
+    "F": {
+      "name": "Improbable",
+      "narrative": "the content is improbable"
+    },
+    "G": {
+      "name": "Cannot be judged",
+      "narrative": "the content cannot be judged"
+    },
+    "H": {
+      "name": "Trusted high",
+      "narrative": "the source is trusted and corroboration is high"
+    },
+    "I": {
+      "name": "Trusted medium",
+      "narrative": "the source is trusted and corroboration is medium"
+    },
+    "J": {
+      "name": "Trusted low",
+      "narrative": "the source is trusted and corroboration is low"
+    },
+    "K": {
+      "name": "Questionable high",
+      "narrative": "the source is questionable and corroboration is high"
+    },
+    "L": {
+      "name": "Questionable medium",
+      "narrative": "the source is questionable and corroboration is medium"
+    },
+    "M": {
+      "name": "Questionable low",
+      "narrative": "the source is questionable and corroboration is low"
+    },
+    "N": {
+      "name": "Unknown high",
+      "narrative": "the source is unknown and corroboration is high"
+    },
+    "O": {
+      "name": "Unknown medium",
+      "narrative": "the source is unknown and corroboration is medium"
+    },
+    "P": {
+      "name": "Unknown low",
+      "narrative": "the source is unknown and corroboration is low"
+    },
+    "Q": {
+      "name": "Official source",
+      "narrative": "information is from an official source"
+    },
+    "R": {
+      "name": "Mainstream media",
+      "narrative": "information is from mainstream media"
+    },
+    "S": {
+      "name": "Independent media",
+      "narrative": "information is from independent media"
+    },
+    "T": {
+      "name": "Social media",
+      "narrative": "information is from social media"
+    },
+    "U": {
+      "name": "First-hand observation",
+      "narrative": "information is based on first-hand observation"
+    },
+    "V": {
+      "name": "OTA (RF) familiar station",
+      "narrative": "this information was received over the air from a familiar station"
+    },
+    "W": {
+      "name": "OTA (RF) unfamiliar station",
+      "narrative": "this information was received over the air from an unfamiliar station"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved trust or source code"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved trust or source code"
+    },
+    "Z": {
+      "name": "Exercise traffic",
+      "narrative": "this is exercise traffic only"
+    }
+  },
+  "station_response": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "this station's status is unknown"
+    },
+    "*** Full operations ***": {
+      "items": [
+        "C",
+        "E",
+        "B",
+        "D"
+      ],
+      "order": 1
+    },
+    "*** Partial operations ***": {
+      "items": [
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O"
+      ],
+      "order": 2
+    },
+    "*** Off air ***": {
+      "items": [
+        "P",
+        "U",
+        "V",
+        "W",
+        "X"
+      ],
+      "order": 3
+    },
+    "*** Logistics ***": {
+      "items": [
+        "Q",
+        "S",
+        "R",
+        "T",
+        "Y"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "No impact",
+      "narrative": "this station is at full operations with no impact"
+    },
+    "C": {
+      "name": "Minor impact",
+      "narrative": "this station is at full operations with minor impact"
+    },
+    "D": {
+      "name": "Not in impact zone",
+      "narrative": "this station is at full operations and not in the impact zone"
+    },
+    "E": {
+      "name": "Monitoring",
+      "narrative": "this station is at full operations and monitoring the situation"
+    },
+    "F": {
+      "name": "Antenna / RF limited",
+      "narrative": "this station is at partial operations with antenna or RF limits"
+    },
+    "G": {
+      "name": "Battery / reduced power",
+      "narrative": "this station is at partial operations on battery or reduced power"
+    },
+    "H": {
+      "name": "Daylight only",
+      "narrative": "this station is at partial operations, daylight only, due to power"
+    },
+    "I": {
+      "name": "Irregular / unscheduled",
+      "narrative": "this station is at partial operations on an irregular or unscheduled basis"
+    },
+    "J": {
+      "name": "Manpower shortage",
+      "narrative": "this station is at partial operations due to a manpower shortage"
+    },
+    "K": {
+      "name": "Nets only",
+      "narrative": "this station is at partial operations, nets only"
+    },
+    "L": {
+      "name": "Night only",
+      "narrative": "this station is at partial operations, nighttime only, due to power"
+    },
+    "M": {
+      "name": "Receive only",
+      "narrative": "this station is at partial operations, receive only"
+    },
+    "N": {
+      "name": "Top of the hour only",
+      "narrative": "this station is at partial operations, top of the hour only"
+    },
+    "O": {
+      "name": "Unattended",
+      "narrative": "this station is at partial operations and unattended"
+    },
+    "P": {
+      "name": "Equipment failure",
+      "narrative": "this station is off the air due to equipment failure"
+    },
+    "U": {
+      "name": "Equipment reconfiguration",
+      "narrative": "this station is off the air for equipment reconfiguration"
+    },
+    "V": {
+      "name": "Evacuating",
+      "narrative": "this station is evacuating and going off the air"
+    },
+    "W": {
+      "name": "Shelter in place",
+      "narrative": "this station is off the air and sheltering in place"
+    },
+    "X": {
+      "name": "Storms",
+      "narrative": "this station is off the air due to storms"
+    },
+    "Q": {
+      "name": "Needing shelter",
+      "narrative": "this station is needing shelter"
+    },
+    "R": {
+      "name": "Offering shelter",
+      "narrative": "this station is able to offer shelter"
+    },
+    "S": {
+      "name": "Needing supplies",
+      "narrative": "this station is needing supplies"
+    },
+    "T": {
+      "name": "Offering supplies",
+      "narrative": "this station is able to offer supplies"
+    },
+    "Y": {
+      "name": "Relocated (alternate QTH)",
+      "narrative": "this station has relocated to an alternate location"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved station status code"
+    }
+  },
+  "emergency_group_order": [
+    "*** Respiratory / close contact ***",
+    "*** Food, water, and gut ***",
+    "*** Blood, animal, and insect ***",
+    "*** Exposure ***"
+  ],
+  "impact_group_order": [
+    "*** Health effects ***",
+    "*** Community / system ***",
+    "*** Life safety ***",
+    "*** Reserved ***"
+  ],
+  "official_response_group_order": [
+    "*** Monitoring ***",
+    "*** Responding ***",
+    "*** Official Orders ***"
+  ],
+  "group_descriptions": {
+    "*** Trust matrix ***": "Trust matrix:\nHigh: Confirmed by multiple credible and independent sources.\nMedium: Plausible with partial corroboration or one strong source.\nLow: Single-source, weakly supported, conflicting, or unconfirmed.",
+    "*** Respiratory / close contact ***": "Respiratory / close contact:\nSpread by air, droplets, or close contact. Includes flu, COVID, measles, TB, strep (including invasive disease), meningococcal disease, and unnamed respiratory clusters.\nPrevention: Stay home if ill, improve ventilation, and follow isolation guidance from public health.",
+    "*** Food, water, and gut ***": "Food, water, and gut:\nSpread by food, water, or feces. Includes foodborne and waterborne outbreaks, hepatitis A, and unnamed GI illness.\nPrevention: Use safe water, wash hands after the bathroom, and cook and store food properly.",
+    "*** Blood, animal, and insect ***": "Blood, animal, and insect:\nSpread by blood, sex, animals, or insects. Includes rabies, mosquito- and tick-borne disease, viral hemorrhagic fever, and similar.\nPrevention: Avoid bites and animal saliva, do not touch blood, and use PPE if you must give care.",
+    "*** Exposure ***": "Exposure:\nNot a normal infection. Chemical, radiation, nuclear, or an unknown biological agent.\nPrevention: Get upwind or out of the area, avoid plume and runoff, and wait for official decontamination guidance."
+  },
+  "hide_reserved": true,
+  "severity": {
+    "A": {
+      "name": "Unknown",
+      "narrative": ""
+    },
+    "*** Minor ***": {
+      "items": [
+        "B",
+        "C"
+      ],
+      "order": 1
+    },
+    "*** Moderate ***": {
+      "items": [
+        "D",
+        "E"
+      ],
+      "order": 2
+    },
+    "*** Severe ***": {
+      "items": [
+        "F",
+        "G",
+        "H"
+      ],
+      "order": 3
+    },
+    "*** Extreme ***": {
+      "items": [
+        "I",
+        "J"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "Low / minor",
+      "narrative": "minor"
+    },
+    "C": {
+      "name": "Elevated",
+      "narrative": "elevated"
+    },
+    "D": {
+      "name": "Moderate",
+      "narrative": "moderate"
+    },
+    "E": {
+      "name": "Moderate-to-strong",
+      "narrative": "moderate-to-strong"
+    },
+    "F": {
+      "name": "Strong",
+      "narrative": "strong"
+    },
+    "G": {
+      "name": "Very strong",
+      "narrative": "very strong"
+    },
+    "H": {
+      "name": "Severe",
+      "narrative": "severe"
+    },
+    "I": {
+      "name": "Extreme",
+      "narrative": "extreme"
+    },
+    "J": {
+      "name": "Catastrophic",
+      "narrative": "catastrophic"
+    },
+    "K": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "L": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "M": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "N": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "O": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "P": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Q": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "R": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "S": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "T": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    }
+  }
+}

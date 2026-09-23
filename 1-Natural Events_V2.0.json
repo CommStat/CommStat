@@ -1,0 +1,3939 @@
+{
+  "gui_titles": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Event / Hazard:",
+    "status": "3. Phase:",
+    "severity": "4. Severity:",
+    "primary": "5. Impact:",
+    "secondary": "6. Official Response:",
+    "source": "7. Trust / Source:",
+    "station": "8. Station Status:"
+  },
+  "gui_titles_v3": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Event / Hazard:",
+    "status": "3. Phase:",
+    "primary": "5. Impact:",
+    "secondary_impact": "6. Official Response:",
+    "severity": "4. Severity:",
+    "source": "7. Trust / Source:",
+    "station": "8. Station Status:",
+    "secondary": "6. Official Response:"
+  },
+  "emergency_type": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "an unknown hazard",
+      "default_phase": "A",
+      "default_response": "A",
+      "default_severity": "A",
+      "default_source": "A",
+      "default_station": "B"
+    },
+    "*** Geologic ***": {
+      "B": {
+        "name": "Earthquake",
+        "narrative": "an earthquake",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "C": {
+        "name": "Landslide / debris flow / avalanche",
+        "narrative": "a landslide, debris flow, or avalanche",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "E": {
+        "name": "Tsunami",
+        "narrative": "a tsunami",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "D": {
+        "name": "Volcanic activity",
+        "narrative": "volcanic activity",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      }
+    },
+    "*** Severe weather ***": {
+      "S": {
+        "name": "Cold",
+        "narrative": "a cold event",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "P": {
+        "name": "Dam / levee issue",
+        "narrative": "a dam or levee issue",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "D",
+        "default_station": "B"
+      },
+      "O": {
+        "name": "Drought",
+        "narrative": "a drought",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "L": {
+        "name": "Dust / sand storm",
+        "narrative": "a dust or sand storm",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "N": {
+        "name": "Flood",
+        "narrative": "a flood",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "C",
+        "default_station": "B"
+      },
+      "F": {
+        "name": "Fog",
+        "narrative": "fog",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "E",
+        "default_station": "B"
+      },
+      "J": {
+        "name": "Hail",
+        "narrative": "hail",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "K": {
+        "name": "Heat",
+        "narrative": "a heat event",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "R": {
+        "name": "Ice storm",
+        "narrative": "an ice storm",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "M": {
+        "name": "Rain",
+        "narrative": "rain",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Q": {
+        "name": "Snow",
+        "narrative": "snow",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "H": {
+        "name": "Thunderstorm",
+        "narrative": "a thunderstorm",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "C",
+        "default_station": "B"
+      },
+      "G": {
+        "name": "Tornado",
+        "narrative": "a tornado",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "I": {
+        "name": "Wind",
+        "narrative": "damaging wind",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "W": {
+        "name": "Blizzard",
+        "narrative": "a blizzard",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "items": [
+        "W",
+        "S",
+        "P",
+        "O",
+        "L",
+        "N",
+        "F",
+        "J",
+        "K",
+        "R",
+        "M",
+        "Q",
+        "H",
+        "G",
+        "I"
+      ]
+    },
+    "*** Tropical / coastal ***": {
+      "T": {
+        "name": "Hurricane / typhoon",
+        "narrative": "a hurricane",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "V": {
+        "name": "Storm surge / coastal flooding",
+        "narrative": "storm surge or coastal flooding",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "U": {
+        "name": "Tropical storm",
+        "narrative": "a tropical storm",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "items": [
+        "T",
+        "V",
+        "U"
+      ]
+    },
+    "*** Fire ***": {
+      "Y": {
+        "name": "Structure fire",
+        "narrative": "a structure fire",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "X": {
+        "name": "Wildfire",
+        "narrative": "a wildfire",
+        "default_phase": "F",
+        "default_response": "D",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "B",
+        "default_station": "B"
+      }
+    },
+    "*** Other ***": {
+      "Z": {
+        "name": "Space weather / geomagnetic",
+        "narrative": "a space-weather or geomagnetic event",
+        "default_phase": "F",
+        "default_response": "P",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_impact": "D",
+        "default_station": "B"
+      }
+    }
+  },
+  "status_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "the phase is unknown",
+      "family": "unknown"
+    },
+    "*** Issued products ***": {
+      "items": [
+        "B",
+        "C",
+        "D"
+      ],
+      "description": "An official product has been issued.",
+      "order": 1
+    },
+    "*** Before it starts ***": {
+      "items": [
+        "E",
+        "F",
+        "G"
+      ],
+      "description": "Event has not yet started or is only threatened.",
+      "order": 2
+    },
+    "*** While it is happening ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M"
+      ],
+      "description": "Event is currently happening.",
+      "order": 3
+    },
+    "*** After / closeout ***": {
+      "items": [
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "T"
+      ],
+      "description": "Event has ended, been cancelled, or all clear.",
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "S",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "description": "Placeholders for later phase codes.",
+      "order": 5
+    },
+    "B": {
+      "name": "Advisory",
+      "narrative": "advisory has been issued",
+      "family": "issued"
+    },
+    "C": {
+      "name": "Watch",
+      "narrative": "watch has been issued",
+      "family": "issued"
+    },
+    "D": {
+      "name": "Warning",
+      "narrative": "warning has been issued",
+      "family": "issued"
+    },
+    "E": {
+      "name": "Possible",
+      "narrative": "is possible",
+      "family": "state"
+    },
+    "F": {
+      "name": "Expected",
+      "narrative": "is expected",
+      "family": "state"
+    },
+    "G": {
+      "name": "Imminent",
+      "narrative": "is imminent",
+      "family": "state"
+    },
+    "H": {
+      "name": "Occurring now",
+      "narrative": "is occurring now",
+      "family": "state"
+    },
+    "I": {
+      "name": "Intensifying",
+      "narrative": "is intensifying",
+      "family": "state"
+    },
+    "J": {
+      "name": "Peak intensity",
+      "narrative": "is at peak intensity",
+      "family": "state"
+    },
+    "K": {
+      "name": "Weakening",
+      "narrative": "is weakening",
+      "family": "state"
+    },
+    "L": {
+      "name": "Continuing",
+      "narrative": "is continuing",
+      "family": "state"
+    },
+    "M": {
+      "name": "Spreading",
+      "narrative": "is spreading",
+      "family": "state"
+    },
+    "N": {
+      "name": "Concluded",
+      "narrative": "has concluded",
+      "family": "state"
+    },
+    "O": {
+      "name": "Dissipated",
+      "narrative": "has dissipated",
+      "family": "state"
+    },
+    "P": {
+      "name": "Cancelled",
+      "narrative": "has been cancelled",
+      "family": "state"
+    },
+    "Q": {
+      "name": "Downgraded",
+      "narrative": "has been downgraded",
+      "family": "state"
+    },
+    "R": {
+      "name": "All clear",
+      "narrative": "All clear has been given.",
+      "family": "standalone"
+    },
+    "S": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "T": {
+      "name": "Prevented / stopped",
+      "narrative": "was prevented or stopped",
+      "family": "state"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    }
+  },
+  "shared_impacts": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "the impact is unknown"
+    },
+    "*** Life safety ***": {
+      "items": [
+        "I",
+        "J",
+        "K",
+        "L",
+        "U",
+        "V"
+      ],
+      "order": 3
+    },
+    "*** Reserved ***": {
+      "items": [
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 4
+    },
+    "B": {
+      "name": "Damage to property",
+      "narrative": "property damage is the main concern"
+    },
+    "C": {
+      "name": "Damage to infrastructure",
+      "narrative": "infrastructure damage is the main concern"
+    },
+    "D": {
+      "name": "Utilities disrupted",
+      "narrative": "utility disruption is the main concern"
+    },
+    "E": {
+      "name": "Travel disrupted",
+      "narrative": "travel disruption is the main concern"
+    },
+    "F": {
+      "name": "Environmental damage",
+      "narrative": "environmental damage is the main concern"
+    },
+    "G": {
+      "name": "Water / supply shortage",
+      "narrative": "a water or supply shortage is the main concern"
+    },
+    "H": {
+      "name": "Hazardous conditions",
+      "narrative": "hazardous conditions are the main concern"
+    },
+    "I": {
+      "name": "Injuries",
+      "narrative": "injuries are the main concern"
+    },
+    "J": {
+      "name": "Fatalities",
+      "narrative": "fatalities are the main concern"
+    },
+    "K": {
+      "name": "Missing persons",
+      "narrative": "missing persons are the main concern"
+    },
+    "L": {
+      "name": "Search and rescue",
+      "narrative": "search and rescue is the main concern"
+    },
+    "M": {
+      "name": "Isolated / stranded",
+      "narrative": "isolated or stranded people are the main concern"
+    },
+    "N": {
+      "name": "Access blocked",
+      "narrative": "blocked access is the main concern"
+    },
+    "O": {
+      "name": "People displaced",
+      "narrative": "displaced people are the main concern"
+    },
+    "P": {
+      "name": "Shelter demand",
+      "narrative": "shelter demand is the main concern"
+    },
+    "Q": {
+      "name": "School / business closed",
+      "narrative": "school or business closures are the main concern"
+    },
+    "R": {
+      "name": "Debris",
+      "narrative": "debris is the main concern"
+    },
+    "S": {
+      "name": "Structural collapse",
+      "narrative": "structural collapse is the main concern"
+    },
+    "T": {
+      "name": "Agriculture / livestock",
+      "narrative": "agriculture or livestock loss is the main concern"
+    },
+    "U": {
+      "name": "Air quality",
+      "narrative": "air quality is the main concern"
+    },
+    "V": {
+      "name": "Contamination",
+      "narrative": "contamination is the main concern"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "*** Ground effects ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "R",
+        "S",
+        "T"
+      ],
+      "order": 1
+    },
+    "*** Community / access ***": {
+      "items": [
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q"
+      ],
+      "order": 2
+    }
+  },
+  "impact_overrides": {
+    "H": {
+      "label": "Thunderstorm",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Weather effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "I"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "J",
+            "K",
+            "L",
+            "M"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "B": {
+          "name": "Heavy rain",
+          "narrative": "heavy rain is the main concern"
+        },
+        "C": {
+          "name": "Flooding",
+          "narrative": "flooding is the main concern"
+        },
+        "D": {
+          "name": "Available",
+          "narrative": "Available"
+        },
+        "E": {
+          "name": "Wind damage",
+          "narrative": "wind damage is the main concern"
+        },
+        "F": {
+          "name": "Hail damage",
+          "narrative": "hail damage is the main concern"
+        },
+        "G": {
+          "name": "Available",
+          "narrative": "available"
+        },
+        "H": {
+          "name": "Lightning",
+          "narrative": "lightning is the main concern"
+        },
+        "I": {
+          "name": "Downed trees / lines",
+          "narrative": "downed trees or lines are the main concern"
+        },
+        "J": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "K": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "L": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "M": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "N": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "O": {
+          "name": "Access blocked",
+          "narrative": "blocked access is the main concern"
+        },
+        "P": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "Q": {
+          "name": "Debris",
+          "narrative": "debris is the main concern"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "N",
+            "O",
+            "P"
+          ],
+          "order": 10
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "Q"
+          ],
+          "order": 11
+        }
+      }
+    },
+    "N": {
+      "label": "Flood",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Water effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L",
+            "M",
+            "V"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "U",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 5
+        },
+        "B": {
+          "name": "Flash flooding",
+          "narrative": "flash flooding is the main concern"
+        },
+        "C": {
+          "name": "River / area flooding",
+          "narrative": "river or area flooding is the main concern"
+        },
+        "D": {
+          "name": "Coastal flooding",
+          "narrative": "coastal flooding is the main concern"
+        },
+        "E": {
+          "name": "Dam / levee failure",
+          "narrative": "a dam or levee failure is the main concern"
+        },
+        "F": {
+          "name": "Standing water",
+          "narrative": "standing water is the main concern"
+        },
+        "G": {
+          "name": "Roadway flooding",
+          "narrative": "roadway flooding is the main concern"
+        },
+        "H": {
+          "name": "Water supply impacted",
+          "narrative": "impacted water supply is the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Swift-water rescue",
+          "narrative": "swift-water rescue is the main concern"
+        },
+        "N": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "O": {
+          "name": "Access blocked",
+          "narrative": "blocked access is the main concern"
+        },
+        "P": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "Q": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "R": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "S": {
+          "name": "Debris",
+          "narrative": "debris is the main concern"
+        },
+        "T": {
+          "name": "Agriculture / livestock",
+          "narrative": "agriculture or livestock loss is the main concern"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "N",
+            "O",
+            "P",
+            "Q",
+            "R"
+          ],
+          "order": 3
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "S",
+            "T"
+          ],
+          "order": 4
+        }
+      }
+    },
+    "X": {
+      "label": "Wildfire",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Fire effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L",
+            "R"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "B": {
+          "name": "Smoke",
+          "narrative": "smoke is the main concern"
+        },
+        "C": {
+          "name": "Spot fires",
+          "narrative": "spot fires are the main concern"
+        },
+        "D": {
+          "name": "Structure threat",
+          "narrative": "threatened structures are the main concern"
+        },
+        "E": {
+          "name": "Structures lost",
+          "narrative": "lost structures are the main concern"
+        },
+        "F": {
+          "name": "Timber / land burned",
+          "narrative": "burned timber or land is the main concern"
+        },
+        "G": {
+          "name": "Evacuation routes threatened",
+          "narrative": "threatened evacuation routes are the main concern"
+        },
+        "H": {
+          "name": "Air quality hazard",
+          "narrative": "hazardous air quality is the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "N": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "O": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "P": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "Q": {
+          "name": "Debris",
+          "narrative": "debris is the main concern"
+        },
+        "R": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P"
+          ],
+          "order": 10
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "Q"
+          ],
+          "order": 11
+        }
+      }
+    },
+    "Q": {
+      "label": "Snow",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Winter effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "B": {
+          "name": "Blowing / drifting snow",
+          "narrative": "blowing or drifting snow is the main concern"
+        },
+        "C": {
+          "name": "Whiteout / zero visibility",
+          "narrative": "whiteout or zero visibility is the main concern"
+        },
+        "D": {
+          "name": "Ice accumulation",
+          "narrative": "ice accumulation is the main concern"
+        },
+        "E": {
+          "name": "Travel impossible or closed",
+          "narrative": "closed or impossible travel is the main concern"
+        },
+        "F": {
+          "name": "Roof / structure strain",
+          "narrative": "roof or structure strain is the main concern"
+        },
+        "G": {
+          "name": "Isolated or stranded people",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "H": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "N": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "O": {
+          "name": "Structural collapse",
+          "narrative": "structural collapse is the main concern"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "H",
+            "M",
+            "N"
+          ],
+          "order": 10
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "O"
+          ],
+          "order": 11
+        }
+      }
+    },
+    "B": {
+      "label": "Earthquake",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "R",
+            "S"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L",
+            "T"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "T": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Infrastructure damage",
+          "narrative": "infrastructure damage is the main concern"
+        },
+        "C": {
+          "name": "Trapped people",
+          "narrative": "trapped people are the main concern"
+        },
+        "D": {
+          "name": "Aftershocks",
+          "narrative": "aftershocks are the main concern"
+        },
+        "E": {
+          "name": "Gas leak / fire",
+          "narrative": "a gas leak or fire is the main concern"
+        },
+        "F": {
+          "name": "Road / bridge failure",
+          "narrative": "road or bridge failure is the main concern"
+        },
+        "G": {
+          "name": "Utility disruption",
+          "narrative": "utility disruption is the main concern"
+        },
+        "H": {
+          "name": "Landslide triggered",
+          "narrative": "a triggered landslide is the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "N": {
+          "name": "Access blocked",
+          "narrative": "blocked access is the main concern"
+        },
+        "O": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "P": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "Q": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "R": {
+          "name": "Debris",
+          "narrative": "debris is the main concern"
+        },
+        "S": {
+          "name": "Structural collapse",
+          "narrative": "structural collapse is the main concern"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q"
+          ],
+          "order": 10
+        }
+      }
+    },
+    "C": {
+      "label": "Landslide / debris flow / avalanche",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Slope effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "H",
+            "I",
+            "J",
+            "K"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "O",
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Road buried or blocked",
+          "narrative": "a buried or blocked road is the main concern"
+        },
+        "C": {
+          "name": "Homes undermined",
+          "narrative": "homes undermined is the main concern"
+        },
+        "D": {
+          "name": "Debris flow",
+          "narrative": "debris flow is the main concern"
+        },
+        "E": {
+          "name": "River blocked / dammed",
+          "narrative": "a blocked or dammed river is the main concern"
+        },
+        "F": {
+          "name": "Evacuation route cut",
+          "narrative": "a cut evacuation route is the main concern"
+        },
+        "G": {
+          "name": "Utility disruption",
+          "narrative": "utility disruption is the main concern"
+        },
+        "H": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "I": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "J": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "K": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "L": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "M": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "N": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "O": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "L",
+            "M",
+            "N"
+          ],
+          "order": 10
+        }
+      }
+    },
+    "D": {
+      "label": "Volcanic activity",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Volcanic effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L",
+            "Q"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Ashfall",
+          "narrative": "ashfall is the main concern"
+        },
+        "C": {
+          "name": "Lava flow",
+          "narrative": "lava flow is the main concern"
+        },
+        "D": {
+          "name": "Pyroclastic flow",
+          "narrative": "pyroclastic flow is the main concern"
+        },
+        "E": {
+          "name": "Lahar / mudflow",
+          "narrative": "a lahar or mudflow is the main concern"
+        },
+        "F": {
+          "name": "Gas / air quality",
+          "narrative": "volcanic gas or air quality is the main concern"
+        },
+        "G": {
+          "name": "Aviation ash hazard",
+          "narrative": "an aviation ash hazard is the main concern"
+        },
+        "H": {
+          "name": "Evacuation routes threatened",
+          "narrative": "threatened evacuation routes are the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "N": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "O": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "P": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "Q": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P"
+          ],
+          "order": 10
+        }
+      }
+    },
+    "E": {
+      "label": "Tsunami",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Wave effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "H",
+            "I",
+            "J",
+            "K",
+            "O"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Wave arrival",
+          "narrative": "wave arrival is the main concern"
+        },
+        "C": {
+          "name": "Coastal inundation",
+          "narrative": "coastal inundation is the main concern"
+        },
+        "D": {
+          "name": "Harbor / vessel damage",
+          "narrative": "harbor or vessel damage is the main concern"
+        },
+        "E": {
+          "name": "Drawdown / unusual tide",
+          "narrative": "drawdown or an unusual tide is the main concern"
+        },
+        "F": {
+          "name": "Coastal roads cut",
+          "narrative": "cut coastal roads are the main concern"
+        },
+        "G": {
+          "name": "People in inundation zone",
+          "narrative": "people in the inundation zone are the main concern"
+        },
+        "H": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "I": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "J": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "K": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "L": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "M": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "N": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "O": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "L",
+            "M",
+            "N"
+          ],
+          "order": 10
+        }
+      }
+    },
+    "G": {
+      "label": "Tornado",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Storm effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Damage path",
+          "narrative": "a damage path is the main concern"
+        },
+        "C": {
+          "name": "Homes destroyed",
+          "narrative": "destroyed homes are the main concern"
+        },
+        "D": {
+          "name": "Debris",
+          "narrative": "debris is the main concern"
+        },
+        "E": {
+          "name": "Downed trees / lines",
+          "narrative": "downed trees or lines are the main concern"
+        },
+        "F": {
+          "name": "Vehicles tossed",
+          "narrative": "tossed vehicles are the main concern"
+        },
+        "G": {
+          "name": "People unaccounted for",
+          "narrative": "unaccounted-for people are the main concern"
+        },
+        "H": {
+          "name": "Utility disruption",
+          "narrative": "utility disruption is the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "N": {
+          "name": "Access blocked",
+          "narrative": "blocked access is the main concern"
+        },
+        "O": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "P": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "Q": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q"
+          ],
+          "order": 10
+        },
+        "*** Ground effects ***": {
+          "items": [],
+          "order": 11
+        }
+      }
+    },
+    "T": {
+      "label": "Hurricane / typhoon",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Tropical effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L",
+            "T"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "T": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Damaging wind",
+          "narrative": "damaging wind is the main concern"
+        },
+        "C": {
+          "name": "Storm surge",
+          "narrative": "storm surge is the main concern"
+        },
+        "D": {
+          "name": "Inland flooding",
+          "narrative": "inland flooding is the main concern"
+        },
+        "E": {
+          "name": "Tornadoes",
+          "narrative": "tornadoes are the main concern"
+        },
+        "F": {
+          "name": "Power outages",
+          "narrative": "power outages are the main concern"
+        },
+        "G": {
+          "name": "Coastal inundation",
+          "narrative": "coastal inundation is the main concern"
+        },
+        "H": {
+          "name": "Travel / port closure",
+          "narrative": "travel or port closure is the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "N": {
+          "name": "Access blocked",
+          "narrative": "blocked access is the main concern"
+        },
+        "O": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "P": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "Q": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "R": {
+          "name": "Debris",
+          "narrative": "debris is the main concern"
+        },
+        "S": {
+          "name": "Agriculture / livestock",
+          "narrative": "agriculture or livestock loss is the main concern"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q"
+          ],
+          "order": 10
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "R",
+            "S"
+          ],
+          "order": 11
+        }
+      }
+    },
+    "U": {
+      "label": "Tropical storm",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Tropical effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L",
+            "S"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Damaging wind",
+          "narrative": "damaging wind is the main concern"
+        },
+        "C": {
+          "name": "Storm surge",
+          "narrative": "storm surge is the main concern"
+        },
+        "D": {
+          "name": "Inland flooding",
+          "narrative": "inland flooding is the main concern"
+        },
+        "E": {
+          "name": "Tornadoes",
+          "narrative": "tornadoes are the main concern"
+        },
+        "F": {
+          "name": "Power outages",
+          "narrative": "power outages are the main concern"
+        },
+        "G": {
+          "name": "Coastal inundation",
+          "narrative": "coastal inundation is the main concern"
+        },
+        "H": {
+          "name": "Travel / port closure",
+          "narrative": "travel or port closure is the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "N": {
+          "name": "Access blocked",
+          "narrative": "blocked access is the main concern"
+        },
+        "O": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "P": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "Q": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "R": {
+          "name": "Debris",
+          "narrative": "debris is the main concern"
+        },
+        "S": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q"
+          ],
+          "order": 10
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "R"
+          ],
+          "order": 11
+        }
+      }
+    },
+    "V": {
+      "label": "Storm surge / coastal flooding",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Coastal effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "H",
+            "I",
+            "J",
+            "K",
+            "O"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Inundation",
+          "narrative": "inundation is the main concern"
+        },
+        "C": {
+          "name": "Tide / surge rising",
+          "narrative": "a rising tide or surge is the main concern"
+        },
+        "D": {
+          "name": "Coastal roads cut",
+          "narrative": "cut coastal roads are the main concern"
+        },
+        "E": {
+          "name": "Homes flooded",
+          "narrative": "flooded homes are the main concern"
+        },
+        "F": {
+          "name": "Islands / areas cut off",
+          "narrative": "cut-off islands or areas are the main concern"
+        },
+        "G": {
+          "name": "Dune / seawall failure",
+          "narrative": "dune or seawall failure is the main concern"
+        },
+        "H": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "I": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "J": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "K": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "L": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "M": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "N": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "O": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "L",
+            "M",
+            "N"
+          ],
+          "order": 10
+        }
+      }
+    },
+    "P": {
+      "label": "Dam / levee issue",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Structure effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "H",
+            "I",
+            "J",
+            "K",
+            "P"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Seepage / overtopping",
+          "narrative": "seepage or overtopping is the main concern"
+        },
+        "C": {
+          "name": "Controlled release",
+          "narrative": "a controlled release is the main concern"
+        },
+        "D": {
+          "name": "Possible failure",
+          "narrative": "possible failure is the main concern"
+        },
+        "E": {
+          "name": "Failure in progress",
+          "narrative": "failure in progress is the main concern"
+        },
+        "F": {
+          "name": "Downstream inundation",
+          "narrative": "downstream inundation is the main concern"
+        },
+        "G": {
+          "name": "Evacuation of floodplain",
+          "narrative": "floodplain evacuation is the main concern"
+        },
+        "H": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "I": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "J": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "K": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "L": {
+          "name": "Isolated / stranded",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "M": {
+          "name": "Access blocked",
+          "narrative": "blocked access is the main concern"
+        },
+        "N": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "O": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "P": {
+          "name": "Contamination",
+          "narrative": "contamination is the main concern"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "L",
+            "M",
+            "N",
+            "O"
+          ],
+          "order": 10
+        }
+      }
+    },
+    "R": {
+      "label": "Ice storm",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Winter effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "B": {
+          "name": "Ice accumulation",
+          "narrative": "ice accumulation is the main concern"
+        },
+        "C": {
+          "name": "Downed trees / lines",
+          "narrative": "downed trees or lines are the main concern"
+        },
+        "D": {
+          "name": "Travel impossible or closed",
+          "narrative": "closed or impossible travel is the main concern"
+        },
+        "E": {
+          "name": "Power outages",
+          "narrative": "power outages are the main concern"
+        },
+        "F": {
+          "name": "Roof / structure ice load",
+          "narrative": "roof or structure ice load is the main concern"
+        },
+        "G": {
+          "name": "Roof / structure strain",
+          "narrative": "roof or structure strain is the main concern"
+        },
+        "H": {
+          "name": "Isolated or stranded people",
+          "narrative": "people are isolated or stranded"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "N": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "O": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "M",
+            "N",
+            "O"
+          ],
+          "order": 10
+        }
+      }
+    },
+    "K": {
+      "label": "Heat",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Heat effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "H",
+            "I",
+            "J",
+            "K"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "O",
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Heat illness",
+          "narrative": "heat illness is the main concern"
+        },
+        "C": {
+          "name": "Cooling centers needed",
+          "narrative": "need for cooling centers is the main concern"
+        },
+        "D": {
+          "name": "Power strain / outages",
+          "narrative": "power strain or outages are the main concern"
+        },
+        "E": {
+          "name": "Outdoor work unsafe",
+          "narrative": "unsafe outdoor work is the main concern"
+        },
+        "F": {
+          "name": "Vulnerable populations",
+          "narrative": "vulnerable populations are the main concern"
+        },
+        "G": {
+          "name": "Water shortage",
+          "narrative": "water shortage is the main concern"
+        },
+        "H": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "I": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "J": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "K": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "L": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "M": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "N": {
+          "name": "Agriculture / livestock",
+          "narrative": "agriculture or livestock loss is the main concern"
+        },
+        "O": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "L",
+            "M"
+          ],
+          "order": 10
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "N"
+          ],
+          "order": 11
+        }
+      }
+    },
+    "O": {
+      "label": "Drought",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Drought effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "H",
+            "I",
+            "J",
+            "K"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "M",
+            "N",
+            "O",
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "B": {
+          "name": "Water restrictions",
+          "narrative": "water restrictions are the main concern"
+        },
+        "C": {
+          "name": "Wells / supply failing",
+          "narrative": "failing wells or supply is the main concern"
+        },
+        "D": {
+          "name": "Crop / livestock loss",
+          "narrative": "crop or livestock loss is the main concern"
+        },
+        "E": {
+          "name": "Burn ban / fire risk",
+          "narrative": "burn ban or fire risk is the main concern"
+        },
+        "F": {
+          "name": "Dust / air quality",
+          "narrative": "dust or air quality is the main concern"
+        },
+        "G": {
+          "name": "Water haul needed",
+          "narrative": "need for water haul is the main concern"
+        },
+        "H": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "I": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "J": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "K": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "L": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "M": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "N": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "O": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "L"
+          ],
+          "order": 10
+        }
+      }
+    },
+    "W": {
+      "label": "Blizzard",
+      "impacts": {
+        "A": {
+          "name": "Unknown",
+          "narrative": "the impact is unknown"
+        },
+        "*** Winter effects ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G"
+          ],
+          "order": 1
+        },
+        "*** Life safety ***": {
+          "items": [
+            "I",
+            "J",
+            "K",
+            "L"
+          ],
+          "order": 2
+        },
+        "*** Reserved ***": {
+          "items": [
+            "P",
+            "Q",
+            "R",
+            "S",
+            "T",
+            "U",
+            "V",
+            "W",
+            "X",
+            "Y",
+            "Z"
+          ],
+          "order": 99
+        },
+        "B": {
+          "name": "Blowing / drifting snow",
+          "narrative": "blowing or drifting snow is the main concern"
+        },
+        "C": {
+          "name": "Whiteout / zero visibility",
+          "narrative": "whiteout or zero visibility is the main concern"
+        },
+        "D": {
+          "name": "Ice accumulation",
+          "narrative": "ice accumulation is the main concern"
+        },
+        "E": {
+          "name": "Travel impossible or closed",
+          "narrative": "closed or impossible travel is the main concern"
+        },
+        "F": {
+          "name": "Roof / structure strain",
+          "narrative": "roof or structure strain is the main concern"
+        },
+        "G": {
+          "name": "Isolated or stranded people",
+          "narrative": "isolated or stranded people are the main concern"
+        },
+        "H": {
+          "name": "People displaced",
+          "narrative": "displaced people are the main concern"
+        },
+        "I": {
+          "name": "Injuries",
+          "narrative": "injuries are the main concern"
+        },
+        "J": {
+          "name": "Fatalities",
+          "narrative": "fatalities are the main concern"
+        },
+        "K": {
+          "name": "Missing persons",
+          "narrative": "missing persons are the main concern"
+        },
+        "L": {
+          "name": "Search and rescue",
+          "narrative": "search and rescue is the main concern"
+        },
+        "M": {
+          "name": "Shelter demand",
+          "narrative": "shelter demand is the main concern"
+        },
+        "N": {
+          "name": "School / business closed",
+          "narrative": "school or business closures are the main concern"
+        },
+        "O": {
+          "name": "Structural collapse",
+          "narrative": "structural collapse is the main concern"
+        },
+        "P": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Q": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "R": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "S": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "T": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "U": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "V": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "W": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "X": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Y": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "Z": {
+          "name": "Reserved",
+          "narrative": "a reserved impact code"
+        },
+        "*** Community / access ***": {
+          "items": [
+            "H",
+            "M",
+            "N"
+          ],
+          "order": 10
+        },
+        "*** Ground effects ***": {
+          "items": [
+            "O"
+          ],
+          "order": 11
+        }
+      }
+    }
+  },
+  "official_response": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "official response is unknown"
+    },
+    "B": {
+      "name": "Local public safety",
+      "narrative": "local public safety is monitoring the situation"
+    },
+    "C": {
+      "name": "Local public safety",
+      "narrative": "local public safety is responding to the situation"
+    },
+    "D": {
+      "name": "EOC",
+      "narrative": "the EOC is monitoring the situation"
+    },
+    "E": {
+      "name": "EOC",
+      "narrative": "the EOC is responding"
+    },
+    "F": {
+      "name": "State agencies/officials",
+      "narrative": "state agencies and or officials are monitoring the situation"
+    },
+    "G": {
+      "name": "State agencies/officials",
+      "narrative": "state agencies and or officials are responding to the situation"
+    },
+    "H": {
+      "name": "National Guard",
+      "narrative": "the National Guard is monitoring the situation"
+    },
+    "I": {
+      "name": "National Guard",
+      "narrative": "the National Guard is responding to the situation"
+    },
+    "J": {
+      "name": "Health dept",
+      "narrative": "the health department is monitoring the situation"
+    },
+    "K": {
+      "name": "Health dept",
+      "narrative": "the health department is responding to the situation"
+    },
+    "L": {
+      "name": "Public alerts issued",
+      "narrative": "public alerts have been issued"
+    },
+    "M": {
+      "name": "Shelter-in-place",
+      "narrative": "a shelter-in-place order is in effect"
+    },
+    "N": {
+      "name": "FEMA",
+      "narrative": "FEMA is monitoring the situation"
+    },
+    "O": {
+      "name": "FEMA",
+      "narrative": "FEMA is responding to the situation"
+    },
+    "P": {
+      "name": "Federal agencies/officials",
+      "narrative": "federal authorities are monitoring the situation"
+    },
+    "Q": {
+      "name": "Federal agencies/officials",
+      "narrative": "federal authorities are responding to the situation"
+    },
+    "R": {
+      "name": "Red Cross",
+      "narrative": "the Red Cross is monitoring the situation"
+    },
+    "S": {
+      "name": "Red Cross",
+      "narrative": "the Red Cross is responding to the situation"
+    },
+    "T": {
+      "name": "Law enforcement",
+      "narrative": "law enforcement is monitoring the situation"
+    },
+    "U": {
+      "name": "Law enforcement",
+      "narrative": "law enforcement is responding to the situation"
+    },
+    "V": {
+      "name": "FBI",
+      "narrative": "The FBI is monitoring the situation"
+    },
+    "W": {
+      "name": "FBI",
+      "narrative": "The FBI is responding to the situation"
+    },
+    "X": {
+      "name": "Evacuation warning",
+      "narrative": "an evacuation warning has been issued"
+    },
+    "Y": {
+      "name": "Evacuation ordered",
+      "narrative": "evacuations have been ordered"
+    },
+    "Z": {
+      "name": "State of emergency",
+      "narrative": "a state of emergency has been declared"
+    },
+    "*** Monitoring ***": {
+      "items": [
+        "D",
+        "N",
+        "J",
+        "T",
+        "B",
+        "H",
+        "P",
+        "R",
+        "F",
+        "V"
+      ],
+      "order": 1
+    },
+    "*** Responding ***": {
+      "items": [
+        "E",
+        "O",
+        "K",
+        "U",
+        "C",
+        "I",
+        "Q",
+        "S",
+        "G",
+        "W"
+      ],
+      "order": 2
+    },
+    "*** Official Orders ***": {
+      "items": [
+        "L",
+        "M",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 3
+    }
+  },
+  "information_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "trust and source are unknown"
+    },
+    "*** NATO Admiralty content matrix ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
+      ],
+      "order": 1
+    },
+    "*** Trust matrix ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P"
+      ],
+      "order": 2,
+      "description": "Trust matrix:\nHigh: Confirmed by multiple credible and independent sources.\nMedium: Plausible with partial corroboration or one strong source.\nLow: Single-source, weakly supported, conflicting, or unconfirmed.",
+      "show_in_report": true
+    },
+    "*** Sources ***": {
+      "items": [
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 3
+    },
+    "B": {
+      "name": "Confirmed",
+      "narrative": "the content is confirmed"
+    },
+    "C": {
+      "name": "Probably true",
+      "narrative": "the content is probably true"
+    },
+    "D": {
+      "name": "Possibly true",
+      "narrative": "the content is possibly true"
+    },
+    "E": {
+      "name": "Doubtfully true",
+      "narrative": "the content is doubtfully true"
+    },
+    "F": {
+      "name": "Improbable",
+      "narrative": "the content is improbable"
+    },
+    "G": {
+      "name": "Cannot be judged",
+      "narrative": "the content cannot be judged"
+    },
+    "H": {
+      "name": "Trusted high",
+      "narrative": "the source is trusted and corroboration is high"
+    },
+    "I": {
+      "name": "Trusted medium",
+      "narrative": "the source is trusted and corroboration is medium"
+    },
+    "J": {
+      "name": "Trusted low",
+      "narrative": "the source is trusted and corroboration is low"
+    },
+    "K": {
+      "name": "Questionable high",
+      "narrative": "the source is questionable and corroboration is high"
+    },
+    "L": {
+      "name": "Questionable medium",
+      "narrative": "the source is questionable and corroboration is medium"
+    },
+    "M": {
+      "name": "Questionable low",
+      "narrative": "the source is questionable and corroboration is low"
+    },
+    "N": {
+      "name": "Unknown high",
+      "narrative": "the source is unknown and corroboration is high"
+    },
+    "O": {
+      "name": "Unknown medium",
+      "narrative": "the source is unknown and corroboration is medium"
+    },
+    "P": {
+      "name": "Unknown low",
+      "narrative": "the source is unknown and corroboration is low"
+    },
+    "Q": {
+      "name": "Official source",
+      "narrative": "information is from an official source"
+    },
+    "R": {
+      "name": "Mainstream media",
+      "narrative": "information is from mainstream media"
+    },
+    "S": {
+      "name": "Independent media",
+      "narrative": "information is from independent media"
+    },
+    "T": {
+      "name": "Social media",
+      "narrative": "information is from social media"
+    },
+    "U": {
+      "name": "First-hand observation",
+      "narrative": "information is based on first-hand observation"
+    },
+    "V": {
+      "name": "OTA (RF) familiar station",
+      "narrative": "this information was received over the air from a familiar station"
+    },
+    "W": {
+      "name": "OTA (RF) unfamiliar station",
+      "narrative": "this information was received over the air from an unfamiliar station"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved trust or source code"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved trust or source code"
+    },
+    "Z": {
+      "name": "Exercise traffic",
+      "narrative": "this is exercise traffic only"
+    }
+  },
+  "station_response": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "this station's status is unknown"
+    },
+    "*** Full operations ***": {
+      "items": [
+        "C",
+        "E",
+        "B",
+        "D"
+      ],
+      "order": 1
+    },
+    "*** Partial operations ***": {
+      "items": [
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O"
+      ],
+      "order": 2
+    },
+    "*** Off air ***": {
+      "items": [
+        "P",
+        "U",
+        "V",
+        "W",
+        "X"
+      ],
+      "order": 3
+    },
+    "*** Logistics ***": {
+      "items": [
+        "Q",
+        "S",
+        "R",
+        "T",
+        "Y"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "No impact",
+      "narrative": "this station is at full operations with no impact"
+    },
+    "C": {
+      "name": "Minor impact",
+      "narrative": "this station is at full operations with minor impact"
+    },
+    "D": {
+      "name": "Not in impact zone",
+      "narrative": "this station is at full operations and not in the impact zone"
+    },
+    "E": {
+      "name": "Monitoring",
+      "narrative": "this station is at full operations and monitoring the situation"
+    },
+    "F": {
+      "name": "Antenna / RF limited",
+      "narrative": "this station is at partial operations with antenna or RF limits"
+    },
+    "G": {
+      "name": "Battery / reduced power",
+      "narrative": "this station is at partial operations on battery or reduced power"
+    },
+    "H": {
+      "name": "Daylight only",
+      "narrative": "this station is at partial operations, daylight only, due to power"
+    },
+    "I": {
+      "name": "Irregular / unscheduled",
+      "narrative": "this station is at partial operations on an irregular or unscheduled basis"
+    },
+    "J": {
+      "name": "Manpower shortage",
+      "narrative": "this station is at partial operations due to a manpower shortage"
+    },
+    "K": {
+      "name": "Nets only",
+      "narrative": "this station is at partial operations, nets only"
+    },
+    "L": {
+      "name": "Night only",
+      "narrative": "this station is at partial operations, nighttime only, due to power"
+    },
+    "M": {
+      "name": "Receive only",
+      "narrative": "this station is at partial operations, receive only"
+    },
+    "N": {
+      "name": "Top of the hour only",
+      "narrative": "this station is at partial operations, top of the hour only"
+    },
+    "O": {
+      "name": "Unattended",
+      "narrative": "this station is at partial operations and unattended"
+    },
+    "P": {
+      "name": "Equipment failure",
+      "narrative": "this station is off the air due to equipment failure"
+    },
+    "U": {
+      "name": "Equipment reconfiguration",
+      "narrative": "this station is off the air for equipment reconfiguration"
+    },
+    "V": {
+      "name": "Evacuating",
+      "narrative": "this station is evacuating and going off the air"
+    },
+    "W": {
+      "name": "Shelter in place",
+      "narrative": "this station is off the air and sheltering in place"
+    },
+    "X": {
+      "name": "Storms",
+      "narrative": "this station is off the air due to storms"
+    },
+    "Q": {
+      "name": "Needing shelter",
+      "narrative": "this station is needing shelter"
+    },
+    "R": {
+      "name": "Offering shelter",
+      "narrative": "this station is able to offer shelter"
+    },
+    "S": {
+      "name": "Needing supplies",
+      "narrative": "this station is needing supplies"
+    },
+    "T": {
+      "name": "Offering supplies",
+      "narrative": "this station is able to offer supplies"
+    },
+    "Y": {
+      "name": "Relocated (alternate QTH)",
+      "narrative": "this station has relocated to an alternate location"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved station status code"
+    }
+  },
+  "emergency_group_order": [
+    "*** Geologic ***",
+    "*** Severe weather ***",
+    "*** Tropical / coastal ***",
+    "*** Fire ***",
+    "*** Other ***"
+  ],
+  "impact_group_order": [
+    "*** Ground effects ***",
+    "*** Community / access ***",
+    "*** Life safety ***",
+    "*** Reserved ***"
+  ],
+  "official_response_group_order": [
+    "*** Monitoring ***",
+    "*** Responding ***",
+    "*** Official Orders ***"
+  ],
+  "group_descriptions": {
+    "*** Trust matrix ***": "Trust matrix:\nHigh: Confirmed by multiple credible and independent sources.\nMedium: Plausible with partial corroboration or one strong source.\nLow: Single-source, weakly supported, conflicting, or unconfirmed."
+  },
+  "hide_reserved": true,
+  "severity": {
+    "A": {
+      "name": "Unknown",
+      "narrative": ""
+    },
+    "*** Minor ***": {
+      "items": [
+        "B",
+        "C"
+      ],
+      "order": 1
+    },
+    "*** Moderate ***": {
+      "items": [
+        "D",
+        "E"
+      ],
+      "order": 2
+    },
+    "*** Severe ***": {
+      "items": [
+        "F",
+        "G",
+        "H"
+      ],
+      "order": 3
+    },
+    "*** Extreme ***": {
+      "items": [
+        "I",
+        "J"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "Low / minor",
+      "narrative": "minor"
+    },
+    "C": {
+      "name": "Elevated",
+      "narrative": "elevated"
+    },
+    "D": {
+      "name": "Moderate",
+      "narrative": "moderate"
+    },
+    "E": {
+      "name": "Moderate-to-strong",
+      "narrative": "moderate-to-strong"
+    },
+    "F": {
+      "name": "Strong",
+      "narrative": "strong"
+    },
+    "G": {
+      "name": "Very strong",
+      "narrative": "very strong"
+    },
+    "H": {
+      "name": "Severe",
+      "narrative": "severe"
+    },
+    "I": {
+      "name": "Extreme",
+      "narrative": "extreme"
+    },
+    "J": {
+      "name": "Catastrophic",
+      "narrative": "catastrophic"
+    },
+    "K": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "L": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "M": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "N": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "O": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "P": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Q": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "R": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "S": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "T": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    }
+  }
+}

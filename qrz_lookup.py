@@ -1701,7 +1701,7 @@ class StatRepDetailDialog(QDialog):
             sq.setStyleSheet(f"QLabel {{ background-color:{color_str}; border:1px solid #D2D0CF; }}")
             sq.setToolTip(tip)
 
-        self.comments.setHtml(_text_to_html((row[14] or "").replace("||", "\n"), self._data_bg))
+        self.comments.setHtml(_text_to_html(_remarks_with_summary(row[14] or ""), self._data_bg))
 
         self.statrep_memo_edit.blockSignals(True)
         self.statrep_memo_edit.setPlainText(row[19] or "")
@@ -1930,7 +1930,7 @@ class StatRepDetailDialog(QDialog):
                 f'Grid: {self._statrep_grid}</div>'
             )
 
-        raw_comments = (self._row_data.get("comments") or "").replace("||", "\n")
+        raw_comments = _remarks_with_summary(self._row_data.get("comments") or "")
         if raw_comments:
             comments_html = _text_to_html(raw_comments, self._data_bg)
             comments_html = (
@@ -2427,7 +2427,33 @@ import html as _html_mod
 import re as _re
 
 _URL_RE = _re.compile(r'(https?://[^\s<>"\']+)', _re.IGNORECASE)
-_BREVITY_RE = _re.compile(r'\b([0-9][A-Z]{5})\b')
+_BREVITY_RE = _re.compile(r'(?<![^\s])([0-9][A-Z]{7}|[0-9][A-Z]{5})(?![^\s])')
+
+
+def _remarks_with_summary(raw: str) -> str:
+    """Keep transmitted remarks, then append a summary for each brevity code."""
+    text = (raw or "").replace("||", "\n").strip()
+    try:
+        from brevity import find_brevity_codes, decode_to_summary
+        codes = find_brevity_codes(text)
+    except Exception:
+        return text
+    if not codes:
+        return text
+    parts = [text]
+    for code in codes:
+        try:
+            summary = (decode_to_summary(code) or "").strip()
+        except Exception:
+            continue
+        if not summary:
+            continue
+        low = summary.lower()
+        if low.startswith("invalid") or low.startswith("error") or low.startswith("unknown list"):
+            continue
+        parts.append("")
+        parts.append(summary)
+    return "\n".join(parts)
 
 
 def _text_to_html(text: str, bg: str) -> str:

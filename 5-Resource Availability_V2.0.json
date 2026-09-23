@@ -1,0 +1,1271 @@
+{
+  "gui_titles": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Event:",
+    "status": "3. Phase:",
+    "severity": "4. Severity:",
+    "primary": "5. Impact:",
+    "secondary": "6. Official Response:",
+    "source": "7. Trust / Source:",
+    "station": "8. Station Status:"
+  },
+  "gui_titles_v3": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Event:",
+    "status": "3. Phase:",
+    "primary": "5. Impact:",
+    "secondary_impact": "6. Official Response:",
+    "severity": "4. Severity:",
+    "source": "7. Trust / Source:",
+    "station": "8. Station Status:",
+    "secondary": "6. Official Response:"
+  },
+  "emergency_type": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "resource pressure on an unknown resource",
+      "default_phase": "A",
+      "default_severity": "A",
+      "default_source": "A",
+      "default_station": "B"
+    },
+    "*** Food / water ***": {
+      "narrative": "",
+      "description": "Food / water:\nEdible goods and drinking water as a resource, not a single broken pipe on the SitRep map.",
+      "order": 1,
+      "items": [
+        "B",
+        "C",
+        "Y",
+        "E"
+      ],
+      "B": {
+        "name": "Groceries / food",
+        "narrative": "resource pressure on groceries or food",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "C": {
+        "name": "Drinking water (commodity)",
+        "narrative": "resource pressure on drinking water as a commodity",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "E": {
+        "name": "Other",
+        "narrative": "resource pressure on unspecified food or water resource",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Y": {
+        "name": "Infant supplies",
+        "narrative": "resource pressure on infant supplies",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Energy ***": {
+      "narrative": "",
+      "description": "Energy:\nFuel and power as a market or supply problem. Local outages stay on the SitRep colors.",
+      "order": 3,
+      "items": [
+        "F",
+        "G",
+        "H",
+        "R",
+        "I"
+      ],
+      "F": {
+        "name": "Motor fuel",
+        "narrative": "resource pressure on motor fuel",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "G": {
+        "name": "Electricity",
+        "narrative": "resource pressure on electricity",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "H": {
+        "name": "Natural gas / heat",
+        "narrative": "resource pressure on natural gas or heat",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "I": {
+        "name": "Other",
+        "narrative": "resource pressure on unspecified energy resource",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "R": {
+        "name": "Motor oil / lubricants",
+        "narrative": "resource pressure on motor oil or lubricants",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Agriculture ***": {
+      "narrative": "",
+      "description": "Agriculture:\nFarm inputs and animal care. Not groceries on a store shelf.",
+      "order": 2,
+      "items": [
+        "D",
+        "W",
+        "X",
+        "V"
+      ],
+      "D": {
+        "name": "Agriculture / feed",
+        "narrative": "resource pressure on agriculture or livestock feed",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "W": {
+        "name": "Ag fertilizer / chemicals",
+        "narrative": "resource pressure on agricultural fertilizer or chemicals",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "X": {
+        "name": "Animal health care",
+        "narrative": "resource pressure on animal health care",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "V": {
+        "name": "Other",
+        "narrative": "resource pressure on an unspecified agricultural resource",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Goods / services ***": {
+      "narrative": "",
+      "description": "Goods / services:\nMedicines, clinics, payments, household and shop goods people cannot obtain or cannot afford.",
+      "order": 4,
+      "items": [
+        "J",
+        "K",
+        "L",
+        "S",
+        "T",
+        "U",
+        "Z",
+        "M"
+      ],
+      "J": {
+        "name": "Medicines / pharmacy",
+        "narrative": "resource pressure on medicines or pharmacy goods",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "K": {
+        "name": "Banking / cash / payments",
+        "narrative": "resource pressure on banking, cash, or payments",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "L": {
+        "name": "Building materials",
+        "narrative": "resource pressure on building materials",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "M": {
+        "name": "Other",
+        "narrative": "resource pressure on unspecified goods or money resource",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "S": {
+        "name": "Paper products",
+        "narrative": "resource pressure on paper products",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "T": {
+        "name": "Medical services",
+        "narrative": "resource pressure on medical services",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "U": {
+        "name": "Auto supplies",
+        "narrative": "resource pressure on auto supplies",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Z": {
+        "name": "Ammunition / reloading",
+        "narrative": "resource pressure on ammunition or reloading supplies",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Transportation / labor ***": {
+      "narrative": "",
+      "description": "Transportation / labor:\nFreight, public transport as a service, or not enough workers to keep supply moving.",
+      "order": 5,
+      "items": [
+        "N",
+        "O",
+        "P",
+        "Q"
+      ],
+      "N": {
+        "name": "Freight / trucking",
+        "narrative": "resource pressure on freight or trucking",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "O": {
+        "name": "Public transport",
+        "narrative": "resource pressure on public transport service",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "P": {
+        "name": "Labor / staffing",
+        "narrative": "resource pressure on labor or staffing",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Q": {
+        "name": "Other",
+        "narrative": "resource pressure on unspecified movement or labor resource",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    }
+  },
+  "status_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "the phase is unknown",
+      "family": "unknown"
+    },
+    "*** Issued products ***": {
+      "items": [
+        "B",
+        "C",
+        "D"
+      ],
+      "description": "An official product has been issued.",
+      "order": 1
+    },
+    "*** Before it starts ***": {
+      "items": [
+        "E",
+        "F",
+        "G"
+      ],
+      "description": "Event has not yet started or is only threatened.",
+      "order": 2
+    },
+    "*** While it is happening ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M"
+      ],
+      "description": "Event is currently happening.",
+      "order": 3
+    },
+    "*** After / closeout ***": {
+      "items": [
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T"
+      ],
+      "description": "Event has ended, been cancelled, or all clear.",
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "description": "Placeholders for later phase codes.",
+      "order": 5
+    },
+    "B": {
+      "name": "Advisory",
+      "narrative": "advisory has been issued",
+      "family": "issued"
+    },
+    "C": {
+      "name": "Watch",
+      "narrative": "watch has been issued",
+      "family": "issued"
+    },
+    "D": {
+      "name": "Warning",
+      "narrative": "warning has been issued",
+      "family": "issued"
+    },
+    "E": {
+      "name": "Possible",
+      "narrative": "is possible",
+      "family": "state"
+    },
+    "F": {
+      "name": "Expected",
+      "narrative": "is expected",
+      "family": "state"
+    },
+    "G": {
+      "name": "Imminent",
+      "narrative": "is imminent",
+      "family": "state"
+    },
+    "H": {
+      "name": "Occurring now",
+      "narrative": "is occurring now",
+      "family": "state"
+    },
+    "I": {
+      "name": "Intensifying",
+      "narrative": "is intensifying",
+      "family": "state"
+    },
+    "J": {
+      "name": "Peak intensity",
+      "narrative": "is at peak intensity",
+      "family": "state"
+    },
+    "K": {
+      "name": "Weakening",
+      "narrative": "is weakening",
+      "family": "state"
+    },
+    "L": {
+      "name": "Continuing",
+      "narrative": "is continuing",
+      "family": "state"
+    },
+    "M": {
+      "name": "Spreading",
+      "narrative": "is spreading",
+      "family": "state"
+    },
+    "N": {
+      "name": "Concluded",
+      "narrative": "has concluded",
+      "family": "state"
+    },
+    "O": {
+      "name": "Dissipated",
+      "narrative": "has dissipated",
+      "family": "state"
+    },
+    "P": {
+      "name": "Cancelled",
+      "narrative": "has been cancelled",
+      "family": "state"
+    },
+    "Q": {
+      "name": "Downgraded",
+      "narrative": "has been downgraded",
+      "family": "state"
+    },
+    "R": {
+      "name": "All clear",
+      "narrative": "All clear has been given.",
+      "family": "standalone"
+    },
+    "S": {
+      "name": "Hoax / unfounded",
+      "narrative": "was a hoax or unfounded",
+      "family": "state"
+    },
+    "T": {
+      "name": "Prevented / stopped",
+      "narrative": "was prevented or stopped",
+      "family": "state"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    }
+  },
+  "shared_impacts": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "the impact is unknown"
+    },
+    "*** Shortage ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E"
+      ],
+      "order": 1
+    },
+    "*** Rationing ***": {
+      "items": [
+        "F",
+        "G",
+        "H",
+        "I"
+      ],
+      "order": 2
+    },
+    "*** Price ***": {
+      "items": [
+        "J",
+        "K",
+        "L",
+        "M"
+      ],
+      "order": 3
+    },
+    "*** Disruption ***": {
+      "items": [
+        "N",
+        "O",
+        "P",
+        "Q"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "Unavailable",
+      "narrative": "unavailability is the main concern"
+    },
+    "C": {
+      "name": "Long lines / limited stock",
+      "narrative": "long lines or limited stock are the main concern"
+    },
+    "D": {
+      "name": "Hours cut / outlets closed",
+      "narrative": "cut hours or closed outlets are the main concern"
+    },
+    "E": {
+      "name": "Poor quality / adulteration",
+      "narrative": "poor quality or adulteration is the main concern"
+    },
+    "F": {
+      "name": "Official rationing",
+      "narrative": "official rationing is the main concern"
+    },
+    "G": {
+      "name": "Priority allocation",
+      "narrative": "priority allocation is the main concern"
+    },
+    "H": {
+      "name": "Purchase limits",
+      "narrative": "purchase limits are the main concern"
+    },
+    "I": {
+      "name": "Rationing rumored / unofficial",
+      "narrative": "unofficial or rumored rationing is the main concern"
+    },
+    "J": {
+      "name": "Sharp price increase",
+      "narrative": "a sharp price increase is the main concern"
+    },
+    "K": {
+      "name": "Price gouging",
+      "narrative": "price gouging is the main concern"
+    },
+    "L": {
+      "name": "Currency / payment failure",
+      "narrative": "currency or payment failure is the main concern"
+    },
+    "M": {
+      "name": "Barter only",
+      "narrative": "barter-only trade is the main concern"
+    },
+    "N": {
+      "name": "Supply chain break",
+      "narrative": "a supply-chain break is the main concern"
+    },
+    "O": {
+      "name": "Hoarding / panic buying",
+      "narrative": "hoarding or panic buying is the main concern"
+    },
+    "P": {
+      "name": "Import / delivery stop",
+      "narrative": "import or delivery stoppage is the main concern"
+    },
+    "Q": {
+      "name": "Production stop",
+      "narrative": "a production stop is the main concern"
+    },
+    "R": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "S": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "T": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved impact code"
+    }
+  },
+  "impact_overrides": {},
+  "official_response": {
+    "A": {
+      "name": "None observed",
+      "narrative": "no official response has been observed"
+    },
+    "B": {
+      "name": "Local public safety",
+      "narrative": "local public safety is monitoring the situation"
+    },
+    "C": {
+      "name": "Local public safety",
+      "narrative": "local public safety is responding to the situation"
+    },
+    "D": {
+      "name": "EOC",
+      "narrative": "the EOC is monitoring the situation"
+    },
+    "E": {
+      "name": "EOC",
+      "narrative": "the EOC is responding"
+    },
+    "F": {
+      "name": "State agencies/officials",
+      "narrative": "state agencies and or officials are monitoring the situation"
+    },
+    "G": {
+      "name": "State agencies/officials",
+      "narrative": "state agencies and or officials are responding to the situation"
+    },
+    "H": {
+      "name": "National Guard",
+      "narrative": "the National Guard is monitoring the situation"
+    },
+    "I": {
+      "name": "National Guard",
+      "narrative": "the National Guard is responding to the situation"
+    },
+    "J": {
+      "name": "Health dept",
+      "narrative": "the health department is monitoring the situation"
+    },
+    "K": {
+      "name": "Health dept",
+      "narrative": "the health department is responding to the situation"
+    },
+    "L": {
+      "name": "Public alerts issued",
+      "narrative": "public alerts have been issued"
+    },
+    "M": {
+      "name": "Shelter-in-place",
+      "narrative": "a shelter-in-place order is in effect"
+    },
+    "N": {
+      "name": "FEMA",
+      "narrative": "FEMA is monitoring the situation"
+    },
+    "O": {
+      "name": "FEMA",
+      "narrative": "FEMA is responding to the situation"
+    },
+    "P": {
+      "name": "Federal agencies/officials",
+      "narrative": "federal authorities are monitoring the situation"
+    },
+    "Q": {
+      "name": "Federal agencies/officials",
+      "narrative": "federal authorities are responding to the situation"
+    },
+    "R": {
+      "name": "Red Cross",
+      "narrative": "the Red Cross is monitoring the situation"
+    },
+    "S": {
+      "name": "Red Cross",
+      "narrative": "the Red Cross is responding to the situation"
+    },
+    "T": {
+      "name": "Law enforcement",
+      "narrative": "law enforcement is monitoring the situation"
+    },
+    "U": {
+      "name": "Law enforcement",
+      "narrative": "law enforcement is responding to the situation"
+    },
+    "V": {
+      "name": "FBI",
+      "narrative": "The FBI is monitoring the situation"
+    },
+    "W": {
+      "name": "FBI",
+      "narrative": "The FBI is responding to the situation"
+    },
+    "X": {
+      "name": "Evacuation warning",
+      "narrative": "an evacuation warning has been issued"
+    },
+    "Y": {
+      "name": "Evacuation ordered",
+      "narrative": "evacuations have been ordered"
+    },
+    "Z": {
+      "name": "State of emergency",
+      "narrative": "a state of emergency has been declared"
+    },
+    "*** Monitoring ***": {
+      "items": [
+        "D",
+        "N",
+        "J",
+        "T",
+        "B",
+        "H",
+        "P",
+        "R",
+        "F",
+        "V"
+      ],
+      "order": 1
+    },
+    "*** Responding ***": {
+      "items": [
+        "E",
+        "O",
+        "K",
+        "U",
+        "C",
+        "I",
+        "Q",
+        "S",
+        "G",
+        "W"
+      ],
+      "order": 2
+    },
+    "*** Official Orders ***": {
+      "items": [
+        "L",
+        "M",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 3
+    }
+  },
+  "information_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "trust and source are unknown"
+    },
+    "*** NATO Admiralty content matrix ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
+      ],
+      "order": 1
+    },
+    "*** Trust matrix ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P"
+      ],
+      "order": 2,
+      "description": "Trust matrix:\nHigh: Confirmed by multiple credible and independent sources.\nMedium: Plausible with partial corroboration or one strong source.\nLow: Single-source, weakly supported, conflicting, or unconfirmed.",
+      "show_in_report": true
+    },
+    "*** Sources ***": {
+      "items": [
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 3
+    },
+    "B": {
+      "name": "Confirmed",
+      "narrative": "the content is confirmed"
+    },
+    "C": {
+      "name": "Probably true",
+      "narrative": "the content is probably true"
+    },
+    "D": {
+      "name": "Possibly true",
+      "narrative": "the content is possibly true"
+    },
+    "E": {
+      "name": "Doubtfully true",
+      "narrative": "the content is doubtfully true"
+    },
+    "F": {
+      "name": "Improbable",
+      "narrative": "the content is improbable"
+    },
+    "G": {
+      "name": "Cannot be judged",
+      "narrative": "the content cannot be judged"
+    },
+    "H": {
+      "name": "Trusted high",
+      "narrative": "the source is trusted and corroboration is high"
+    },
+    "I": {
+      "name": "Trusted medium",
+      "narrative": "the source is trusted and corroboration is medium"
+    },
+    "J": {
+      "name": "Trusted low",
+      "narrative": "the source is trusted and corroboration is low"
+    },
+    "K": {
+      "name": "Questionable high",
+      "narrative": "the source is questionable and corroboration is high"
+    },
+    "L": {
+      "name": "Questionable medium",
+      "narrative": "the source is questionable and corroboration is medium"
+    },
+    "M": {
+      "name": "Questionable low",
+      "narrative": "the source is questionable and corroboration is low"
+    },
+    "N": {
+      "name": "Unknown high",
+      "narrative": "the source is unknown and corroboration is high"
+    },
+    "O": {
+      "name": "Unknown medium",
+      "narrative": "the source is unknown and corroboration is medium"
+    },
+    "P": {
+      "name": "Unknown low",
+      "narrative": "the source is unknown and corroboration is low"
+    },
+    "Q": {
+      "name": "Official source",
+      "narrative": "information is from an official source"
+    },
+    "R": {
+      "name": "Mainstream media",
+      "narrative": "information is from mainstream media"
+    },
+    "S": {
+      "name": "Independent media",
+      "narrative": "information is from independent media"
+    },
+    "T": {
+      "name": "Social media",
+      "narrative": "information is from social media"
+    },
+    "U": {
+      "name": "First-hand observation",
+      "narrative": "information is based on first-hand observation"
+    },
+    "V": {
+      "name": "OTA (RF) familiar station",
+      "narrative": "this information was received over the air from a familiar station"
+    },
+    "W": {
+      "name": "OTA (RF) unfamiliar station",
+      "narrative": "this information was received over the air from an unfamiliar station"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved trust or source code"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved trust or source code"
+    },
+    "Z": {
+      "name": "Exercise traffic",
+      "narrative": "this is exercise traffic only"
+    }
+  },
+  "station_response": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "this station's status is unknown"
+    },
+    "*** Full operations ***": {
+      "items": [
+        "C",
+        "E",
+        "B",
+        "D"
+      ],
+      "order": 1
+    },
+    "*** Partial operations ***": {
+      "items": [
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O"
+      ],
+      "order": 2
+    },
+    "*** Off air ***": {
+      "items": [
+        "P",
+        "U",
+        "V",
+        "W",
+        "X"
+      ],
+      "order": 3
+    },
+    "*** Logistics ***": {
+      "items": [
+        "Q",
+        "S",
+        "R",
+        "T",
+        "Y"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "No impact",
+      "narrative": "this station is at full operations with no impact"
+    },
+    "C": {
+      "name": "Minor impact",
+      "narrative": "this station is at full operations with minor impact"
+    },
+    "D": {
+      "name": "Not in impact zone",
+      "narrative": "this station is at full operations and not in the impact zone"
+    },
+    "E": {
+      "name": "Monitoring",
+      "narrative": "this station is at full operations and monitoring the situation"
+    },
+    "F": {
+      "name": "Antenna / RF limited",
+      "narrative": "this station is at partial operations with antenna or RF limits"
+    },
+    "G": {
+      "name": "Battery / reduced power",
+      "narrative": "this station is at partial operations on battery or reduced power"
+    },
+    "H": {
+      "name": "Daylight only",
+      "narrative": "this station is at partial operations, daylight only, due to power"
+    },
+    "I": {
+      "name": "Irregular / unscheduled",
+      "narrative": "this station is at partial operations on an irregular or unscheduled basis"
+    },
+    "J": {
+      "name": "Manpower shortage",
+      "narrative": "this station is at partial operations due to a manpower shortage"
+    },
+    "K": {
+      "name": "Nets only",
+      "narrative": "this station is at partial operations, nets only"
+    },
+    "L": {
+      "name": "Night only",
+      "narrative": "this station is at partial operations, nighttime only, due to power"
+    },
+    "M": {
+      "name": "Receive only",
+      "narrative": "this station is at partial operations, receive only"
+    },
+    "N": {
+      "name": "Top of the hour only",
+      "narrative": "this station is at partial operations, top of the hour only"
+    },
+    "O": {
+      "name": "Unattended",
+      "narrative": "this station is at partial operations and unattended"
+    },
+    "P": {
+      "name": "Equipment failure",
+      "narrative": "this station is off the air due to equipment failure"
+    },
+    "U": {
+      "name": "Equipment reconfiguration",
+      "narrative": "this station is off the air for equipment reconfiguration"
+    },
+    "V": {
+      "name": "Evacuating",
+      "narrative": "this station is evacuating and going off the air"
+    },
+    "W": {
+      "name": "Shelter in place",
+      "narrative": "this station is off the air and sheltering in place"
+    },
+    "X": {
+      "name": "Storms",
+      "narrative": "this station is off the air due to storms"
+    },
+    "Q": {
+      "name": "Needing shelter",
+      "narrative": "this station is needing shelter"
+    },
+    "R": {
+      "name": "Offering shelter",
+      "narrative": "this station is able to offer shelter"
+    },
+    "S": {
+      "name": "Needing supplies",
+      "narrative": "this station is needing supplies"
+    },
+    "T": {
+      "name": "Offering supplies",
+      "narrative": "this station is able to offer supplies"
+    },
+    "Y": {
+      "name": "Relocated (alternate QTH)",
+      "narrative": "this station has relocated to an alternate location"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved station status code"
+    }
+  },
+  "emergency_group_order": [
+    "*** Food / water ***",
+    "*** Agriculture ***",
+    "*** Energy ***",
+    "*** Goods / services ***",
+    "*** Transportation / labor ***"
+  ],
+  "impact_group_order": [
+    "*** Shortage ***",
+    "*** Rationing ***",
+    "*** Price ***",
+    "*** Disruption ***",
+    "*** Reserved ***"
+  ],
+  "official_response_group_order": [
+    "*** Monitoring ***",
+    "*** Responding ***",
+    "*** Official Orders ***"
+  ],
+  "group_descriptions": {
+    "*** Trust matrix ***": "Trust matrix:\nHigh: Confirmed by multiple credible and independent sources.\nMedium: Plausible with partial corroboration or one strong source.\nLow: Single-source, weakly supported, conflicting, or unconfirmed.",
+    "*** Food / water ***": "Food / water:\nEdible goods and drinking water as a resource, not a single broken pipe on the SitRep map.",
+    "*** Energy ***": "Energy:\nFuel and power as a market or supply problem. Local outages stay on the SitRep colors.",
+    "*** Agriculture ***": "Agriculture:\nFarm inputs and animal care. Not groceries on a store shelf.",
+    "*** Goods / services ***": "Goods / services:\nMedicines, clinics, payments, household and shop goods people cannot obtain or cannot afford.",
+    "*** Transportation / labor ***": "Transportation / labor:\nFreight, public transport as a service, or not enough workers to keep supply moving."
+  },
+  "hide_reserved": true,
+  "severity": {
+    "A": {
+      "name": "Unknown",
+      "narrative": ""
+    },
+    "*** Minor ***": {
+      "items": [
+        "B",
+        "C"
+      ],
+      "order": 1
+    },
+    "*** Moderate ***": {
+      "items": [
+        "D",
+        "E"
+      ],
+      "order": 2
+    },
+    "*** Severe ***": {
+      "items": [
+        "F",
+        "G",
+        "H"
+      ],
+      "order": 3
+    },
+    "*** Extreme ***": {
+      "items": [
+        "I",
+        "J"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "Low / minor",
+      "narrative": "minor"
+    },
+    "C": {
+      "name": "Elevated",
+      "narrative": "elevated"
+    },
+    "D": {
+      "name": "Moderate",
+      "narrative": "moderate"
+    },
+    "E": {
+      "name": "Moderate-to-strong",
+      "narrative": "moderate-to-strong"
+    },
+    "F": {
+      "name": "Strong",
+      "narrative": "strong"
+    },
+    "G": {
+      "name": "Very strong",
+      "narrative": "very strong"
+    },
+    "H": {
+      "name": "Severe",
+      "narrative": "severe"
+    },
+    "I": {
+      "name": "Extreme",
+      "narrative": "extreme"
+    },
+    "J": {
+      "name": "Catastrophic",
+      "narrative": "catastrophic"
+    },
+    "K": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "L": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "M": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "N": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "O": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "P": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Q": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "R": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "S": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "T": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    }
+  }
+}

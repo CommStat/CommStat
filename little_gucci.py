@@ -1788,7 +1788,7 @@ class DatabaseManager:
                         query = f"""
                             SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
                                    power, water, med, telecom, travel, internet,
-                                   fuel, food, crime, civil, political, comments, source, id
+                                   fuel, food, crime, civil, political, comments, source, id, memo
                             FROM statrep
                             WHERE target NOT IN ({placeholders})
                               AND ({date_condition} OR pinned = 1)
@@ -1799,7 +1799,7 @@ class DatabaseManager:
                         query = f"""
                             SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
                                    power, water, med, telecom, travel, internet,
-                                   fuel, food, crime, civil, political, comments, source, id
+                                   fuel, food, crime, civil, political, comments, source, id, memo
                             FROM statrep
                             WHERE {date_condition} OR pinned = 1
                             ORDER BY datetime DESC
@@ -1817,7 +1817,7 @@ class DatabaseManager:
                     query = f"""
                         SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
                                power, water, med, telecom, travel, internet,
-                               fuel, food, crime, civil, political, comments, source, id
+                               fuel, food, crime, civil, political, comments, source, id, memo
                         FROM statrep
                         WHERE target IN ({placeholders}) AND ({date_condition} OR pinned = 1)
                         ORDER BY datetime DESC
@@ -4496,7 +4496,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Boxes are wide (140px) because each holds a comma- or space-
         # separated list; longer lists scroll horizontally within the box.
         # No tooltips here - the rules are documented in the map's Filter > Help.
-        _FIELDS = [("from", "From"), ("to", "To"), ("grid", "Grid"), ("remarks", "Remarks")]
+        _FIELDS = [("from", "From"), ("to", "To"), ("grid", "Grid"), ("remarks", "Remarks & Notes")]
         self._cf_inputs: Dict[str, QtWidgets.QLineEdit] = {}
         self._cf_conj_labels: List[QtWidgets.QLabel] = []
         for idx, (key, label_text) in enumerate(_FIELDS):
@@ -4775,14 +4775,21 @@ class MainWindow(QtWidgets.QMainWindow):
         ("N0DDK, W1ABC" or "N0DDK W1ABC" matches either). Across boxes, the
         bar's AND/OR toggle decides. Empty boxes impose no constraint; an
         entirely empty bar matches everything. All matching is
-        case-insensitive substring."""
+        case-insensitive substring.
+
+        The Remarks box searches both the statrep's own remarks (comments,
+        row[21]) and its detail-view memo/note (row[24]) - operators use
+        either field to record why a report matters, so a search term should
+        find it regardless of which one it landed in."""
         if self._map_filter_state != "custom":
             return True
+        memo = (row[24] if len(row) > 24 else "") or ""
+        remarks_hay = f"{row[21] or ''} {memo}"
         pairs = [
             (self._cf_inputs["from"].text(),    row[3]),
             (self._cf_inputs["to"].text(),      row[4]),
             (self._cf_inputs["grid"].text(),    row[7]),
-            (self._cf_inputs["remarks"].text(), row[21]),
+            (self._cf_inputs["remarks"].text(), remarks_hay),
         ]
         results = []
         for raw, field in pairs:

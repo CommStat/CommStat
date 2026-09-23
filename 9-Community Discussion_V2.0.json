@@ -1,0 +1,2159 @@
+{
+  "summary_style": "social",
+  "gui_titles": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Focus:",
+    "status": "4. Status:",
+    "severity": "5. Attitude:",
+    "primary": "3. Task:",
+    "secondary": "6. My strategic outlook:",
+    "source": "7. Inspiration:",
+    "station": "8. Station Status:",
+    "secondary_impact": "6. My strategic outlook:"
+  },
+  "gui_titles_v3": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Focus:",
+    "status": "4. Status:",
+    "severity": "5. Attitude:",
+    "primary": "3. Task:",
+    "secondary": "6. My strategic outlook:",
+    "source": "7. Inspiration:",
+    "station": "8. Station Status:",
+    "secondary_impact": "6. My strategic outlook:"
+  },
+  "emergency_type": {
+    "A": {
+      "name": "Unspecified",
+      "narrative": "an unspecified focus",
+      "default_response": "A",
+      "default_source": "A",
+      "default_impact": "A",
+      "default_station": "B"
+    },
+    "*** Chores ***": {
+      "narrative": "",
+      "order": 1,
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H"
+      ],
+      "B": {
+        "name": "Yard",
+        "narrative": "yard work",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "C": {
+        "name": "Garden",
+        "narrative": "garden work",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "D": {
+        "name": "House / home repair",
+        "narrative": "house or home repair",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "E": {
+        "name": "Vehicle / equipment",
+        "narrative": "vehicle or equipment work",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "F": {
+        "name": "Kitchen / household",
+        "narrative": "kitchen or household work",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "G": {
+        "name": "Paperwork / bills",
+        "narrative": "paperwork or bills",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "H": {
+        "name": "Other chores",
+        "narrative": "other chores",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      }
+    },
+    "*** Preps ***": {
+      "narrative": "",
+      "order": 2,
+      "items": [
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P"
+      ],
+      "I": {
+        "name": "Food storage",
+        "narrative": "food storage",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "J": {
+        "name": "Water",
+        "narrative": "water preparedness",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "K": {
+        "name": "Power / solar / generator",
+        "narrative": "power, solar, or generator work",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "L": {
+        "name": "Shelter / weatherize",
+        "narrative": "shelter or weatherizing",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "M": {
+        "name": "Security",
+        "narrative": "security preparations",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "N": {
+        "name": "Comms / radio readiness",
+        "narrative": "comms or radio readiness",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "O": {
+        "name": "Medical / kits",
+        "narrative": "medical kits or training",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "P": {
+        "name": "Other preps",
+        "narrative": "other preparedness work",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      }
+    },
+    "*** Hobbies ***": {
+      "narrative": "",
+      "order": 3,
+      "items": [
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W"
+      ],
+      "Q": {
+        "name": "Ham radio / antennas",
+        "narrative": "ham radio or antennas",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "R": {
+        "name": "Hunting / fishing",
+        "narrative": "hunting or fishing",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "S": {
+        "name": "Shooting / reloading",
+        "narrative": "shooting or reloading",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "T": {
+        "name": "Cooking / smoking",
+        "narrative": "cooking or smoking",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "U": {
+        "name": "Workshop / making",
+        "narrative": "workshop or making",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "V": {
+        "name": "Games / game day",
+        "narrative": "games or game day",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "W": {
+        "name": "Other hobby",
+        "narrative": "another hobby",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      }
+    },
+    "*** Everyday / calendar ***": {
+      "narrative": "",
+      "order": 4,
+      "items": [
+        "X",
+        "Y"
+      ],
+      "X": {
+        "name": "Everyday weather",
+        "narrative": "everyday weather",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      },
+      "Y": {
+        "name": "Holiday / calendar",
+        "narrative": "a holiday or calendar event",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "B",
+        "default_station": "B"
+      }
+    },
+    "*** Reserved ***": {
+      "items": [
+        "Z"
+      ],
+      "order": 5,
+      "Z": {
+        "name": "Reserved",
+        "narrative": "a reserved focus",
+        "default_response": "A",
+        "default_source": "A",
+        "default_impact": "A",
+        "default_station": "B"
+      }
+    }
+  },
+  "status_codes": {
+    "A": {
+      "name": "Unspecified",
+      "narrative": "",
+      "family": "unknown"
+    },
+    "*** Status ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L"
+      ],
+      "order": 1
+    },
+    "B": {
+      "name": "Planning",
+      "narrative": "planning it",
+      "family": "state"
+    },
+    "C": {
+      "name": "Underway",
+      "narrative": "it is underway",
+      "family": "state"
+    },
+    "D": {
+      "name": "Finished",
+      "narrative": "it is finished",
+      "family": "state"
+    },
+    "E": {
+      "name": "Stuck",
+      "narrative": "stuck on it",
+      "family": "state"
+    },
+    "F": {
+      "name": "Asking for ideas",
+      "narrative": "asking for ideas",
+      "family": "state"
+    },
+    "G": {
+      "name": "Offering help",
+      "narrative": "offering help",
+      "family": "state"
+    },
+    "H": {
+      "name": "Just chatting",
+      "narrative": "just chatting",
+      "family": "state"
+    },
+    "I": {
+      "name": "Expected",
+      "narrative": "expecting it",
+      "family": "state"
+    },
+    "*** Reserved ***": {
+      "items": [
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 2
+    },
+    "J": {
+      "name": "Anticipating",
+      "narrative": "anticipating it",
+      "family": "state"
+    },
+    "K": {
+      "name": "Hoping for it",
+      "narrative": "hoping for it",
+      "family": "state"
+    },
+    "L": {
+      "name": "Not looking forward to it",
+      "narrative": "not looking forward to it",
+      "family": "state"
+    },
+    "M": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "N": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "O": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "P": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "Q": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "R": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "S": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "T": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "",
+      "family": "reserved"
+    }
+  },
+  "shared_impacts": {
+    "A": {
+      "name": "Unspecified",
+      "narrative": "an unspecified task"
+    },
+    "B": {
+      "name": "Mowing",
+      "narrative": "mowing"
+    },
+    "C": {
+      "name": "Trimming / pruning",
+      "narrative": "trimming or pruning"
+    },
+    "D": {
+      "name": "Snow removal",
+      "narrative": "snow removal"
+    },
+    "E": {
+      "name": "Fence",
+      "narrative": "fence work"
+    },
+    "F": {
+      "name": "Firewood",
+      "narrative": "firewood"
+    },
+    "G": {
+      "name": "Pest control",
+      "narrative": "pest control"
+    },
+    "H": {
+      "name": "Cleanup / debris",
+      "narrative": "cleanup or debris"
+    },
+    "Z": {
+      "name": "Other",
+      "narrative": "other yard work"
+    },
+    "*** Tasks ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "Z"
+      ],
+      "order": 1
+    }
+  },
+  "impact_overrides": {
+    "B": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Mowing",
+          "narrative": "mowing"
+        },
+        "C": {
+          "name": "Trimming / pruning",
+          "narrative": "trimming or pruning"
+        },
+        "D": {
+          "name": "Snow removal",
+          "narrative": "snow removal"
+        },
+        "E": {
+          "name": "Fence",
+          "narrative": "fence work"
+        },
+        "F": {
+          "name": "Firewood",
+          "narrative": "firewood"
+        },
+        "G": {
+          "name": "Pest control",
+          "narrative": "pest control"
+        },
+        "H": {
+          "name": "Cleanup / debris",
+          "narrative": "cleanup or debris"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other yard work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "C": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Bed prep",
+          "narrative": "bed prep"
+        },
+        "C": {
+          "name": "Planting",
+          "narrative": "planting"
+        },
+        "D": {
+          "name": "Weeding",
+          "narrative": "weeding"
+        },
+        "E": {
+          "name": "Watering",
+          "narrative": "watering"
+        },
+        "F": {
+          "name": "Harvest",
+          "narrative": "harvesting"
+        },
+        "G": {
+          "name": "Preserve / can",
+          "narrative": "preserving or canning"
+        },
+        "H": {
+          "name": "Tool care",
+          "narrative": "garden tool care"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other garden work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "D": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Plumbing",
+          "narrative": "plumbing"
+        },
+        "C": {
+          "name": "Roof",
+          "narrative": "roof work"
+        },
+        "D": {
+          "name": "Windows",
+          "narrative": "window work"
+        },
+        "E": {
+          "name": "HVAC",
+          "narrative": "HVAC work"
+        },
+        "F": {
+          "name": "Electrical",
+          "narrative": "electrical work"
+        },
+        "G": {
+          "name": "Weatherproofing",
+          "narrative": "weatherproofing"
+        },
+        "H": {
+          "name": "Paint",
+          "narrative": "painting"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other house work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "E": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Oil change",
+          "narrative": "an oil change"
+        },
+        "C": {
+          "name": "Tires / brakes",
+          "narrative": "tires or brakes"
+        },
+        "D": {
+          "name": "Annual service",
+          "narrative": "annual service"
+        },
+        "E": {
+          "name": "Chainsaw",
+          "narrative": "chainsaw work"
+        },
+        "F": {
+          "name": "Generator",
+          "narrative": "generator work"
+        },
+        "G": {
+          "name": "Tractor / mower",
+          "narrative": "tractor or mower work"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other vehicle or equipment work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "F": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Cooking",
+          "narrative": "cooking"
+        },
+        "C": {
+          "name": "Cleaning",
+          "narrative": "cleaning"
+        },
+        "D": {
+          "name": "Laundry",
+          "narrative": "laundry"
+        },
+        "E": {
+          "name": "Trash / recycling",
+          "narrative": "trash or recycling"
+        },
+        "F": {
+          "name": "Organization",
+          "narrative": "household organization"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other household work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "G": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Bills",
+          "narrative": "paying bills"
+        },
+        "C": {
+          "name": "Taxes",
+          "narrative": "taxes"
+        },
+        "D": {
+          "name": "Insurance / records",
+          "narrative": "insurance or records"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other paperwork"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "H": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "General chores",
+          "narrative": "general chores"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other chores"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "I": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Inventory",
+          "narrative": "food inventory"
+        },
+        "C": {
+          "name": "Rotate stock",
+          "narrative": "rotating stock"
+        },
+        "D": {
+          "name": "Packaging / sealing",
+          "narrative": "packaging or sealing"
+        },
+        "E": {
+          "name": "Buy / restock",
+          "narrative": "buying or restocking food"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other food-storage work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "J": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Store / rotate",
+          "narrative": "storing or rotating water"
+        },
+        "C": {
+          "name": "Filter / treat",
+          "narrative": "filtering or treating water"
+        },
+        "D": {
+          "name": "Haul",
+          "narrative": "hauling water"
+        },
+        "E": {
+          "name": "Catchment",
+          "narrative": "water catchment"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other water work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "K": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Panel / batteries",
+          "narrative": "panels or batteries"
+        },
+        "C": {
+          "name": "Generator test",
+          "narrative": "a generator test"
+        },
+        "D": {
+          "name": "Fuel for power",
+          "narrative": "fuel for power"
+        },
+        "E": {
+          "name": "Wiring / install",
+          "narrative": "wiring or install"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other power work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "L": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Repairs",
+          "narrative": "shelter repairs"
+        },
+        "C": {
+          "name": "Insulation",
+          "narrative": "insulation"
+        },
+        "D": {
+          "name": "Supplies",
+          "narrative": "shelter supplies"
+        },
+        "E": {
+          "name": "Alternate site",
+          "narrative": "an alternate site"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other shelter work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "M": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Lighting / cameras",
+          "narrative": "lighting or cameras"
+        },
+        "C": {
+          "name": "Locks",
+          "narrative": "locks"
+        },
+        "D": {
+          "name": "Check / patrol",
+          "narrative": "a security check"
+        },
+        "E": {
+          "name": "Training",
+          "narrative": "security training"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other security work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "N": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Radio check",
+          "narrative": "a radio check"
+        },
+        "C": {
+          "name": "Antenna",
+          "narrative": "antenna work"
+        },
+        "D": {
+          "name": "Go-kit",
+          "narrative": "go-kit work"
+        },
+        "E": {
+          "name": "Programming",
+          "narrative": "radio programming"
+        },
+        "F": {
+          "name": "Net practice",
+          "narrative": "net practice"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other comms readiness"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "O": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Inventory",
+          "narrative": "medical inventory"
+        },
+        "C": {
+          "name": "Expire / replace",
+          "narrative": "replacing expired supplies"
+        },
+        "D": {
+          "name": "First-aid training",
+          "narrative": "first-aid training"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other medical-kit work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "P": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "General preps",
+          "narrative": "general preparedness work"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other preps"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "Q": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Ragchew / contest",
+          "narrative": "a ragchew or contest"
+        },
+        "C": {
+          "name": "Antenna project",
+          "narrative": "an antenna project"
+        },
+        "D": {
+          "name": "Build / repair",
+          "narrative": "a radio build or repair"
+        },
+        "E": {
+          "name": "Learning",
+          "narrative": "radio learning"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other radio hobby work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "R": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Prep gear",
+          "narrative": "prepping gear"
+        },
+        "C": {
+          "name": "In the field",
+          "narrative": "time in the field"
+        },
+        "D": {
+          "name": "Process / butcher",
+          "narrative": "processing or butchering"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other hunting or fishing"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "S": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Range",
+          "narrative": "time at the range"
+        },
+        "C": {
+          "name": "Reloading",
+          "narrative": "reloading"
+        },
+        "D": {
+          "name": "Clean / smith",
+          "narrative": "cleaning or gunsmithing"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other shooting work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "T": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Everyday cook",
+          "narrative": "everyday cooking"
+        },
+        "C": {
+          "name": "Smoke / grill",
+          "narrative": "smoking or grilling"
+        },
+        "D": {
+          "name": "Recipe / preserve",
+          "narrative": "a recipe or preserving"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other cooking"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "U": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Wood",
+          "narrative": "woodworking"
+        },
+        "C": {
+          "name": "Metal",
+          "narrative": "metalwork"
+        },
+        "D": {
+          "name": "Repair project",
+          "narrative": "a repair project"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other workshop work"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "V": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Watching",
+          "narrative": "watching the game"
+        },
+        "C": {
+          "name": "Playing",
+          "narrative": "playing"
+        },
+        "D": {
+          "name": "Hosting",
+          "narrative": "hosting"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other game-day activity"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "W": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "General hobby",
+          "narrative": "a general hobby"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "another hobby task"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "X": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Nice day",
+          "narrative": "a nice day"
+        },
+        "C": {
+          "name": "Rain",
+          "narrative": "rain"
+        },
+        "D": {
+          "name": "Dry spell",
+          "narrative": "a dry spell"
+        },
+        "E": {
+          "name": "Snow (nuisance)",
+          "narrative": "nuisance snow"
+        },
+        "F": {
+          "name": "Wind",
+          "narrative": "wind"
+        },
+        "G": {
+          "name": "Cloudy / overcast",
+          "narrative": "cloudy or overcast weather"
+        },
+        "H": {
+          "name": "Heat / humidity",
+          "narrative": "heat or humidity"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "other everyday weather"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "B",
+            "C",
+            "D",
+            "E",
+            "F",
+            "G",
+            "H",
+            "Z"
+          ],
+          "order": 1
+        }
+      }
+    },
+    "Y": {
+      "impacts": {
+        "A": {
+          "name": "Unspecified",
+          "narrative": "an unspecified task"
+        },
+        "B": {
+          "name": "Christmas",
+          "narrative": "Christmas"
+        },
+        "C": {
+          "name": "New Year",
+          "narrative": "New Year"
+        },
+        "D": {
+          "name": "Easter",
+          "narrative": "Easter"
+        },
+        "E": {
+          "name": "Independence Day",
+          "narrative": "Independence Day"
+        },
+        "F": {
+          "name": "Thanksgiving",
+          "narrative": "Thanksgiving"
+        },
+        "G": {
+          "name": "Game day",
+          "narrative": "game day"
+        },
+        "H": {
+          "name": "Birthday / family day",
+          "narrative": "a birthday or family day"
+        },
+        "Z": {
+          "name": "Other",
+          "narrative": "another holiday or calendar event"
+        },
+        "*** Tasks ***": {
+          "items": [
+            "O",
+            "P",
+            "Q",
+            "R",
+            "C",
+            "T",
+            "D",
+            "U",
+            "K",
+            "V",
+            "E",
+            "J",
+            "L",
+            "M",
+            "S",
+            "F",
+            "B",
+            "I",
+            "G",
+            "H",
+            "N",
+            "Z"
+          ],
+          "order": 1
+        },
+        "I": {
+          "name": "Friday / TGIF",
+          "narrative": "Friday or TGIF"
+        },
+        "J": {
+          "name": "Labor Day",
+          "narrative": "Labor Day"
+        },
+        "K": {
+          "name": "Memorial Day",
+          "narrative": "Memorial Day"
+        },
+        "L": {
+          "name": "Patriots Day (9/11)",
+          "narrative": "Patriots Day"
+        },
+        "M": {
+          "name": "Halloween",
+          "narrative": "Halloween"
+        },
+        "N": {
+          "name": "Festivus for the rest of us",
+          "narrative": "Festivus for the rest of us"
+        },
+        "O": {
+          "name": "Spring",
+          "narrative": "spring"
+        },
+        "P": {
+          "name": "Summer",
+          "narrative": "summer"
+        },
+        "Q": {
+          "name": "Fall / autumn",
+          "narrative": "fall or autumn"
+        },
+        "R": {
+          "name": "Winter",
+          "narrative": "winter"
+        },
+        "S": {
+          "name": "Veterans Day",
+          "narrative": "Veterans Day"
+        },
+        "T": {
+          "name": "Valentine's Day",
+          "narrative": "Valentine's Day"
+        },
+        "U": {
+          "name": "Mother's Day",
+          "narrative": "Mother's Day"
+        },
+        "V": {
+          "name": "Father's Day",
+          "narrative": "Father's Day"
+        }
+      }
+    }
+  },
+  "official_response": {
+    "A": {
+      "name": "None offered",
+      "narrative": ""
+    },
+    "*** Economic ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M"
+      ],
+      "order": 2,
+      "narrative": ""
+    },
+    "*** Domestic ***": {
+      "items": [
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S"
+      ],
+      "order": 3,
+      "narrative": ""
+    },
+    "*** International ***": {
+      "items": [
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y"
+      ],
+      "order": 4,
+      "narrative": ""
+    },
+    "*** Reserved ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "Z"
+      ],
+      "order": 5
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": ""
+    },
+    "B": {
+      "name": "Reserved",
+      "narrative": ""
+    },
+    "C": {
+      "name": "Reserved",
+      "narrative": ""
+    },
+    "D": {
+      "name": "Reserved",
+      "narrative": ""
+    },
+    "E": {
+      "name": "Reserved",
+      "narrative": ""
+    },
+    "F": {
+      "name": "Reserved",
+      "narrative": ""
+    },
+    "G": {
+      "name": "Reserved",
+      "narrative": ""
+    },
+    "H": {
+      "name": "Optimistic",
+      "narrative": "I am optimistic about the economic conditions we are witnessing"
+    },
+    "I": {
+      "name": "Neutral / wait-and-see",
+      "narrative": "I am taking a wait-and-see view of the economic conditions we are witnessing"
+    },
+    "J": {
+      "name": "Cautious",
+      "narrative": "I am cautious about the economic conditions we are witnessing"
+    },
+    "K": {
+      "name": "Concerned",
+      "narrative": "I am concerned about the economic conditions we are witnessing"
+    },
+    "L": {
+      "name": "Pessimistic",
+      "narrative": "I am pessimistic about the economic conditions we are witnessing"
+    },
+    "M": {
+      "name": "Highly concerned",
+      "narrative": "I am highly concerned about the economic conditions we are witnessing"
+    },
+    "N": {
+      "name": "Optimistic",
+      "narrative": "I am optimistic about the domestic conditions we are witnessing"
+    },
+    "O": {
+      "name": "Neutral / wait-and-see",
+      "narrative": "I am taking a wait-and-see view of the domestic conditions we are witnessing"
+    },
+    "P": {
+      "name": "Cautious",
+      "narrative": "I am cautious about the domestic conditions we are witnessing"
+    },
+    "Q": {
+      "name": "Concerned",
+      "narrative": "I am concerned about the domestic conditions we are witnessing"
+    },
+    "R": {
+      "name": "Pessimistic",
+      "narrative": "I am pessimistic about the domestic conditions we are witnessing"
+    },
+    "S": {
+      "name": "Highly concerned",
+      "narrative": "I am highly concerned about the domestic conditions we are witnessing"
+    },
+    "T": {
+      "name": "Optimistic",
+      "narrative": "I am optimistic about the international conditions we are witnessing"
+    },
+    "U": {
+      "name": "Neutral / wait-and-see",
+      "narrative": "I am taking a wait-and-see view of the international conditions we are witnessing"
+    },
+    "V": {
+      "name": "Cautious",
+      "narrative": "I am cautious about the international conditions we are witnessing"
+    },
+    "W": {
+      "name": "Concerned",
+      "narrative": "I am concerned about the international conditions we are witnessing"
+    },
+    "X": {
+      "name": "Pessimistic",
+      "narrative": "I am pessimistic about the international conditions we are witnessing"
+    },
+    "Y": {
+      "name": "Highly concerned",
+      "narrative": "I am highly concerned about the international conditions we are witnessing"
+    }
+  },
+  "information_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": ""
+    },
+    "*** Courage ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F"
+      ],
+      "order": 1,
+      "narrative": "Courage: do the hard and right thing anyway."
+    },
+    "B": {
+      "name": "Joshua 1:9",
+      "narrative": "Have not I commanded thee? Be strong and of a good courage; be not afraid, neither be thou dismayed: for the LORD thy God is with thee whithersoever thou goest."
+    },
+    "C": {
+      "name": "1 Samuel 17:45-47",
+      "narrative": "Then said David to the Philistine, Thou comest to me with a sword, and with a spear, and with a shield: but I come to thee in the name of the LORD of hosts, the God of the armies of Israel, whom thou hast defied. 46 This day will the LORD deliver thee into mine hand; and I will smite thee, and take thine head from thee; and I will give the carcases of the host of the Philistines this day unto the fowls of the air, and to the wild beasts of the earth; that all the earth may know that there is a God in Israel. And all this assembly shall know that the LORD saveth not with sword and spear: for the battle is the LORD'S, and he will give you into our hands."
+    },
+    "D": {
+      "name": "2 Chronicles 32:7-8",
+      "narrative": "Be strong and courageous, be not afraid nor dismayed for the king of Assyria, nor for all the multitude that is with him: for there be more with us than with him: With him is an arm of flesh; but with us is the LORD our God to help us, and to fight our battles. And the people rested themselves upon the words of Hezekiah king of Judah."
+    },
+    "E": {
+      "name": "Esther 4:14-16",
+      "narrative": "For if thou altogether holdest thy peace at this time, then shall there enlargement and deliverance arise to the Jews from another place; but thou and thy father's house shall be destroyed: and who knoweth whether thou art come to the kingdom for such a time as this? Then Esther bade them return Mordecai this answer, Go, gather together all the Jews that are present in Shushan, and fast ye for me, and neither eat nor drink three days, night or day: I also and my maidens will fast likewise; and so will I go in unto the king, which is not according to the law: and if I perish, I perish."
+    },
+    "F": {
+      "name": "Isaiah 41:10",
+      "narrative": "Fear thou not; for I am with thee: be not dismayed; for I am thy God: I will strengthen thee; yea, I will help thee; yea, I will uphold thee with the right hand of my righteousness."
+    },
+    "*** Discipline ***": {
+      "items": [
+        "G",
+        "H",
+        "I"
+      ],
+      "order": 2,
+      "narrative": "Discipline: No man is free who is not master of himself."
+    },
+    "G": {
+      "name": "Proverbs 25:28",
+      "narrative": "He that hath no rule over his own spirit is like a city that is broken down, and without walls."
+    },
+    "H": {
+      "name": "1 Corinthians 9:24-27",
+      "narrative": "Know ye not that they which run in a race run all*, but one receiveth the prize? So run, that ye may obtain. And every man that striveth for the mastery is temperate in all things*. Now they do it to obtain a corruptible crown; but we an incorruptible. I therefore so run, not as uncertainly; so fight I, not as one that beateth the air: But I keep under my body, and bring it into subjection: lest that by any means*, when I have preached to others, I myself should be a castaway."
+    },
+    "I": {
+      "name": "Philippians 4:8",
+      "narrative": "Finally, brethren, whatsoever things are true, whatsoever things are honest, whatsoever things are just, whatsoever things are pure, whatsoever things are lovely, whatsoever things are of good report; if there be any virtue, and if there be any praise, think on these things."
+    },
+    "*** Endurance ***": {
+      "items": [
+        "J",
+        "K",
+        "L"
+      ],
+      "order": 3,
+      "narrative": "Endurance: keep going. The finish is built one ordinary day at a time."
+    },
+    "J": {
+      "name": "Hebrews 12:1-2",
+      "narrative": "Wherefore seeing we also are compassed about* with so great a cloud of witnesses, let us lay aside every weight, and the sin which doth so easily beset us, and let us run with patience the race that is set before us, Looking unto Jesus the author and finisher of our faith; who for the joy that was set before him endured the cross, despising the shame, and is set down at the right hand of the throne of God."
+    },
+    "K": {
+      "name": "James 1:2-4",
+      "narrative": "My brethren, count it all joy when ye fall into divers temptations; Knowing this, that the trying of your faith worketh patience. But let patience have her perfect work, that ye may be perfect and entire, wanting nothing."
+    },
+    "L": {
+      "name": "Romans 5:3-4",
+      "narrative": "And not only so, but we glory in tribulations also: knowing that tribulation worketh patience; And patience, experience; and experience, hope:"
+    },
+    "*** Hope ***": {
+      "items": [
+        "M",
+        "N",
+        "O"
+      ],
+      "order": 4,
+      "narrative": "Hope is tomorrow's joy seeping into today's drudgery."
+    },
+    "M": {
+      "name": "Jeremiah 29:11",
+      "narrative": "For I know the thoughts that I think toward you, saith the LORD, thoughts of peace, and not of evil, to give you an expected end."
+    },
+    "N": {
+      "name": "Proverbs 12:25",
+      "narrative": "Heaviness in the heart of man maketh it stoop: but a good word maketh it glad."
+    },
+    "O": {
+      "name": "Daniel 3:17-18",
+      "narrative": "If it be so, our God whom we serve is able to deliver us from the burning fiery furnace, and he will deliver us out of thine hand, O king. But if not, be it known unto thee, O king, that we will not serve thy gods, nor worship the golden image which thou hast set up."
+    },
+    "*** Patience and Self Control ***": {
+      "items": [
+        "P",
+        "Q"
+      ],
+      "order": 5,
+      "narrative": "Patience: your first reaction is rarely the one you will be proud of."
+    },
+    "P": {
+      "name": "Genesis 39:7-12",
+      "narrative": "And it came to pass after these things, that his master's wife cast her eyes upon Joseph; and she said, Lie with me. But he refused, and said unto his master's wife, Behold, my master wotteth not what is with me in the house, and he hath committed all that he hath to my hand; There is none greater in this house than I; neither hath he kept back any thing from me but thee, because thou art his wife: how then can I do this great wickedness, and sin against God? And it came to pass, as she spake to Joseph day by day, that he hearkened not unto her, to lie by her, or to be with her. And it came to pass about this time, that Joseph went into the house to do his business; and there was none of the men of the house there within.2 And she caught him by his garment, saying, Lie with me: and he left his garment in her hand, and fled, and got him out."
+    },
+    "Q": {
+      "name": "Proverbs 15:1",
+      "narrative": "A soft answer turneth away wrath: but grievous words stir up anger."
+    },
+    "*** Strength ***": {
+      "items": [
+        "R",
+        "S"
+      ],
+      "order": 6,
+      "narrative": "Strength is a steel hand in a velvet glove."
+    },
+    "R": {
+      "name": "Isaiah 40:29-31",
+      "narrative": "He giveth power to the faint; and to them that have no might he increaseth strength. Even the youths shall faint and be weary, and the young men shall utterly fall: But they that wait upon the LORD shall renew their strength; they shall mount up with wings as eagles; they shall run, and not be weary; and they shall walk, and not faint."
+    },
+    "S": {
+      "name": "Philippians 4:12-13",
+      "narrative": "I know both how to be abased, and I know how to abound: every where* and in all things I am instructed both to be full and to be hungry, both to abound and to suffer need. I can do all things through Christ which strengtheneth me."
+    },
+    "*** Thankfulness ***": {
+      "items": [
+        "T"
+      ],
+      "order": 7,
+      "narrative": "Thankfulness: making known to God and others how they have benefited your life."
+    },
+    "T": {
+      "name": "1 Thessalonians 5:14-18",
+      "narrative": "Now we exhort you, brethren, warn them that are unruly, comfort the feebleminded, support the weak, be patient toward all men. See that none* render evil for evil unto any man; but ever follow that which is good, both among yourselves, and to all men. Rejoice evermore. Pray without ceasing. In every thing give thanks: for this is the will of God in Christ Jesus concerning you."
+    },
+    "*** Training ***": {
+      "items": [
+        "U",
+        "V",
+        "W"
+      ],
+      "order": 8,
+      "narrative": "Training is repeating the right thing until it is easier than the wrong thing."
+    },
+    "U": {
+      "name": "Joshua 1:8-9",
+      "narrative": "This book of the law shall not depart out of thy mouth; but thou shalt meditate therein day and night, that thou mayest observe to do according to all that is written therein: for then thou shalt make thy way prosperous, and then thou shalt have good success. Have not I commanded thee? Be strong and of a good courage; be not afraid, neither be thou dismayed: for the LORD thy God is with thee whithersoever thou goest."
+    },
+    "V": {
+      "name": "Psalm 32:8",
+      "narrative": "I will instruct thee and teach thee in the way which thou shalt go: I will guide thee with mine eye."
+    },
+    "W": {
+      "name": "Proverbs 3:5-6",
+      "narrative": "Trust in the LORD with all thine heart; and lean not unto thine own understanding. In all thy ways acknowledge him, and he shall direct thy paths."
+    },
+    "*** Wisdom ***": {
+      "items": [
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 9,
+      "narrative": "Wisdom is knowing what to do—and what to leave undone."
+    },
+    "X": {
+      "name": "Proverbs 2:6-7",
+      "narrative": "For the LORD giveth wisdom: out of his mouth cometh knowledge and understanding. He layeth up sound wisdom for the righteous: he is a buckler to them that walk uprightly."
+    },
+    "Y": {
+      "name": "Jeremiah 33:2-3",
+      "narrative": "Thus saith the LORD the maker thereof, the LORD that formed it, to establish it; the LORD is his name; Call unto me, and I will answer thee, and shew thee great and mighty things, which thou knowest not."
+    },
+    "Z": {
+      "name": "James 1:5-8",
+      "narrative": "If any of you lack wisdom, let him ask of God, that giveth to all men liberally, and upbraideth not; and it shall be given him.  But let him ask in faith, nothing wavering. For he that wavereth is like a wave of the sea driven with the wind and tossed. For let not that man think that he shall receive any thing of the Lord. A double minded man is unstable in all his ways."
+    }
+  },
+  "station_response": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "this station's status is unknown"
+    },
+    "*** Full operations ***": {
+      "items": [
+        "C",
+        "E",
+        "B",
+        "D"
+      ],
+      "order": 1
+    },
+    "*** Partial operations ***": {
+      "items": [
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O"
+      ],
+      "order": 2
+    },
+    "*** Off air ***": {
+      "items": [
+        "P",
+        "U",
+        "V",
+        "W",
+        "X"
+      ],
+      "order": 3
+    },
+    "*** Logistics ***": {
+      "items": [
+        "Q",
+        "S",
+        "R",
+        "T",
+        "Y"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "No impact",
+      "narrative": "this station is at full operations"
+    },
+    "C": {
+      "name": "Minor impact",
+      "narrative": "this station is at full operations with minor impact"
+    },
+    "D": {
+      "name": "Not in impact zone",
+      "narrative": "this station is at full operations and not in the impact zone"
+    },
+    "E": {
+      "name": "Monitoring",
+      "narrative": "this station is at full operations and monitoring the situation"
+    },
+    "F": {
+      "name": "Antenna / RF limited",
+      "narrative": "this station is at partial operations with antenna or RF limits"
+    },
+    "G": {
+      "name": "Battery / reduced power",
+      "narrative": "this station is at partial operations on battery or reduced power"
+    },
+    "H": {
+      "name": "Daylight only",
+      "narrative": "this station is at partial operations, daylight only, due to power"
+    },
+    "I": {
+      "name": "Irregular / unscheduled",
+      "narrative": "this station is at partial operations on an irregular or unscheduled basis"
+    },
+    "J": {
+      "name": "Manpower shortage",
+      "narrative": "this station is at partial operations due to a manpower shortage"
+    },
+    "K": {
+      "name": "Nets only",
+      "narrative": "this station is at partial operations, nets only"
+    },
+    "L": {
+      "name": "Night only",
+      "narrative": "this station is at partial operations, nighttime only, due to power"
+    },
+    "M": {
+      "name": "Receive only",
+      "narrative": "this station is at partial operations, receive only"
+    },
+    "N": {
+      "name": "Top of the hour only",
+      "narrative": "this station is at partial operations, top of the hour only"
+    },
+    "O": {
+      "name": "Unattended",
+      "narrative": "this station is at partial operations and unattended"
+    },
+    "P": {
+      "name": "Equipment failure",
+      "narrative": "this station is off the air due to equipment failure"
+    },
+    "U": {
+      "name": "Equipment reconfiguration",
+      "narrative": "this station is off the air for equipment reconfiguration"
+    },
+    "V": {
+      "name": "Evacuating",
+      "narrative": "this station is evacuating and going off the air"
+    },
+    "W": {
+      "name": "Shelter in place",
+      "narrative": "this station is off the air and sheltering in place"
+    },
+    "X": {
+      "name": "Storms",
+      "narrative": "this station is off the air due to storms"
+    },
+    "Q": {
+      "name": "Needing shelter",
+      "narrative": "this station is needing shelter"
+    },
+    "R": {
+      "name": "Offering shelter",
+      "narrative": "this station is able to offer shelter"
+    },
+    "S": {
+      "name": "Needing supplies",
+      "narrative": "this station is needing supplies"
+    },
+    "T": {
+      "name": "Offering supplies",
+      "narrative": "this station is able to offer supplies"
+    },
+    "Y": {
+      "name": "Relocated (alternate QTH)",
+      "narrative": "this station has relocated to an alternate location"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved station status code"
+    }
+  },
+  "severity": {
+    "A": {
+      "name": "Unspecified",
+      "narrative": ""
+    },
+    "*** Attitude ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K"
+      ],
+      "order": 1
+    },
+    "B": {
+      "name": "Loving it",
+      "narrative": "loving it"
+    },
+    "C": {
+      "name": "Looking forward to it",
+      "narrative": "looking forward to it"
+    },
+    "D": {
+      "name": "Taking it in stride",
+      "narrative": "taking it in stride"
+    },
+    "E": {
+      "name": "Mildly annoyed",
+      "narrative": "mildly annoyed"
+    },
+    "F": {
+      "name": "Dreading it",
+      "narrative": "dreading it"
+    },
+    "G": {
+      "name": "Glad when it is done",
+      "narrative": "glad when it is done"
+    },
+    "H": {
+      "name": "Avoiding it",
+      "narrative": "avoiding it"
+    },
+    "*** Reserved ***": {
+      "items": [
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 2
+    },
+    "I": {
+      "name": "Curious",
+      "narrative": "curious about it"
+    },
+    "J": {
+      "name": "Ready for it",
+      "narrative": "ready for it"
+    },
+    "K": {
+      "name": "Indifferent",
+      "narrative": "indifferent"
+    },
+    "L": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "M": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "N": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "O": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "P": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Q": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "R": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "S": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "T": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    }
+  },
+  "emergency_group_order": [
+    "*** Chores ***",
+    "*** Preps ***",
+    "*** Hobbies ***",
+    "*** Everyday / calendar ***",
+    "*** Reserved ***"
+  ],
+  "impact_group_order": [
+    "*** Tasks ***"
+  ],
+  "official_response_group_order": [
+    "*** Economic ***",
+    "*** Domestic ***",
+    "*** International ***"
+  ],
+  "group_descriptions": {},
+  "hide_reserved": true
+}

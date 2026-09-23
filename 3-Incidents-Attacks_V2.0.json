@@ -1,0 +1,1272 @@
+{
+  "gui_titles": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Event:",
+    "status": "3. Phase:",
+    "severity": "4. Severity:",
+    "primary": "5. Impact / Motive:",
+    "secondary": "6. Official Response:",
+    "source": "7. Trust / Source:",
+    "station": "8. Station Status:"
+  },
+  "gui_titles_v3": {
+    "select_list": "1. Select List:",
+    "emergency": "2. Event:",
+    "status": "3. Phase:",
+    "primary": "5. Impact / Motive:",
+    "secondary_impact": "6. Official Response:",
+    "severity": "4. Severity:",
+    "source": "7. Trust / Source:",
+    "station": "8. Station Status:",
+    "secondary": "6. Official Response:"
+  },
+  "emergency_type": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "an unknown incident",
+      "default_phase": "A",
+      "default_severity": "A",
+      "default_source": "A",
+      "default_station": "B"
+    },
+    "*** Violent act ***": {
+      "narrative": "",
+      "description": "Violent act:\nForce used against people. Method only — shooter, weapon, vehicle, hostage. Motive is set under Impact / Motive.",
+      "order": 1,
+      "items": [
+        "B",
+        "C",
+        "F",
+        "G",
+        "H",
+        "X"
+      ],
+      "B": {
+        "name": "Active shooter / armed attacker",
+        "narrative": "an active-shooter or armed-attacker incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "C": {
+        "name": "Vehicle-based attack",
+        "narrative": "a vehicle-based attack",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "F": {
+        "name": "Kidnapping / hostage",
+        "narrative": "a kidnapping or hostage incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "G": {
+        "name": "Assassination",
+        "narrative": "an assassination",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "H": {
+        "name": "Edged or blunt weapon",
+        "narrative": "an edged- or blunt-weapon attack",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "X": {
+        "name": "Other",
+        "narrative": "an unspecified violent incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Accident / failure ***": {
+      "narrative": "",
+      "description": "Accident / failure:\nA human system failed or the cause is not known. Plant explosion, hazmat, infrastructure or dam failure. Do not call it an attack unless that is known.",
+      "order": 4,
+      "items": [
+        "N",
+        "P",
+        "S",
+        "T",
+        "Z"
+      ],
+      "N": {
+        "name": "Infrastructure / industrial failure",
+        "narrative": "an infrastructure or industrial failure",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "P": {
+        "name": "Hazmat / plant release",
+        "narrative": "a hazmat or plant release",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "S": {
+        "name": "Pipeline / energy failure",
+        "narrative": "a pipeline or energy failure",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "T": {
+        "name": "Bridge / dam failure",
+        "narrative": "a bridge or dam failure",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Z": {
+        "name": "Other",
+        "narrative": "an unspecified failure or accident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Device ***": {
+      "narrative": "",
+      "description": "Device:\nA physical device, fire, or hazardous material used as the mechanism. Includes bombs, drones, arson, and chemical or radiological releases.",
+      "order": 2,
+      "items": [
+        "D",
+        "E",
+        "I",
+        "K",
+        "L",
+        "M",
+        "U",
+        "V",
+        "O"
+      ],
+      "D": {
+        "name": "Bomb / IED",
+        "narrative": "a bomb or IED incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "E": {
+        "name": "Drone attack",
+        "narrative": "a drone attack",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "I": {
+        "name": "Arson",
+        "narrative": "an arson incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "K": {
+        "name": "Chemical release / attack",
+        "narrative": "a chemical release or attack",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "L": {
+        "name": "Biological release / attack",
+        "narrative": "a biological release or attack",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "M": {
+        "name": "Radiological release / attack",
+        "narrative": "a radiological release or attack",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "U": {
+        "name": "Food / water supply incident",
+        "narrative": "a food- or water-supply incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "V": {
+        "name": "Nuclear facility incident",
+        "narrative": "a nuclear-facility incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "O": {
+        "name": "Other",
+        "narrative": "an unspecified device incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    },
+    "*** Cyber ***": {
+      "narrative": "",
+      "description": "Cyber:\nA network, data, or communications attack. Includes cyberattack, ransomware, and jamming.",
+      "order": 3,
+      "items": [
+        "J",
+        "Q",
+        "R",
+        "W",
+        "Y"
+      ],
+      "J": {
+        "name": "Cyberattack",
+        "narrative": "a cyberattack",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "R": {
+        "name": "Ransomware",
+        "narrative": "a ransomware incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "W": {
+        "name": "Comms / GPS jamming",
+        "narrative": "a communications or GPS-jamming incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Y": {
+        "name": "Other",
+        "narrative": "an unspecified cyber incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      },
+      "Q": {
+        "name": "Maritime / port",
+        "narrative": "a maritime or port cyber incident",
+        "default_phase": "F",
+        "default_severity": "A",
+        "default_source": "Q",
+        "default_station": "B"
+      }
+    }
+  },
+  "status_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "the phase is unknown",
+      "family": "unknown"
+    },
+    "*** Issued products ***": {
+      "items": [
+        "B",
+        "C",
+        "D"
+      ],
+      "description": "An official product has been issued.",
+      "order": 1
+    },
+    "*** Before it starts ***": {
+      "items": [
+        "E",
+        "F",
+        "G"
+      ],
+      "description": "Event has not yet started or is only threatened.",
+      "order": 2
+    },
+    "*** While it is happening ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M"
+      ],
+      "description": "Event is currently happening.",
+      "order": 3
+    },
+    "*** After / closeout ***": {
+      "items": [
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T"
+      ],
+      "description": "Event has ended, been cancelled, or all clear.",
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "description": "Placeholders for later phase codes.",
+      "order": 5
+    },
+    "B": {
+      "name": "Advisory",
+      "narrative": "advisory has been issued",
+      "family": "issued"
+    },
+    "C": {
+      "name": "Watch",
+      "narrative": "watch has been issued",
+      "family": "issued"
+    },
+    "D": {
+      "name": "Warning",
+      "narrative": "warning has been issued",
+      "family": "issued"
+    },
+    "E": {
+      "name": "Possible",
+      "narrative": "is possible",
+      "family": "state"
+    },
+    "F": {
+      "name": "Expected",
+      "narrative": "is expected",
+      "family": "state"
+    },
+    "G": {
+      "name": "Imminent",
+      "narrative": "is imminent",
+      "family": "state"
+    },
+    "H": {
+      "name": "Occurring now",
+      "narrative": "is occurring now",
+      "family": "state"
+    },
+    "I": {
+      "name": "Intensifying",
+      "narrative": "is intensifying",
+      "family": "state"
+    },
+    "J": {
+      "name": "Peak intensity",
+      "narrative": "is at peak intensity",
+      "family": "state"
+    },
+    "K": {
+      "name": "Weakening",
+      "narrative": "is weakening",
+      "family": "state"
+    },
+    "L": {
+      "name": "Continuing",
+      "narrative": "is continuing",
+      "family": "state"
+    },
+    "M": {
+      "name": "Spreading",
+      "narrative": "is spreading",
+      "family": "state"
+    },
+    "N": {
+      "name": "Concluded",
+      "narrative": "has concluded",
+      "family": "state"
+    },
+    "O": {
+      "name": "Dissipated",
+      "narrative": "has dissipated",
+      "family": "state"
+    },
+    "P": {
+      "name": "Cancelled",
+      "narrative": "has been cancelled",
+      "family": "state"
+    },
+    "Q": {
+      "name": "Downgraded",
+      "narrative": "has been downgraded",
+      "family": "state"
+    },
+    "R": {
+      "name": "All clear",
+      "narrative": "All clear has been given.",
+      "family": "standalone"
+    },
+    "S": {
+      "name": "Hoax / unfounded",
+      "narrative": "was a hoax or unfounded",
+      "family": "state"
+    },
+    "T": {
+      "name": "Prevented / stopped",
+      "narrative": "was prevented or stopped",
+      "family": "state"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved phase code",
+      "family": "reserved"
+    }
+  },
+  "shared_impacts": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "the impact is unknown"
+    },
+    "*** Unknown motive ***": {
+      "narrative": "an incident of unknown motive",
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F"
+      ],
+      "order": 1,
+      "description": "Unknown motive:\nThe reason for the act is not known or not stated. Use this for first reports."
+    },
+    "*** Personal / domestic ***": {
+      "narrative": "an apparent personal or domestic act",
+      "items": [
+        "G",
+        "H",
+        "I",
+        "J",
+        "K"
+      ],
+      "order": 3,
+      "description": "Personal / domestic:\nPartner, family, or acquaintance violence. Not political, criminal-crew, or terror."
+    },
+    "*** Criminal / gang ***": {
+      "narrative": "an apparent criminal or gang-related act",
+      "items": [
+        "L",
+        "M",
+        "N",
+        "O",
+        "P"
+      ],
+      "order": 4,
+      "description": "Criminal / gang:\nRobbery, turf, cartel, or other profit or crew crime."
+    },
+    "*** Ideological ***": {
+      "narrative": "an apparent ideologically motivated act",
+      "items": [
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U"
+      ],
+      "order": 5,
+      "description": "Ideological:\nPolitical, extremist, or belief-driven attack. Not family violence or ordinary crime."
+    },
+    "B": {
+      "name": "Casualties",
+      "narrative": "casualties are the main concern"
+    },
+    "C": {
+      "name": "Injuries",
+      "narrative": "injuries are the main concern"
+    },
+    "D": {
+      "name": "Hazardous release / contamination",
+      "narrative": "a hazardous release or contamination is the main concern"
+    },
+    "E": {
+      "name": "Property damage",
+      "narrative": "property damage is the main concern"
+    },
+    "F": {
+      "name": "Infrastructure damage",
+      "narrative": "infrastructure damage is the main concern"
+    },
+    "G": {
+      "name": "Casualties",
+      "narrative": "casualties are the main concern"
+    },
+    "H": {
+      "name": "Injuries",
+      "narrative": "injuries are the main concern"
+    },
+    "I": {
+      "name": "Hostage / ransom",
+      "narrative": "a hostage situation or ransom demand is the main concern"
+    },
+    "J": {
+      "name": "Property damage",
+      "narrative": "property damage is the main concern"
+    },
+    "K": {
+      "name": "Infrastructure damage",
+      "narrative": "infrastructure damage is the main concern"
+    },
+    "L": {
+      "name": "Casualties",
+      "narrative": "casualties are the main concern"
+    },
+    "M": {
+      "name": "Injuries",
+      "narrative": "injuries are the main concern"
+    },
+    "N": {
+      "name": "Hostage / ransom",
+      "narrative": "a hostage situation or ransom demand is the main concern"
+    },
+    "O": {
+      "name": "Property damage",
+      "narrative": "property damage is the main concern"
+    },
+    "P": {
+      "name": "Infrastructure damage",
+      "narrative": "infrastructure damage is the main concern"
+    },
+    "Q": {
+      "name": "Casualties",
+      "narrative": "casualties are the main concern"
+    },
+    "R": {
+      "name": "Injuries",
+      "narrative": "injuries are the main concern"
+    },
+    "S": {
+      "name": "Hostage / ransom",
+      "narrative": "a hostage situation or ransom demand is the main concern"
+    },
+    "T": {
+      "name": "Property damage",
+      "narrative": "property damage is the main concern"
+    },
+    "U": {
+      "name": "Infrastructure damage",
+      "narrative": "infrastructure damage is the main concern"
+    },
+    "V": {
+      "name": "Injuries",
+      "narrative": "injuries are the main concern"
+    },
+    "W": {
+      "name": "Casualties",
+      "narrative": "casualties are the main concern"
+    },
+    "X": {
+      "name": "Hazardous release / contamination",
+      "narrative": "a hazardous release or contamination is the main concern"
+    },
+    "Y": {
+      "name": "Property damage",
+      "narrative": "property damage is the main concern"
+    },
+    "Z": {
+      "name": "Infrastructure damage",
+      "narrative": "infrastructure damage is the main concern"
+    },
+    "*** Failure / no hostile act ***": {
+      "narrative": "age, design, wear, or non-hostile failure",
+      "items": [
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 2,
+      "description": "Failure / no hostile act:\nAge, poor design, wear, overload, or error. Not crime, politics, or terror."
+    }
+  },
+  "impact_overrides": {},
+  "official_response": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "official response is unknown"
+    },
+    "B": {
+      "name": "Local public safety",
+      "narrative": "local public safety is monitoring the situation"
+    },
+    "C": {
+      "name": "Local public safety",
+      "narrative": "local public safety is responding to the situation"
+    },
+    "D": {
+      "name": "EOC",
+      "narrative": "the EOC is monitoring the situation"
+    },
+    "E": {
+      "name": "EOC",
+      "narrative": "the EOC is responding"
+    },
+    "F": {
+      "name": "State agencies/officials",
+      "narrative": "state agencies and or officials are monitoring the situation"
+    },
+    "G": {
+      "name": "State agencies/officials",
+      "narrative": "state agencies and or officials are responding to the situation"
+    },
+    "H": {
+      "name": "National Guard",
+      "narrative": "the National Guard is monitoring the situation"
+    },
+    "I": {
+      "name": "National Guard",
+      "narrative": "the National Guard is responding to the situation"
+    },
+    "J": {
+      "name": "Health dept",
+      "narrative": "the health department is monitoring the situation"
+    },
+    "K": {
+      "name": "Health dept",
+      "narrative": "the health department is responding to the situation"
+    },
+    "L": {
+      "name": "Public alerts issued",
+      "narrative": "public alerts have been issued"
+    },
+    "M": {
+      "name": "Shelter-in-place",
+      "narrative": "a shelter-in-place order is in effect"
+    },
+    "N": {
+      "name": "FEMA",
+      "narrative": "FEMA is monitoring the situation"
+    },
+    "O": {
+      "name": "FEMA",
+      "narrative": "FEMA is responding to the situation"
+    },
+    "P": {
+      "name": "Federal agencies/officials",
+      "narrative": "federal authorities are monitoring the situation"
+    },
+    "Q": {
+      "name": "Federal agencies/officials",
+      "narrative": "federal authorities are responding to the situation"
+    },
+    "R": {
+      "name": "Red Cross",
+      "narrative": "the Red Cross is monitoring the situation"
+    },
+    "S": {
+      "name": "Red Cross",
+      "narrative": "the Red Cross is responding to the situation"
+    },
+    "T": {
+      "name": "Law enforcement",
+      "narrative": "law enforcement is monitoring the situation"
+    },
+    "U": {
+      "name": "Law enforcement",
+      "narrative": "law enforcement is responding to the situation"
+    },
+    "V": {
+      "name": "FBI",
+      "narrative": "The FBI is monitoring the situation"
+    },
+    "W": {
+      "name": "FBI",
+      "narrative": "The FBI is responding to the situation"
+    },
+    "X": {
+      "name": "Evacuation warning",
+      "narrative": "an evacuation warning has been issued"
+    },
+    "Y": {
+      "name": "Evacuation ordered",
+      "narrative": "evacuations have been ordered"
+    },
+    "Z": {
+      "name": "State of emergency",
+      "narrative": "a state of emergency has been declared"
+    },
+    "*** Monitoring ***": {
+      "items": [
+        "D",
+        "N",
+        "J",
+        "T",
+        "B",
+        "H",
+        "P",
+        "R",
+        "F",
+        "V"
+      ],
+      "order": 1
+    },
+    "*** Responding ***": {
+      "items": [
+        "E",
+        "O",
+        "K",
+        "U",
+        "C",
+        "I",
+        "Q",
+        "S",
+        "G",
+        "W"
+      ],
+      "order": 2
+    },
+    "*** Official Orders ***": {
+      "items": [
+        "L",
+        "M",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 3
+    }
+  },
+  "information_codes": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "trust and source are unknown"
+    },
+    "*** NATO Admiralty content matrix ***": {
+      "items": [
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G"
+      ],
+      "order": 1
+    },
+    "*** Trust matrix ***": {
+      "items": [
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P"
+      ],
+      "order": 2,
+      "description": "Trust matrix:\nHigh: Confirmed by multiple credible and independent sources.\nMedium: Plausible with partial corroboration or one strong source.\nLow: Single-source, weakly supported, conflicting, or unconfirmed.",
+      "show_in_report": true
+    },
+    "*** Sources ***": {
+      "items": [
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 3
+    },
+    "B": {
+      "name": "Confirmed",
+      "narrative": "the content is confirmed"
+    },
+    "C": {
+      "name": "Probably true",
+      "narrative": "the content is probably true"
+    },
+    "D": {
+      "name": "Possibly true",
+      "narrative": "the content is possibly true"
+    },
+    "E": {
+      "name": "Doubtfully true",
+      "narrative": "the content is doubtfully true"
+    },
+    "F": {
+      "name": "Improbable",
+      "narrative": "the content is improbable"
+    },
+    "G": {
+      "name": "Cannot be judged",
+      "narrative": "the content cannot be judged"
+    },
+    "H": {
+      "name": "Trusted high",
+      "narrative": "the source is trusted and corroboration is high"
+    },
+    "I": {
+      "name": "Trusted medium",
+      "narrative": "the source is trusted and corroboration is medium"
+    },
+    "J": {
+      "name": "Trusted low",
+      "narrative": "the source is trusted and corroboration is low"
+    },
+    "K": {
+      "name": "Questionable high",
+      "narrative": "the source is questionable and corroboration is high"
+    },
+    "L": {
+      "name": "Questionable medium",
+      "narrative": "the source is questionable and corroboration is medium"
+    },
+    "M": {
+      "name": "Questionable low",
+      "narrative": "the source is questionable and corroboration is low"
+    },
+    "N": {
+      "name": "Unknown high",
+      "narrative": "the source is unknown and corroboration is high"
+    },
+    "O": {
+      "name": "Unknown medium",
+      "narrative": "the source is unknown and corroboration is medium"
+    },
+    "P": {
+      "name": "Unknown low",
+      "narrative": "the source is unknown and corroboration is low"
+    },
+    "Q": {
+      "name": "Official source",
+      "narrative": "information is from an official source"
+    },
+    "R": {
+      "name": "Mainstream media",
+      "narrative": "information is from mainstream media"
+    },
+    "S": {
+      "name": "Independent media",
+      "narrative": "information is from independent media"
+    },
+    "T": {
+      "name": "Social media",
+      "narrative": "information is from social media"
+    },
+    "U": {
+      "name": "First-hand observation",
+      "narrative": "information is based on first-hand observation"
+    },
+    "V": {
+      "name": "OTA (RF) familiar station",
+      "narrative": "this information was received over the air from a familiar station"
+    },
+    "W": {
+      "name": "OTA (RF) unfamiliar station",
+      "narrative": "this information was received over the air from an unfamiliar station"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "a reserved trust or source code"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "a reserved trust or source code"
+    },
+    "Z": {
+      "name": "Exercise traffic",
+      "narrative": "this is exercise traffic only"
+    }
+  },
+  "station_response": {
+    "A": {
+      "name": "Unknown",
+      "narrative": "this station's status is unknown"
+    },
+    "*** Full operations ***": {
+      "items": [
+        "C",
+        "E",
+        "B",
+        "D"
+      ],
+      "order": 1
+    },
+    "*** Partial operations ***": {
+      "items": [
+        "F",
+        "G",
+        "H",
+        "I",
+        "J",
+        "K",
+        "L",
+        "M",
+        "N",
+        "O"
+      ],
+      "order": 2
+    },
+    "*** Off air ***": {
+      "items": [
+        "P",
+        "U",
+        "V",
+        "W",
+        "X"
+      ],
+      "order": 3
+    },
+    "*** Logistics ***": {
+      "items": [
+        "Q",
+        "S",
+        "R",
+        "T",
+        "Y"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "No impact",
+      "narrative": "this station is at full operations with no impact"
+    },
+    "C": {
+      "name": "Minor impact",
+      "narrative": "this station is at full operations with minor impact"
+    },
+    "D": {
+      "name": "Not in impact zone",
+      "narrative": "this station is at full operations and not in the impact zone"
+    },
+    "E": {
+      "name": "Monitoring",
+      "narrative": "this station is at full operations and monitoring the situation"
+    },
+    "F": {
+      "name": "Antenna / RF limited",
+      "narrative": "this station is at partial operations with antenna or RF limits"
+    },
+    "G": {
+      "name": "Battery / reduced power",
+      "narrative": "this station is at partial operations on battery or reduced power"
+    },
+    "H": {
+      "name": "Daylight only",
+      "narrative": "this station is at partial operations, daylight only, due to power"
+    },
+    "I": {
+      "name": "Irregular / unscheduled",
+      "narrative": "this station is at partial operations on an irregular or unscheduled basis"
+    },
+    "J": {
+      "name": "Manpower shortage",
+      "narrative": "this station is at partial operations due to a manpower shortage"
+    },
+    "K": {
+      "name": "Nets only",
+      "narrative": "this station is at partial operations, nets only"
+    },
+    "L": {
+      "name": "Night only",
+      "narrative": "this station is at partial operations, nighttime only, due to power"
+    },
+    "M": {
+      "name": "Receive only",
+      "narrative": "this station is at partial operations, receive only"
+    },
+    "N": {
+      "name": "Top of the hour only",
+      "narrative": "this station is at partial operations, top of the hour only"
+    },
+    "O": {
+      "name": "Unattended",
+      "narrative": "this station is at partial operations and unattended"
+    },
+    "P": {
+      "name": "Equipment failure",
+      "narrative": "this station is off the air due to equipment failure"
+    },
+    "U": {
+      "name": "Equipment reconfiguration",
+      "narrative": "this station is off the air for equipment reconfiguration"
+    },
+    "V": {
+      "name": "Evacuating",
+      "narrative": "this station is evacuating and going off the air"
+    },
+    "W": {
+      "name": "Shelter in place",
+      "narrative": "this station is off the air and sheltering in place"
+    },
+    "X": {
+      "name": "Storms",
+      "narrative": "this station is off the air due to storms"
+    },
+    "Q": {
+      "name": "Needing shelter",
+      "narrative": "this station is needing shelter"
+    },
+    "R": {
+      "name": "Offering shelter",
+      "narrative": "this station is able to offer shelter"
+    },
+    "S": {
+      "name": "Needing supplies",
+      "narrative": "this station is needing supplies"
+    },
+    "T": {
+      "name": "Offering supplies",
+      "narrative": "this station is able to offer supplies"
+    },
+    "Y": {
+      "name": "Relocated (alternate QTH)",
+      "narrative": "this station has relocated to an alternate location"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "a reserved station status code"
+    }
+  },
+  "emergency_group_order": [
+    "*** Violent act ***",
+    "*** Device ***",
+    "*** Cyber ***",
+    "*** Accident / failure ***"
+  ],
+  "impact_group_order": [
+    "*** Unknown motive ***",
+    "*** Failure / no hostile act ***",
+    "*** Personal / domestic ***",
+    "*** Criminal / gang ***",
+    "*** Ideological ***"
+  ],
+  "official_response_group_order": [
+    "*** Monitoring ***",
+    "*** Responding ***",
+    "*** Official Orders ***"
+  ],
+  "group_descriptions": {
+    "*** Trust matrix ***": "Trust matrix:\nHigh: Confirmed by multiple credible and independent sources.\nMedium: Plausible with partial corroboration or one strong source.\nLow: Single-source, weakly supported, conflicting, or unconfirmed.",
+    "*** Violent act ***": "Violent act:\nForce used against people. Method only — shooter, weapon, vehicle, hostage. Motive is set under Impact / Motive.",
+    "*** Accident / failure ***": "Accident / failure:\nA human system failed or the cause is not known. Plant explosion, hazmat, infrastructure or dam failure. Do not call it an attack unless that is known.",
+    "*** Device ***": "Device:\nA physical device, fire, or hazardous material used as the mechanism. Includes bombs, drones, arson, and chemical or radiological releases.",
+    "*** Cyber ***": "Cyber:\nA network, data, or communications attack. Includes cyberattack, ransomware, and jamming."
+  },
+  "hide_reserved": true,
+  "severity": {
+    "A": {
+      "name": "Unknown",
+      "narrative": ""
+    },
+    "*** Minor ***": {
+      "items": [
+        "B",
+        "C"
+      ],
+      "order": 1
+    },
+    "*** Moderate ***": {
+      "items": [
+        "D",
+        "E"
+      ],
+      "order": 2
+    },
+    "*** Severe ***": {
+      "items": [
+        "F",
+        "G",
+        "H"
+      ],
+      "order": 3
+    },
+    "*** Extreme ***": {
+      "items": [
+        "I",
+        "J"
+      ],
+      "order": 4
+    },
+    "*** Reserved ***": {
+      "items": [
+        "K",
+        "L",
+        "M",
+        "N",
+        "O",
+        "P",
+        "Q",
+        "R",
+        "S",
+        "T",
+        "U",
+        "V",
+        "W",
+        "X",
+        "Y",
+        "Z"
+      ],
+      "order": 5
+    },
+    "B": {
+      "name": "Low / minor",
+      "narrative": "minor"
+    },
+    "C": {
+      "name": "Elevated",
+      "narrative": "elevated"
+    },
+    "D": {
+      "name": "Moderate",
+      "narrative": "moderate"
+    },
+    "E": {
+      "name": "Moderate-to-strong",
+      "narrative": "moderate-to-strong"
+    },
+    "F": {
+      "name": "Strong",
+      "narrative": "strong"
+    },
+    "G": {
+      "name": "Very strong",
+      "narrative": "very strong"
+    },
+    "H": {
+      "name": "Severe",
+      "narrative": "severe"
+    },
+    "I": {
+      "name": "Extreme",
+      "narrative": "extreme"
+    },
+    "J": {
+      "name": "Catastrophic",
+      "narrative": "catastrophic"
+    },
+    "K": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "L": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "M": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "N": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "O": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "P": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Q": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "R": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "S": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "T": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "U": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "V": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "W": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "X": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Y": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    },
+    "Z": {
+      "name": "Reserved",
+      "narrative": "reserved"
+    }
+  }
+}

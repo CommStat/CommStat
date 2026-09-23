@@ -157,9 +157,9 @@ Zoom back out and the rows come back.</p>
 this grid?"</i></p>
 <p>A <b>Custom Filtering</b> bar appears directly above the StatRep table
 column headings, with four boxes. Each box shows its name &mdash;
-<b>From</b>, <b>To</b>, <b>Grid</b>, <b>Remarks</b> &mdash; in gray until you
-type in it. It filters the <b>table and the map together</b>, and it also
-ignores your Filter menu choices.</p>
+<b>From</b>, <b>To</b>, <b>Grid</b>, <b>Remarks &amp; Notes</b> &mdash; in
+gray until you type in it. It filters the <b>table and the map
+together</b>, and it also ignores your Filter menu choices.</p>
 
 <p><b style="color:#6f42c1;">How matching works</b></p>
 <ul>
@@ -198,8 +198,9 @@ ignores your Filter menu choices.</p>
   <td>Traffic sent to the @AMRRON group. You do not need to type the @.</td>
 </tr>
 <tr bgcolor="#FAFAFA">
-  <td>Remarks = <b>SHELTER</b></td>
-  <td>Every status report whose remarks mention SHELTER.</td>
+  <td>Remarks &amp; Notes = <b>SHELTER</b></td>
+  <td>Every status report whose remarks or saved detail-view note mention
+      SHELTER.</td>
 </tr>
 <tr bgcolor="#F2F2F2">
   <td>From = <b>N0DDK</b><br>Grid = <b>EM83</b><br>with <b>AND</b></td>
