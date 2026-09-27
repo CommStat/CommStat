@@ -1863,7 +1863,7 @@ class DatabaseManager:
 
                 if show_all:
                     # Show all messages regardless of group
-                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id
+                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id, rfi
                                FROM messages
                                WHERE {date_condition}
                                ORDER BY datetime DESC"""
@@ -1872,7 +1872,7 @@ class DatabaseManager:
                     # Filter by active groups (add @ prefix for matching)
                     groups_with_at = ["@" + g for g in groups]
                     placeholders = ",".join("?" * len(groups_with_at))
-                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id
+                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id, rfi
                                FROM messages
                                WHERE target IN ({placeholders}) AND {date_condition}
                                ORDER BY datetime DESC"""
@@ -6292,6 +6292,26 @@ class MainWindow(QtWidgets.QMainWindow):
                         print(f"Warning: Failed to update {controls_column} in controls table (delete): {e}")
                     continue
 
+                # Handle message delete directive
+                msg_delete_match = re.match(r'^::MESSAGE-DELETE::(\d+)$', data)
+                if msg_delete_match:
+                    gid = int(msg_delete_match.group(1))
+                    self.db._execute(
+                        lambda cursor, conn, g=gid: (
+                            cursor.execute("DELETE FROM messages WHERE global_id = ?", (g,)),
+                            conn.commit()
+                        ),
+                        None
+                    )
+                    try:
+                        with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                            conn.execute(f"UPDATE controls SET {controls_column} = ? WHERE id = 1", (data_id,))
+                            conn.commit()
+                        print(f"Updated {controls_column} to {data_id} in controls table (delete)")
+                    except sqlite3.Error as e:
+                        print(f"Warning: Failed to update {controls_column} in controls table (delete): {e}")
+                    continue
+
                 # Parse the data line: date time freq_hz unused snr callsign: message
                 # Example: 2026-02-06 18:32:32    14118000    0    30    N0DDK: @MAGNET ,EM83CV,3,T31,321311111331,GA,{&%}
                 # Fields: date(0) time(1) freq_hz(2) unused/0(3) snr/db(4) callsign:message(5)
@@ -6691,6 +6711,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if (re.search(r'^\d+:\s+\d{4}-\d{2}-\d{2}', content_stripped, re.MULTILINE) or
                     re.search(r'^\d+:\s+::STATREP-DELETE::', content_stripped, re.MULTILINE) or
+                    re.search(r'^\d+:\s+::MESSAGE-DELETE::', content_stripped, re.MULTILINE) or
                     re.search(r'::DELIVERED::', content_stripped) or
                     re.search(r'::EXPIRED::', content_stripped)):
                 self._handle_commsrvr_data_messages(content_stripped)
@@ -9539,6 +9560,8 @@ window.commstatBouncePin = function(srid) {
 
         for row_num, row_data in enumerate(data):
             table.insertRow(row_num)
+            rfi_value = int(row_data[11]) if is_message_table and len(row_data) > 11 and row_data[11] else 0
+            row_is_rfi = rfi_value in (1, 2)
 
             for col_num, value in enumerate(row_data):
                 display_value = str(value) if value is not None else ""
@@ -9548,9 +9571,14 @@ window.commstatBouncePin = function(srid) {
                 if is_statrep_table and col_num == 21 and "||" in display_value:
                     decoded_remarks = display_value.replace("||", "\n")
                     display_value = display_value.replace("||", " ")
-                elif is_message_table and col_num == 7 and "||" in display_value:
-                    raw_message = display_value          # preserve for detail dialog
+                elif is_message_table and col_num == 7:
+                    if "||" in display_value or row_is_rfi:
+                        raw_message = display_value      # preserve real body for detail dialog
                     display_value = display_value.replace("||", " ")
+                    if rfi_value == 1:
+                        display_value = " REQUEST FOR INFORMATION"
+                    elif rfi_value == 2:
+                        display_value = " REQUEST FOR INFORMATION REPLY"
                     decoded_remarks = None
                 else:
                     decoded_remarks = None
@@ -9631,7 +9659,13 @@ window.commstatBouncePin = function(srid) {
                 # Use Kode Mono for remarks/message text columns and StatRep's
                 # Grid column. Freq (both tables) and both tables' From/GID
                 # columns (plus each table's TID) use Roboto.
-                if (is_statrep_table and col_num in (7, 21)) or (is_message_table and col_num == 7):
+                if is_message_table and col_num == 7 and row_is_rfi:
+                    font = QtGui.QFont("Kode Mono", -1)
+                    font.setBold(True)
+                    item.setFont(font)
+                    item.setForeground(QColor("#333333"))
+                    item.setBackground(QColor("#FFD1DC") if rfi_value == 1 else QColor("#D9D9D9"))
+                elif (is_statrep_table and col_num in (7, 21)) or (is_message_table and col_num == 7):
                     item.setFont(QtGui.QFont("Kode Mono", -1))
                 elif (is_statrep_table and col_num in (2, 3, 5, 6)) or (is_message_table and col_num in (2, 3, 5, 6)):
                     item.setFont(QtGui.QFont("Roboto", -1))
@@ -10867,15 +10901,22 @@ window.commstatBouncePin = function(srid) {
         msg_id = None
         msg_target = target
         message_text = None
+        rfi = 0
 
-        # Try to parse commsrvr format: [SENDER: ]@GROUP MSG ,MSG_ID,MESSAGE[,{^%}]
+        # Try to parse commsrvr format: [SENDER: ]@GROUP MSG ,MSG_ID,MESSAGE[,{^%}[+-]]
         # Callsign prefix is optional — new JS8Call omits it (sender is in from_callsign param).
         # Old JS8Call includes it; strip_duplicate_callsign reduces any double prefix first.
-        commsrvr_pattern = re.match(r'^(?:\w+:\s+)?(@?\w+)\s+MSG\s+,([^,]+),(.+?)(?:\s*,\{\^%\})?$', message_value, re.IGNORECASE)
+        # Trailing "+" after the marker flags the message as an RFI (Request For
+        # Information, rfi=1); trailing "-" flags it as a GRP Reply (rfi=2).
+        commsrvr_pattern = re.match(r'^(?:\w+:\s+)?(@?\w+)\s+MSG\s+,([^,]+),(.+?)(?:\s*,\{\^%\}([+-])?)?$', message_value, re.IGNORECASE)
         if commsrvr_pattern:
             msg_target = commsrvr_pattern.group(1).strip()
             msg_id = commsrvr_pattern.group(2).strip()
             message_text = commsrvr_pattern.group(3).strip()
+            if commsrvr_pattern.group(4) == "+":
+                rfi = 1
+            elif commsrvr_pattern.group(4) == "-":
+                rfi = 2
         else:
             # Try TCP MSG pattern: [CALLSIGN: ]TARGET MSG message_text
             tcp_pattern = re.match(r'^(?:\w+:\s+)?(@?\w+)\s+MSG\s+(.+)$', message_value, re.IGNORECASE)
@@ -10894,11 +10935,15 @@ window.commstatBouncePin = function(srid) {
                 # "MSG" token to anchor on — without it this would risk
                 # matching ordinary "@GROUP ,text" conversational chatter as
                 # a structured message.
-                no_msg_pattern = re.match(r'^(?:\w+:\s+)?(@\w+)\s+,([^,]+),(.+?)\s*,\{\^%\}$', message_value, re.IGNORECASE)
+                no_msg_pattern = re.match(r'^(?:\w+:\s+)?(@\w+)\s+,([^,]+),(.+?)\s*,\{\^%\}([+-])?$', message_value, re.IGNORECASE)
                 if no_msg_pattern:
                     msg_target = no_msg_pattern.group(1).strip()
                     msg_id = no_msg_pattern.group(2).strip()
                     message_text = no_msg_pattern.group(3).strip()
+                    if no_msg_pattern.group(4) == "+":
+                        rfi = 1
+                    elif no_msg_pattern.group(4) == "-":
+                        rfi = 2
                 elif source == 2:
                     # Commsrvr fallback: accept raw message (for older formats)
                     message_text = message_value
@@ -10958,7 +11003,8 @@ window.commstatBouncePin = function(srid) {
             'from_callsign': from_callsign,
             'target': msg_target,
             'message': message_text,
-            'global_id': global_id
+            'global_id': global_id,
+            'rfi': rfi
         }
 
         result = self._insert_message_data(

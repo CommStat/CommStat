@@ -81,7 +81,7 @@ STATUS_CATEGORIES = [
     ("Food", "food"),
     ("Crime", "crime"),
     ("Civil", "civil"),
-    ("Political", "political"),
+    ("Weather", "political"),
 ]
 
 # Colors for status indicators

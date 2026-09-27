@@ -39,12 +39,12 @@ from id_utils import generate_time_based_id
 from qrz_client import QRZClient, get_qrz_cached, load_qrz_config, subscription_status
 from constants import (
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
-    COLOR_BTN_RED, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_GREEN,
+    COLOR_BTN_RED, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_GREEN, COLOR_BTN_HELP,
     RIG_FREQ_DELAY_MS,
 )
 # Single source of truth for mouse-wheel zoom dampening — see little_gucci.py
-from little_gucci import MAP_WHEEL_PX_PER_ZOOM, create_verified_ssl_context
-from ui_helpers import apply_standard_dialog_chrome, connect_single
+from little_gucci import MAP_WHEEL_PX_PER_ZOOM, base_callsign, create_verified_ssl_context
+from ui_helpers import apply_standard_dialog_chrome, connect_single, show_help_dialog
 
 DB_PATH = "traffic.db3"
 _COMMSRVR_URL  = base64.b64decode("aHR0cHM6Ly9jb21tc3RhdC5hcHA=").decode()
@@ -70,7 +70,7 @@ STATUS_FIELDS = [
     ("Food",  16),
     ("Crime", 17),
     ("Civil", 18),
-    ("Pol",   19),
+    ("Weather", 19),
 ]
 
 # Status value → (CSS color string, tooltip text)
@@ -591,13 +591,15 @@ class _QRZInfoSection(QWidget):
         self.lbl_msg_source    = QLabel(); self.lbl_msg_source.setFont(_mono_font())
         self.lbl_msg_global_id = QLabel(); self.lbl_msg_global_id.setFont(_mono_font())
         self.lbl_msg_delivered = QLabel(); self.lbl_msg_delivered.setFont(_mono_font())
+        self.lbl_msg_rfi       = QLabel(); self.lbl_msg_rfi.setFont(_mono_font())
 
         msg_hdr = QLabel("Message Details")
         msg_hdr.setFont(_lbl_font())
 
-        # Row 0: header | Freq:
+        # Row 0: header | Freq: | RFI Status:
         msg_grid.addWidget(msg_hdr,                 0, 0)
         msg_grid.addWidget(self.lbl_msg_freq,       0, 1)
+        msg_grid.addWidget(self.lbl_msg_rfi,        0, 2)
         # Row 1: Posted: | Message ID: | Received via:
         msg_grid.addWidget(self.lbl_msg_posted,     1, 0)
         msg_grid.addWidget(self.lbl_msg_id,         1, 1)
@@ -2250,24 +2252,25 @@ class StatRepDetailDialog(QDialog):
         self._update_nav_buttons()
 
     def _on_delete(self) -> None:
-        from ui_helpers import confirm
-        if not confirm(
-            self, "Confirm Delete",
-            "Status Report records will be deleted from all CommStat users if you are "
-            "the creator of the record. If you are not the creator, the record will only "
-            "be deleted locally.",
-        ):
-            return
-        import netguard
-        if self._global_id and self._commsrvr_url and netguard.guard("Remote statrep delete"):
-            try:
-                local_cs = _get_local_callsign()
-                url = (f"{self._commsrvr_url}/statrep-delete-808585.php"
-                       f"?cs={urllib.parse.quote(local_cs)}&id={self._global_id}")
-                with urllib.request.urlopen(url, timeout=10, context=create_verified_ssl_context()):
-                    pass
-            except Exception as e:
-                print(f"[StatRepDetailDialog] Delete request failed: {e}")
+        local_cs = _get_local_callsign()
+        is_owner = bool(local_cs) and bool(self.callsign) and base_callsign(local_cs) == base_callsign(self.callsign)
+        if is_owner:
+            from ui_helpers import confirm
+            if not confirm(
+                self, "Confirm Delete",
+                "This record will be deleted from the CommStat app of all users. "
+                "Do you want to proceed?",
+            ):
+                return
+            import netguard
+            if self._global_id and self._commsrvr_url and netguard.guard("Remote statrep delete"):
+                try:
+                    url = (f"{self._commsrvr_url}/record-delete-808585.php"
+                           f"?cs={urllib.parse.quote(local_cs)}&id={self._global_id}")
+                    with urllib.request.urlopen(url, timeout=10, context=create_verified_ssl_context()):
+                        pass
+                except Exception as e:
+                    print(f"[StatRepDetailDialog] Delete request failed: {e}")
         deleted_id = self._record_id
         direction = self._last_nav
         full_list = self._get_record_list()
@@ -2474,6 +2477,42 @@ def _text_to_html(text: str, bg: str) -> str:
     )
 
 
+# ── Help content ─────────────────────────────────────────────────────────────
+# Beside the feature it documents. Chrome comes from ui_helpers.
+
+_MSG_DETAIL_HELP_HTML = """
+<div style="font-family: Roboto; font-size: 13px; color: #333333;">
+
+<h3 style="color:#555555;">What Is an RFI?</h3>
+<p>A <b>Request for Information (RFI)</b> is a special CommStat message used
+when an operator needs information, assistance, or help relaying a request.
+CommStat marks it highly visible so other operators can quickly recognize
+that someone is actively requesting help.</p>
+
+<h3 style="color:#555555;">How an RFI Moves</h3>
+<p>A typical RFI may move through several operators. An operator in the
+affected area sends a request over radio to an <b>RFI Relay Operator</b>. The
+relay operator enters the request into CommStat as an RFI. CommStat users
+monitoring the system can see the highly visible request, research the
+information using available resources, and reply through CommStat. The relay
+operator then transmits the response back over radio to the operator who
+originally requested the information.</p>
+
+<h3 style="color:#555555;">The Forward Button</h3>
+<p>The <b>Forward</b> button is used exclusively to forward messages marked
+as a <b>Request for Information</b> on to other CommStat users. Clicking it
+opens the Group Message dialog with the original message copied in as-is
+and the <b>RFI</b> checkbox already checked.</p>
+<p>The button is only active when the message's <b>RFI Status</b> is
+<b>RFI Request</b>&mdash;the initial request, not a reply&mdash;and it was
+<b>received via RF only</b>. This is the situation where a relay operator
+has taken a request off the air and needs to pass it on to the wider
+CommStat network for a response.</p>
+
+</div>
+"""
+
+
 class MessageDetailDialog(QDialog):
     """Detail view for a Message row: QRZ info + map + message text."""
 
@@ -2522,6 +2561,10 @@ class MessageDetailDialog(QDialog):
         self._deleted_any = False
         self._last_nav: str = "older"
         self._msg_datetime: str = ""
+        self._target: str = ""
+        self._rfi: int = 0
+        self._source: Optional[int] = None
+        self._global_id: int = 0
         self.setWindowTitle(f"Message — {callsign}")
         self.setModal(True)
         self.setMinimumSize(996, 616)
@@ -2570,6 +2613,11 @@ class MessageDetailDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
+
+        self.btn_help = _btn("Help", COLOR_BTN_HELP, 60)
+        self.btn_help.clicked.connect(self._on_help_clicked)
+        btn_row.addWidget(self.btn_help)
+
         btn_row.addStretch()
 
         self.btn_delete = _btn("Delete", COLOR_BTN_RED)
@@ -2588,9 +2636,17 @@ class MessageDetailDialog(QDialog):
         self.btn_reply.clicked.connect(self._on_reply_clicked)
         btn_row.addWidget(self.btn_reply)
 
+        self.btn_grp_reply = _btn("GRP Reply", COLOR_BTN_BLUE)
+        self.btn_grp_reply.clicked.connect(self._on_grp_reply_clicked)
+        btn_row.addWidget(self.btn_grp_reply)
+
         self.btn_js8_reply = _btn("JS8 Reply", COLOR_BTN_BLUE)
         self.btn_js8_reply.clicked.connect(self._on_js8_reply_clicked)
         btn_row.addWidget(self.btn_js8_reply)
+
+        self.btn_relay = _btn("Forward", COLOR_BTN_BLUE)
+        self.btn_relay.clicked.connect(self._on_relay_clicked)
+        btn_row.addWidget(self.btn_relay)
 
         self.btn_close = _btn("Close", _COL_CANCEL)
         self.btn_close.clicked.connect(self._on_close_clicked)
@@ -2624,6 +2680,39 @@ class MessageDetailDialog(QDialog):
         )
         dlg.exec_()
 
+    def _on_grp_reply_clicked(self) -> None:
+        """Reply to this message via a new Group Message, seeded with the original body."""
+        from group_message import GroupMessageDialog
+        original = self.message_text.replace("||", "\n")
+        prefill = "\n\n----------\n" + original
+        dlg = GroupMessageDialog(
+            tcp_pool=self._tcp_pool,
+            connector_manager=self._connector_manager,
+            refresh_callback=self._refresh_callback,
+            internet_available=self.internet_available,
+            parent=self,
+        )
+        dlg.set_group_reply_context(self._target, prefill)
+        dlg.exec_()
+
+    def _on_help_clicked(self) -> None:
+        show_help_dialog(self, "Message Details Help", _MSG_DETAIL_HELP_HTML, width=520)
+
+    def _on_relay_clicked(self) -> None:
+        """Rebroadcast this RFI via a new Group Message, seeded with the original
+        body as-is and the RFI checkbox pre-checked."""
+        from group_message import GroupMessageDialog
+        original = self.message_text.replace("||", "\n")
+        dlg = GroupMessageDialog(
+            tcp_pool=self._tcp_pool,
+            connector_manager=self._connector_manager,
+            refresh_callback=self._refresh_callback,
+            internet_available=self.internet_available,
+            parent=self,
+        )
+        dlg.set_relay_context(original)
+        dlg.exec_()
+
     def _on_js8_reply_clicked(self) -> None:
         """Reply to this message over RF via JS8 Direct Message. The clicked
         callsign is shown as a read-only reminder in the JS8 dialog (not forced
@@ -2655,7 +2744,7 @@ class MessageDetailDialog(QDialog):
             with sqlite3.connect(DB_PATH, timeout=10) as conn:
                 cur = conn.cursor()
                 cur.execute(
-                    "SELECT datetime, freq, target, source, global_id, msg_id FROM messages WHERE id = ?",
+                    "SELECT datetime, freq, target, source, global_id, msg_id, rfi FROM messages WHERE id = ?",
                     (self._record_id,)
                 )
                 row = cur.fetchone()
@@ -2664,14 +2753,28 @@ class MessageDetailDialog(QDialog):
         if row:
             self._msg_datetime = row[0] or ""
             self._msg_id = row[5] or self._msg_id
-            self._populate_message_labels(row[0] or "", row[1], row[2] or "", row[3], row[4] or 0)
+            self._populate_message_labels(row[0] or "", row[1], row[2] or "", row[3], row[4] or 0, row[6] or 0)
         else:
             self._populate_message_labels(self._msg_datetime, None, "", None)
 
     def _populate_message_labels(self, datetime_str: str, freq, target: str, source,
-                                  global_id: int = 0) -> None:
+                                  global_id: int = 0, rfi: int = 0) -> None:
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
         _source_map = {1: "RF via JS8Call", 2: "Internet", 3: "Internet Only"}
+
+        self._rfi = int(rfi) if rfi else 0
+        self._global_id = global_id
+        self.btn_reply.setEnabled(not self._rfi)
+        self.btn_js8_reply.setEnabled(not self._rfi)
+        try:
+            self._source = int(source) if source is not None else None
+        except (TypeError, ValueError):
+            self._source = None
+        self.btn_relay.setEnabled(self._source == 1 and self._rfi == 1)
+        _rfi_status_map = {1: "RFI Request", 2: "RFI Reply"}
+        self.qrz_info.lbl_msg_rfi.setText(
+            f'<span style="{_k}">RFI Status:</span>  {_rfi_status_map.get(self._rfi, "N/A")}'
+        )
 
         self.qrz_info.lbl_msg_posted.setText(
             f'<span style="{_k}">Posted:</span>  {datetime_str}' if datetime_str
@@ -2682,6 +2785,7 @@ class MessageDetailDialog(QDialog):
             else f'<span style="{_k}">Message ID:</span>'
         )
         target_text = target.strip() if target else ""
+        self._target = target_text
         self.qrz_info.lbl_msg_target.setText(
             f'<span style="{_k}">To:</span>  {target_text}' if target_text
             else f'<span style="{_k}">To:</span>'
@@ -2735,7 +2839,8 @@ class MessageDetailDialog(QDialog):
         )
 
     def _reload(self, record_id, callsign: str, message_text: str, msg_datetime: str,
-                msg_id: str = "", freq=None, target: str = "", source=None, global_id: int = 0) -> None:
+                msg_id: str = "", freq=None, target: str = "", source=None, global_id: int = 0,
+                rfi: int = 0) -> None:
         self._reload_token += 1
         self.btn_newer.setEnabled(False)
         self.btn_older.setEnabled(False)
@@ -2758,7 +2863,7 @@ class MessageDetailDialog(QDialog):
         self.contact_memo_edit.clear()
         self.contact_memo_edit.blockSignals(False)
         self.qrz_info.update_data({"call": callsign})
-        self._populate_message_labels(msg_datetime, freq, target, source, global_id)
+        self._populate_message_labels(msg_datetime, freq, target, source, global_id, rfi)
         if self._thread is not None:
             try:
                 self._thread.result_ready.disconnect()
@@ -2811,13 +2916,13 @@ class MessageDetailDialog(QDialog):
                 cur = conn.cursor()
                 if direction == "newer":
                     cur.execute(
-                        "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                        "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi "
                         "FROM messages WHERE id > ? ORDER BY id ASC LIMIT 1",
                         (self._record_id,)
                     )
                 else:
                     cur.execute(
-                        "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                        "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi "
                         "FROM messages WHERE id < ? ORDER BY id DESC LIMIT 1",
                         (self._record_id,)
                     )
@@ -2829,12 +2934,32 @@ class MessageDetailDialog(QDialog):
             self._update_nav_buttons()
             return
         self._reload(row[0], row[2] or "", row[3] or "", row[4] or "",
-                     msg_id=row[1] or "", freq=row[5], target=row[6] or "", source=row[7], global_id=row[8] or 0)
+                     msg_id=row[1] or "", freq=row[5], target=row[6] or "", source=row[7], global_id=row[8] or 0,
+                     rfi=row[9] or 0)
 
     def _on_delete(self) -> None:
         # Delete by the unique primary key — msg_id is not unique (see
         # _navigate), so keying the DELETE off it could remove unrelated
         # rows from other days/senders that happen to share the same code.
+        local_cs = _get_local_callsign()
+        is_owner = bool(local_cs) and bool(self.callsign) and base_callsign(local_cs) == base_callsign(self.callsign)
+        if is_owner:
+            from ui_helpers import confirm
+            if not confirm(
+                self, "Confirm Delete",
+                "This record will be deleted from the CommStat app of all users. "
+                "Do you want to proceed?",
+            ):
+                return
+            import netguard
+            if self._global_id and self._commsrvr_url and netguard.guard("Remote message delete"):
+                try:
+                    url = (f"{self._commsrvr_url}/record-delete-808585.php"
+                           f"?cs={urllib.parse.quote(local_cs)}&msg={self._global_id}")
+                    with urllib.request.urlopen(url, timeout=10, context=create_verified_ssl_context()):
+                        pass
+                except Exception as e:
+                    print(f"[MessageDetailDialog] Delete request failed: {e}")
         deleted_id = self._record_id
         direction = self._last_nav
         try:
@@ -2847,13 +2972,13 @@ class MessageDetailDialog(QDialog):
                 if deleted_id is not None:
                     if direction == "newer":
                         cur.execute(
-                            "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                            "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi "
                             "FROM messages WHERE id > ? ORDER BY id ASC LIMIT 1",
                             (deleted_id,)
                         )
                     else:
                         cur.execute(
-                            "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id "
+                            "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi "
                             "FROM messages WHERE id < ? ORDER BY id DESC LIMIT 1",
                             (deleted_id,)
                         )
@@ -2867,7 +2992,7 @@ class MessageDetailDialog(QDialog):
             return
         self._reload(next_row[0], next_row[2] or "", next_row[3] or "", next_row[4] or "",
                      msg_id=next_row[1] or "", freq=next_row[5], target=next_row[6] or "", source=next_row[7],
-                     global_id=next_row[8] or 0)
+                     global_id=next_row[8] or 0, rfi=next_row[9] or 0)
 
     def _start_qrz(self) -> None:
         cached_fresh = get_qrz_cached(self.callsign)
