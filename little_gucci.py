@@ -1130,6 +1130,7 @@ class CustomWebEnginePage(QWebEnginePage):
                                 condition_red=mw.config.get_color('condition_red'),
                                 condition_gray=mw.config.get_color('condition_gray'),
                                 condition_purple=mw.config.get_color('condition_purple'),
+                                condition_magenta=mw.config.get_color('condition_magenta'),
                                 tcp_pool=mw.tcp_pool,
                                 connector_manager=mw.connector_manager,
                                 record_list_provider=build_record_list,
@@ -3779,7 +3780,7 @@ class MainWindow(QtWidgets.QMainWindow):
             ("statrep",      "Status Report",        self._on_statrep),
             ("send_message", "Message",               self._on_send_message),
             ("group_alert",  "Alert",                 self._on_group_alert),
-            ("group_event",  "Event",                 self._on_group_event),
+            ("group_incident", "Incident",            self._on_group_incident),
         ]:
             action = QtWidgets.QAction(text, self)
             action.triggered.connect(handler)
@@ -4070,7 +4071,7 @@ class MainWindow(QtWidgets.QMainWindow):
         add_section_header(self.websites_menu, "Open Source Intel")
         for label, url in [
             ("Osiris",     "https://www.osirisai.live"),
-            ("Provenance", "https://www.provenance.website"),
+            ("Provenance", "https://provenance-online.com/app"),
         ]:
             create_action(
                 self.websites_menu, label, "osint_" + label.lower(),
@@ -7852,14 +7853,16 @@ class MainWindow(QtWidgets.QMainWindow):
                         "2": "Advisory",
                         "3": "Emergency",
                         "4": "Unknown",
-                        "6": "Event"
+                        "6": "Event",
+                        "7": "Attack"
                     }.get(status, "Unknown")
                     status_color = {
                         "1": "#39d12f",
                         "2": "#ff9f1a",
                         "3": "#ff3333",
                         "4": "#c7c7c7",
-                        "6": "#8000ff"
+                        "6": "#8000ff",
+                        "7": "#ff00ff"
                     }.get(status, "#c7c7c7")
                     _light_map = self.config.get_map_theme() == "light"
                     _bg = ("linear-gradient(145deg,rgba(248,248,245,.97),rgba(235,235,230,.95))"
@@ -7921,15 +7924,16 @@ class MainWindow(QtWidgets.QMainWindow):
                     if not (US_BBOX[0] <= lat <= US_BBOX[1] and US_BBOX[2] <= lon <= US_BBOX[3]):
                         region_counts["world"] += 1
 
-                    if status == "6":
-                        # Event record: distinct outlined/translucent marker, no halo.
+                    if status in ("6", "7"):
+                        # Event/Attack record: distinct outlined/translucent marker, no halo.
                         # Renders whenever the row reached this loop at all — the
                         # SQL query already applied the date-range/pinned filter,
                         # same as every other status. Pinned just keeps it on the
                         # map past its date range, exactly like non-Event pins.
                         folium.Marker(
                             location=[lat, lon],
-                            icon=self._event_pin_icon(self.config.get_color('condition_purple')),
+                            icon=self._event_pin_icon(self.config.get_color(
+                                'condition_magenta' if status == "7" else 'condition_purple')),
                             popup=popup,
                             pane="statrepPane"
                         ).add_to(m)
@@ -8441,13 +8445,14 @@ window.commstatBouncePin = function(srid) {
             # Same criteria the map's pin loop applies, so both stay in sync.
             data = [row for row in data if self._custom_filter_match(row)]
 
-        # Status color mapping for values 1-4, plus 6 (Event)
+        # Status color mapping for values 1-4, plus 6 (Event) and 7 (Attack)
         status_colors = {
             "1": "condition_green",
             "2": "condition_yellow",
             "3": "condition_red",
             "4": "condition_gray",
-            "6": "condition_purple"
+            "6": "condition_purple",
+            "7": "condition_magenta"
         }
         self._populate_table(self.statrep_table, data, status_colors)
 
@@ -8494,6 +8499,7 @@ window.commstatBouncePin = function(srid) {
                     condition_red=self.config.get_color('condition_red'),
                     condition_gray=self.config.get_color('condition_gray'),
                     condition_purple=self.config.get_color('condition_purple'),
+                    condition_magenta=self.config.get_color('condition_magenta'),
                     tcp_pool=self.tcp_pool,
                     connector_manager=self.connector_manager,
                     record_list_provider=build_record_list,
@@ -9134,9 +9140,9 @@ window.commstatBouncePin = function(srid) {
         dialog = Cls(self.tcp_pool, self.connector_manager, self._trigger_show_alerts, parent=self)
         dialog.exec_()
 
-    def _on_group_event(self) -> None:
-        """Open Group Event window."""
-        Cls = self._resolve_dialog_class("group_event", "GroupEventDialog")
+    def _on_group_incident(self) -> None:
+        """Open Group Incident (Event / Attack) window."""
+        Cls = self._resolve_dialog_class("group_incident", "GroupIncidentDialog")
         dialog = Cls(
             self.tcp_pool, self.connector_manager, self,
             module_background=self.config.get_color('module_background'),
@@ -10554,7 +10560,7 @@ window.commstatBouncePin = function(srid) {
         client.call_selected_received.connect(_on_selected)
         client.get_call_selected()
 
-    def _parse_group_event(
+    def _parse_group_incident(
         self,
         rig_name: str,
         message_value: str,
@@ -10568,15 +10574,17 @@ window.commstatBouncePin = function(srid) {
         global_id: int = 0
     ) -> tuple:
         """
-        Parse a Group Event message and save it as an Event-flavored StatRep row.
+        Parse a Group Incident message and save it as an Event- or
+        Attack-flavored StatRep row.
 
-        Format: ,GRID,6,ID,PIN,MESSAGE,{##}
-        Forwarded: ,GRID,6,ID,PIN,MESSAGE,{F#}
-        See group_event.py — the scope slot is always literal "6" (not a
-        geographic scope code), and the normal 12-digit condition string is
-        replaced by a single Pin-to-Map digit ("1"/"0"). An Event row is
-        distinguished the same way Part 1/2 create one locally: all 12
-        condition columns hold "6" and scope holds the literal text "EVENT".
+        Format: ,GRID,TYPE,ID,PIN,MESSAGE,{##}
+        Forwarded: ,GRID,TYPE,ID,PIN,MESSAGE,{F#}
+        See group_incident.py — the scope slot is the Incident type's status
+        code, "6" (Event) or "7" (Attack), not a geographic scope code, and
+        the normal 12-digit condition string is replaced by a single
+        Pin-to-Map digit ("1"/"0"). An Incident row is distinguished the same
+        way the dialog creates one locally: all 12 condition columns hold the
+        type code and scope holds the literal text "EVENT" or "ATTACK".
 
         Args:
             rig_name: Name of the rig/source
@@ -10603,7 +10611,7 @@ window.commstatBouncePin = function(srid) {
 
         fields = match.group(1).split(",")
 
-        # Need at least 4 fields: GRID, SCOPE(6), ID, PIN
+        # Need at least 4 fields: GRID, TYPE(6/7), ID, PIN
         if len(fields) < 4:
             return ("", None)
 
@@ -10612,15 +10620,17 @@ window.commstatBouncePin = function(srid) {
         event_id = fields[2].strip()
         pin_flag = fields[3].strip()
 
-        # Scope slot must be the literal Event sentinel "6" — anything else
-        # isn't a Group Event message (shouldn't reach here given the {##}
-        # marker check, but guards against a malformed/foreign message).
-        if scope_code != "6":
+        # Scope slot must be an Incident type sentinel ("6" Event, "7" Attack)
+        # — anything else isn't a Group Incident message (shouldn't reach here
+        # given the {##} marker check, but guards against a malformed/foreign
+        # message).
+        incident_scope = {"6": "EVENT", "7": "ATTACK"}.get(scope_code)
+        if not incident_scope:
             return ("", None)
 
         pinned = 1 if pin_flag == "1" else 0
 
-        event_grid = self._resolve_grid(rig_name, event_grid, from_callsign, grid, "EVENT")
+        event_grid = self._resolve_grid(rig_name, event_grid, from_callsign, grid, incident_scope)
 
         message_raw = ",".join([f for f in fields[4:] if f.strip()]).strip() if len(fields) > 4 else ""
         message_text = sanitize_ascii(message_raw)
@@ -10637,19 +10647,19 @@ window.commstatBouncePin = function(srid) {
             'from_callsign': from_callsign,
             'target': target,
             'grid': event_grid,
-            'scope': "EVENT",
-            'map': "6",
-            'power': "6",
-            'water': "6",
-            'med': "6",
-            'telecom': "6",
-            'travel': "6",
-            'internet': "6",
-            'fuel': "6",
-            'food': "6",
-            'crime': "6",
-            'civil': "6",
-            'political': "6",
+            'scope': incident_scope,
+            'map': scope_code,
+            'power': scope_code,
+            'water': scope_code,
+            'med': scope_code,
+            'telecom': scope_code,
+            'travel': scope_code,
+            'internet': scope_code,
+            'fuel': scope_code,
+            'food': scope_code,
+            'crime': scope_code,
+            'civil': scope_code,
+            'political': scope_code,
             'comments': message_text,
             'pinned': pinned,
             'global_id': global_id
@@ -11193,7 +11203,7 @@ window.commstatBouncePin = function(srid) {
 
         Processes messages in priority order:
         1. Standard STATREP ({&%} or {F%})
-        2. Group Event ({##} or {F#})
+        2. Group Incident ({##} or {F#})
         3. F!304 STATREP (8-digit format)
         4. F!301 STATREP (9-digit format)
         5. ALERT ({%%})
@@ -11240,9 +11250,9 @@ window.commstatBouncePin = function(srid) {
                 rig_name, message_value, from_callsign, target, grid, freq, snr, utc, source, global_id
             )
 
-        # PRIORITY 2: Group Event ({##} or {F#})
+        # PRIORITY 2: Group Incident ({##} or {F#})
         if "{##}" in message_value or "{F#}" in message_value:
-            return self._parse_group_event(
+            return self._parse_group_incident(
                 rig_name, message_value, from_callsign, target, grid, freq, snr, utc, source, global_id
             )
 
@@ -11343,7 +11353,7 @@ window.commstatBouncePin = function(srid) {
         # Group check: any @GROUP is accepted here so its traffic reaches the
         # per-type parsers below. Alerts/messages/videos still apply their own
         # membership-or-"Save all"-toggle gate inside their own parsers.
-        # STATREPs and Group Events have no such gate, so they're always saved
+        # STATREPs and Group Incidents have no such gate, so they're always saved
         # for any group — display filtering is handled by the Filter menu.
         is_to_group = to_call.startswith("@")
 

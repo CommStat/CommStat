@@ -57,6 +57,7 @@ STATUS_YELLOW = "2"
 STATUS_RED = "3"
 STATUS_UNKNOWN = "4"
 STATUS_EVENT = "6"
+STATUS_ATTACK = "7"
 
 # Status display names and their codes
 STATUS_OPTIONS = [
@@ -1144,7 +1145,7 @@ class StatRepDialog(QDialog):
         Grid, Scope, all 12 statuses, and remarks — is read-only. The 12
         status dropdowns are hidden outright (their values are still read
         and transmitted from the background combos) so the dialog reads as a
-        report rather than an editable form, matching the Group Event
+        report rather than an editable form, matching the Group Incident
         forward view. The dialog is also resized shorter (WINDOW_HEIGHT_FORWARD)
         since there's no 12-dropdown grid left to fit.
         """

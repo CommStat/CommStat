@@ -4,11 +4,13 @@
 # AI Assistance: Claude (Anthropic), ChatGPT (OpenAI)
 
 """
-Group Event Dialog for CommStat
-Allows creating and transmitting AMRRON Events via JS8Call.
+Group Incident Dialog for CommStat
+Allows creating and transmitting AMRRON Incidents (Events and Attacks) via JS8Call.
 
-An Event is a StatRep record distinguished by all 12 condition columns set to
-STATUS_EVENT ("6") and scope set to the literal text "EVENT" — see statrep.py.
+An Incident is a StatRep record distinguished by all 12 condition columns set
+to one sentinel value and scope set to the matching literal text — see statrep.py:
+    Event:  STATUS_EVENT  ("6"), scope "EVENT"
+    Attack: STATUS_ATTACK ("7"), scope "ATTACK"
 """
 
 import re
@@ -30,7 +32,7 @@ from constants import (
 )
 from id_utils import generate_time_based_id
 from little_gucci import create_verified_ssl_context
-from statrep import STATUS_EVENT, _COMMSRVR, _DATAFEED, INTERNET_RIG, make_uppercase
+from statrep import STATUS_EVENT, STATUS_ATTACK, _COMMSRVR, _DATAFEED, INTERNET_RIG, make_uppercase
 from ui_helpers import (
     make_button, label_font, mono_font, apply_standard_dialog_chrome,
     connect_single, show_help_dialog,
@@ -46,6 +48,12 @@ if TYPE_CHECKING:
 
 _HELP_HTML = """
 <div style="font-family: Roboto; font-size: 13px; color: #333333;">
+
+<p>An Incident is either an <b>Event</b> or an <b>Attack</b>. Choose the
+type from the Type dropdown. Both are location-based, can be pinned to the
+map, and are sent to your group the same way.</p>
+
+<p><b>Event</b></p>
 
 <p>An Event is an ongoing, developing, or planned situation that has the
 potential to escalate into civil unrest, large-scale protests, rioting,
@@ -71,6 +79,17 @@ can still be reported without becoming a persistent map item.</p>
 happen&mdash;at a particular location that may deserve continued
 attention.</p>
 
+<p><b>Attack</b></p>
+
+<p>An Attack is a deliberate hostile act that has occurred, or is in
+progress, at a particular location&mdash;for example an armed assault,
+bombing, arson, sabotage of infrastructure, or other act of violence
+against people or property.</p>
+
+<p>Attacks follow the same rules as Events: they must have a Maidenhead grid
+square and may be pinned to the map. Attacks are shown on the map and in the
+Status Report table in magenta so they stand apart from Events (purple).</p>
+
 <p>If the situation progresses to a Zombie Apocalypse, Alien Invasion, World
 War, collapse of civilization, or another minor inconvenience of similar
 magnitude, create a Status Report instead.</p>
@@ -86,8 +105,8 @@ magnitude, create a Status Report instead.</p>
 DATABASE_FILE = "traffic.db3"
 
 WINDOW_WIDTH = 700
-WINDOW_HEIGHT = 494
-WINDOW_HEIGHT_FORWARD = 514  # Room for the "Forward Mode" banner above the buttons
+WINDOW_HEIGHT = 544
+WINDOW_HEIGHT_FORWARD = 564  # Room for the "Forward Mode" banner above the buttons
 MESSAGE_MAX_RADIO = 500
 MESSAGE_MAX_INTERNET = 500
 NEWLINE_PLACEHOLDER = "||"
@@ -101,19 +120,33 @@ _COL_CANCEL = "#555555"
 _COL_PINK   = COLOR_BTN_HELP
 _COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
-# All 12 statrep condition columns, all forced to STATUS_EVENT for an Event.
+# All 12 statrep condition columns, all forced to the Incident type's status code.
 _CONDITION_COLUMNS = [
     "map", "power", "water", "med", "telecom", "travel",
     "internet", "fuel", "food", "crime", "civil", "political",
 ]
 
+# Incident type → (status code / wire scope slot, statrep scope text, subtitle)
+INCIDENT_TYPES = {
+    "Event": (
+        STATUS_EVENT, "EVENT",
+        "An Event is an ongoing, developing, or planned situation that could "
+        "escalate into\ncivil unrest, protests, rioting, violence, anarchy, or revolution.",
+    ),
+    "Attack": (
+        STATUS_ATTACK, "ATTACK",
+        "An Attack is a deliberate hostile act that has occurred or is in "
+        "progress,\nsuch as an armed assault, bombing, arson, or sabotage.",
+    ),
+}
+
 
 # =============================================================================
-# Group Event Dialog
+# Group Incident Dialog
 # =============================================================================
 
-class GroupEventDialog(QDialog):
-    """Compose and transmit a Group Event (an Event-flavored StatRep record)."""
+class GroupIncidentDialog(QDialog):
+    """Compose and transmit a Group Incident (an Event- or Attack-flavored StatRep record)."""
 
     _commsrvr_error = QtCore.pyqtSignal(str)
 
@@ -131,7 +164,7 @@ class GroupEventDialog(QDialog):
         self.module_background = module_background
         self.data_background = data_background
 
-        apply_standard_dialog_chrome(self, "Event", WINDOW_WIDTH, WINDOW_HEIGHT)
+        apply_standard_dialog_chrome(self, "Incident", WINDOW_WIDTH, WINDOW_HEIGHT)
 
         self._commsrvr_error.connect(self._on_commsrvr_error)
 
@@ -171,6 +204,22 @@ class GroupEventDialog(QDialog):
         except sqlite3.Error as e:
             print(f"Error reading groups from database: {e}")
         return []
+
+    def _incident_type(self) -> str:
+        """Currently selected Incident type ("Event" or "Attack")."""
+        if hasattr(self, 'type_combo') and self.type_combo.currentText() in INCIDENT_TYPES:
+            return self.type_combo.currentText()
+        return "Event"
+
+    def _status_code(self) -> str:
+        return INCIDENT_TYPES[self._incident_type()][0]
+
+    def _scope_text(self) -> str:
+        return INCIDENT_TYPES[self._incident_type()][1]
+
+    def _on_type_changed(self, _text: str = "") -> None:
+        if hasattr(self, 'subtitle'):
+            self.subtitle.setText(INCIDENT_TYPES[self._incident_type()][2])
 
     def _is_internet_only(self) -> bool:
         return hasattr(self, 'rig_combo') and self.rig_combo.currentText() == INTERNET_RIG
@@ -217,7 +266,7 @@ class GroupEventDialog(QDialog):
         return netguard.is_network_enabled()
 
     def _submit_to_commsrvr_async(self, frequency: int, on_complete=None) -> None:
-        """Start background thread to submit the event to commsrvr server."""
+        """Start background thread to submit the incident to commsrvr server."""
         if not self._is_commsrvr_enabled():
             if on_complete:
                 on_complete(0)
@@ -243,10 +292,10 @@ class GroupEventDialog(QDialog):
 
                 if result.isdigit():
                     global_id = int(result)
-                    print(f"[Commsrvr] Event submitted successfully (global_id={global_id})")
+                    print(f"[Commsrvr] Incident submitted successfully (global_id={global_id})")
                 else:
                     error_msg = result[5:] if result.startswith("ERR::") else (result or "Unknown server error")
-                    print(f"[Commsrvr] Event submission failed — server returned: {result}")
+                    print(f"[Commsrvr] Incident submission failed — server returned: {result}")
 
             except Exception as e:
                 reason = getattr(e, 'reason', e)
@@ -254,7 +303,7 @@ class GroupEventDialog(QDialog):
                     error_msg = "Server timeout — the server did not respond in time."
                 else:
                     error_msg = f"Connection error — {e}"
-                print(f"[Commsrvr] Event submission failed — {error_msg}")
+                print(f"[Commsrvr] Incident submission failed — {error_msg}")
             finally:
                 if on_complete:
                     on_complete(global_id)
@@ -319,7 +368,7 @@ class GroupEventDialog(QDialog):
 
         if rig_name == INTERNET_RIG:
             # Grid is intentionally left as whatever the operator has typed —
-            # unlike StatRep, Group Event never auto-fills it from User Settings.
+            # unlike StatRep, Group Incident never auto-fills it from User Settings.
             callsign, _, _ = self._get_internet_user_settings()
             if getattr(self, '_forward_origin', None):
                 self._forwarder_callsign = callsign
@@ -341,7 +390,7 @@ class GroupEventDialog(QDialog):
                 self.mode_combo.setCurrentIndex(0)
 
         if not self.tcp_pool:
-            print("[GroupEvent] No TCP pool available")
+            print("[GroupIncident] No TCP pool available")
             return
 
         for client_name in self.tcp_pool.get_all_rig_names():
@@ -376,11 +425,11 @@ class GroupEventDialog(QDialog):
                 else:
                     self.freq_field.setText("")
 
-            print(f"[GroupEvent] Requesting callsign and frequency from {rig_name}")
+            print(f"[GroupIncident] Requesting callsign and frequency from {rig_name}")
             client.get_callsign()
             QtCore.QTimer.singleShot(RIG_FREQ_DELAY_MS, client.get_frequency)
         else:
-            print(f"[GroupEvent] Client not available or not connected for {rig_name}")
+            print(f"[GroupIncident] Client not available or not connected for {rig_name}")
             if hasattr(self, 'freq_field'):
                 self.freq_field.setText("")
 
@@ -411,7 +460,7 @@ class GroupEventDialog(QDialog):
         if client and client.is_connected():
             speed_value = self.mode_combo.currentData()
             client.send_message("MODE.SET_SPEED", "", {"SPEED": speed_value})
-            print(f"[GroupEvent] Set mode to {self.mode_combo.currentText()} (speed={speed_value})")
+            print(f"[GroupIncident] Set mode to {self.mode_combo.currentText()} (speed={speed_value})")
 
     def _on_delivery_changed(self, delivery: str) -> None:
         pass
@@ -429,7 +478,7 @@ class GroupEventDialog(QDialog):
     def _on_frequency_received(self, rig_name: str, dial_freq: int) -> None:
         if self.rig_combo.currentText() == rig_name:
             frequency_mhz = dial_freq / 1000000
-            print(f"[GroupEvent] Frequency received from {rig_name}: {frequency_mhz:.3f} MHz")
+            print(f"[GroupIncident] Frequency received from {rig_name}: {frequency_mhz:.3f} MHz")
             if hasattr(self, 'freq_field'):
                 self.freq_field.setText(f"{frequency_mhz:.3f}")
 
@@ -448,12 +497,19 @@ class GroupEventDialog(QDialog):
             self.grid_field.setCursorPosition(pos)
 
     def _generate_event_id(self) -> None:
-        """Generate a time-based Event ID from current UTC time."""
+        """Generate a time-based Incident ID from current UTC time."""
         if not self.event_id:
             self.event_id = generate_time_based_id()
 
     def prefill(self, data: dict) -> None:
-        """Pre-populate fields from a previously received Event, for forwarding."""
+        """Pre-populate fields from a previously received Incident, for forwarding."""
+        if hasattr(self, 'type_combo'):
+            scope = (data.get("scope") or "").strip().upper()
+            for type_name, (_, scope_text, _) in INCIDENT_TYPES.items():
+                if scope == scope_text:
+                    self.type_combo.setCurrentText(type_name)
+                    break
+
         if data.get("grid"):
             self.grid_field.setText(data["grid"])
 
@@ -493,12 +549,14 @@ class GroupEventDialog(QDialog):
                 self._update_forward_message_field(self._forwarder_callsign)
 
     def _lock_for_forward_mode(self) -> None:
-        """Lock Event structure fields when forwarding.
+        """Lock Incident structure fields when forwarding.
 
-        Forwarding preserves the original event verbatim. The user may only
-        change Rig, Mode, Delivery, and Group (target) — Grid, Pin to Map,
-        and the message body are read-only.
+        Forwarding preserves the original incident verbatim. The user may only
+        change Rig, Mode, Delivery, and Group (target) — Type, Grid, Pin to
+        Map, and the message body are read-only.
         """
+        if hasattr(self, 'type_combo'):
+            self.type_combo.setEnabled(False)
         if hasattr(self, 'grid_field'):
             self.grid_field.setReadOnly(True)
         if hasattr(self, 'pin_combo'):
@@ -551,7 +609,7 @@ class GroupEventDialog(QDialog):
         layout.setSpacing(10)
         layout.setContentsMargins(15, 15, 15, 15)
 
-        title = QtWidgets.QLabel("Group Event")
+        title = QtWidgets.QLabel("Group Incident")
         title.setAlignment(Qt.AlignCenter)
         title.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
         title.setFixedHeight(36)
@@ -562,18 +620,15 @@ class GroupEventDialog(QDialog):
         )
         layout.addWidget(title)
 
-        subtitle = QtWidgets.QLabel(
-            "An Event is an ongoing, developing, or planned situation that could "
-            "escalate into\ncivil unrest, protests, rioting, violence, anarchy, or revolution."
-        )
-        subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setWordWrap(True)
-        subtitle.setStyleSheet(
+        self.subtitle = QtWidgets.QLabel(INCIDENT_TYPES["Event"][2])
+        self.subtitle.setAlignment(Qt.AlignCenter)
+        self.subtitle.setWordWrap(True)
+        self.subtitle.setStyleSheet(
             f"QLabel {{ color: {_PANEL_FG}; background-color: transparent;"
             f" font-family: 'Roboto'; font-size: 15px;"
             f" padding: 2px 10px 4px 10px; }}"
         )
-        layout.addWidget(subtitle)
+        layout.addWidget(self.subtitle)
 
         # ── Settings row: Rig | Mode | Freq | Delivery ──────────────────
         def _labeled_col(lbl_text, ctrl):
@@ -632,23 +687,23 @@ class GroupEventDialog(QDialog):
         rig_row.addStretch()
         layout.addLayout(rig_row)
 
-        # ── Header row: From | To | Grid | Pin to Map ───────────────────
+        # ── Header rows: From | Group | Grid, then Type | Pin to Map ────
         header_grid = QtWidgets.QGridLayout()
         header_grid.setSpacing(8)
-        for col in range(4):
+        for col in range(3):
             header_grid.setColumnStretch(col, 1)
 
-        def _add_header_cell(col, label_text, widget):
+        def _add_header_cell(row, col, label_text, widget):
             lbl = QtWidgets.QLabel(label_text)
             lbl.setFont(label_font())
-            header_grid.addWidget(lbl, 0, col)
-            header_grid.addWidget(widget, 1, col)
+            header_grid.addWidget(lbl, row * 2, col)
+            header_grid.addWidget(widget, row * 2 + 1, col)
 
         self.from_field = QtWidgets.QLineEdit(self.callsign)
         self.from_field.setFont(mono_font())
         self.from_field.textChanged.connect(self._on_from_field_changed)
         make_uppercase(self.from_field)
-        _add_header_cell(0, "From:", self.from_field)
+        _add_header_cell(0, 0, "From:", self.from_field)
 
         self.to_combo = QtWidgets.QComboBox()
         self.to_combo.setFont(mono_font())
@@ -661,13 +716,21 @@ class GroupEventDialog(QDialog):
             for group in all_groups:
                 self.to_combo.addItem(group)
         _apply_combo_popup_style(self.to_combo)
-        _add_header_cell(1, "Group:", self.to_combo)
+        _add_header_cell(0, 1, "Group:", self.to_combo)
 
         self.grid_field = QtWidgets.QLineEdit(self.grid)
         self.grid_field.setMaxLength(6)
         self.grid_field.setFont(mono_font())
         self.grid_field.textChanged.connect(self._on_grid_field_changed)
-        _add_header_cell(2, "Grid:", self.grid_field)
+        _add_header_cell(0, 2, "Grid:", self.grid_field)
+
+        self.type_combo = QtWidgets.QComboBox()
+        self.type_combo.setFont(mono_font())
+        for type_name in INCIDENT_TYPES:
+            self.type_combo.addItem(type_name)
+        _apply_combo_popup_style(self.type_combo)
+        self.type_combo.currentTextChanged.connect(self._on_type_changed)
+        _add_header_cell(1, 0, "Type:", self.type_combo)
 
         self.pin_combo = QtWidgets.QComboBox()
         self.pin_combo.setFont(mono_font())
@@ -675,7 +738,7 @@ class GroupEventDialog(QDialog):
         self.pin_combo.addItem("No")
         self.pin_combo.setCurrentIndex(0)  # Default to "Yes"
         _apply_combo_popup_style(self.pin_combo)
-        _add_header_cell(3, "Persistent Map Pin:", self.pin_combo)
+        _add_header_cell(1, 1, "Persistent Map Pin:", self.pin_combo)
 
         layout.addLayout(header_grid)
 
@@ -746,8 +809,8 @@ class GroupEventDialog(QDialog):
         layout.addLayout(btn_grid)
 
     def _on_help_clicked(self) -> None:
-        """Show a styled help dialog explaining what an Event is and how pinning works."""
-        show_help_dialog(self, "Group Event Help", _HELP_HTML, width=470, height=430)
+        """Show a styled help dialog explaining Events, Attacks, and how pinning works."""
+        show_help_dialog(self, "Group Incident Help", _HELP_HTML, width=470)
 
     def _on_commsrvr_error(self, message: str) -> None:
         from qrz_lookup import InternetDeliveryFailureDialog
@@ -831,21 +894,23 @@ class GroupEventDialog(QDialog):
             self._grid_finder.close()
 
     def _build_message(self) -> str:
-        """Build the Group Event message string for transmission.
+        """Build the Group Incident message string for transmission.
 
-        Format: CALLSIGN: @GROUP ,GRID,6,ID,PIN,MESSAGE,{##}
-        Forwarded: ORIGIN_CALL: @GROUP ,GRID,6,ID,PIN,MESSAGE,{F#}
-        Scope slot is hardcoded to "6" (Event); the normal 12-digit status
-        string is replaced by a single Pin-to-Map digit ("1"/"0").
+        Format: CALLSIGN: @GROUP ,GRID,TYPE,ID,PIN,MESSAGE,{##}
+        Forwarded: ORIGIN_CALL: @GROUP ,GRID,TYPE,ID,PIN,MESSAGE,{F#}
+        The scope slot carries the Incident type's status code ("6" Event,
+        "7" Attack); the normal 12-digit status string is replaced by a
+        single Pin-to-Map digit ("1"/"0").
         """
+        type_code = self._status_code()
         message = self._clean_message(self.message_edit.toPlainText().strip())
         pin_flag = "1" if self.pin_combo.currentText() == "Yes" else "0"
         group = f"@{self.to_combo.currentText()}"
         if getattr(self, "_forward_origin", None):
             marker = "{F#}"
-            return f"{self._forward_origin.upper()}: {group} ,{self.grid},6,{self.event_id},{pin_flag},{message},{marker}"
+            return f"{self._forward_origin.upper()}: {group} ,{self.grid},{type_code},{self.event_id},{pin_flag},{message},{marker}"
         marker = "{#3}" if self.rig_combo.currentText() == INTERNET_RIG else "{##}"
-        return f"{self.callsign.upper()}: {group} ,{self.grid},6,{self.event_id},{pin_flag},{message},{marker}"
+        return f"{self.callsign.upper()}: {group} ,{self.grid},{type_code},{self.event_id},{pin_flag},{message},{marker}"
 
     def _capture_save_data(self, frequency: int) -> dict:
         """Capture all widget state needed for DB insert on the main thread."""
@@ -862,13 +927,15 @@ class GroupEventDialog(QDialog):
             'date_only': now.toString("yyyy-MM-dd"),
             'comments': message,
             'pinned': 1 if self.pin_combo.currentText() == "Yes" else 0,
+            'scope': self._scope_text(),
         }
+        status_code = self._status_code()
         for col in _CONDITION_COLUMNS:
-            data[col] = STATUS_EVENT
+            data[col] = status_code
         return data
 
     def _save_to_database(self, frequency: int = 0, global_id: int = 0) -> None:
-        """Save the Event to the statrep table."""
+        """Save the Incident to the statrep table."""
         if hasattr(self, '_pending_save_data') and self._pending_save_data:
             d = self._pending_save_data
         else:
@@ -894,7 +961,7 @@ class GroupEventDialog(QDialog):
                     d['callsign'],
                     d['target'],
                     d['grid'],
-                    "EVENT",
+                    d['scope'],
                     d['map'],
                     d['power'],
                     d['water'],
@@ -912,7 +979,7 @@ class GroupEventDialog(QDialog):
                 ))
                 conn.commit()
         except sqlite3.Error as e:
-            print(f"Database error saving Group Event: {e}")
+            print(f"Database error saving Group Incident: {e}")
             raise
 
     def _refresh_parent_data(self) -> None:
@@ -941,7 +1008,7 @@ class GroupEventDialog(QDialog):
 
             now = QDateTime.currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss")
             print(f"\n{'='*60}")
-            print(f"GROUP EVENT SAVED - {now} UTC")
+            print(f"GROUP INCIDENT ({self._scope_text()}) SAVED - {now} UTC")
             print(f"{'='*60}")
             print(f"  ID:       {self.event_id}")
             print(f"  To:       {self.to_combo.currentText()}")
@@ -951,11 +1018,11 @@ class GroupEventDialog(QDialog):
             print(f"  Message:  {message}")
             print(f"{'='*60}\n")
 
-            self._show_info(f"Group Event saved:\n{message}")
+            self._show_info(f"Group Incident ({self._incident_type()}) saved:\n{message}")
             self._refresh_parent_data()
             self.accept()
         except Exception as e:
-            self._show_error(f"Failed to save Group Event: {e}")
+            self._show_error(f"Failed to save Group Incident: {e}")
 
     def _on_transmit(self) -> None:
         """Validate, check for selected call, get frequency, transmit, and save."""
@@ -966,7 +1033,7 @@ class GroupEventDialog(QDialog):
         rig_name = self.rig_combo.currentText()
 
         if rig_name == INTERNET_RIG:
-            # Only callsign is actually used below — Group Event transmits the
+            # Only callsign is actually used below — Group Incident transmits the
             # Grid the operator entered in this dialog, not User Settings' grid.
             callsign, _, _ = self._get_internet_user_settings()
             if not callsign:
@@ -998,7 +1065,7 @@ class GroupEventDialog(QDialog):
 
             now = QDateTime.currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss")
             print(f"\n{'='*60}")
-            print(f"GROUP EVENT TRANSMITTED (Internet) - {now} UTC")
+            print(f"GROUP INCIDENT ({self._scope_text()}) TRANSMITTED (Internet) - {now} UTC")
             print(f"{'='*60}")
             print(f"  ID:       {self.event_id}")
             print(f"  To:       {self.to_combo.currentText()}")
@@ -1092,7 +1159,7 @@ class GroupEventDialog(QDialog):
             now = QDateTime.currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss")
             freq_mhz = frequency / 1000000.0 if frequency else 0
             print(f"\n{'='*60}")
-            print(f"GROUP EVENT TRANSMITTED - {now} UTC")
+            print(f"GROUP INCIDENT ({self._scope_text()}) TRANSMITTED - {now} UTC")
             print(f"{'='*60}")
             print(f"  ID:       {self.event_id}")
             print(f"  To:       {self.to_combo.currentText()}")
@@ -1107,7 +1174,7 @@ class GroupEventDialog(QDialog):
                 self._refresh_parent_data()
                 self.accept()
         except Exception as e:
-            self._show_error(f"Failed to transmit Group Event: {e}")
+            self._show_error(f"Failed to transmit Group Incident: {e}")
 
 
 # =============================================================================
@@ -1126,6 +1193,6 @@ if __name__ == "__main__":
     tcp_pool = TCPConnectionPool(connector_manager)
     tcp_pool.connect_all()
 
-    dialog = GroupEventDialog(tcp_pool, connector_manager)
+    dialog = GroupIncidentDialog(tcp_pool, connector_manager)
     dialog.show()
     sys.exit(app.exec_())

@@ -80,6 +80,7 @@ STATUS_COLORS: Dict[str, tuple] = {
     "3": ("rgb(255, 0, 0)",     "Red: Critical"),
     "4": ("rgb(128, 128, 128)", "Gray: Unknown"),
     "6": ("rgb(128, 0, 255)", "Event"),
+    "7": ("rgb(255, 0, 255)", "Attack"),
 }
 
 
@@ -1441,6 +1442,7 @@ class StatRepDetailDialog(QDialog):
                  condition_red: str = "",
                  condition_gray: str = "",
                  condition_purple: str = "",
+                 condition_magenta: str = "",
                  tcp_pool=None,
                  connector_manager=None,
                  record_list: list = None,
@@ -1473,6 +1475,7 @@ class StatRepDetailDialog(QDialog):
             "3": (condition_red    or STATUS_COLORS["3"][0], STATUS_COLORS["3"][1]),
             "4": (condition_gray   or STATUS_COLORS["4"][0], STATUS_COLORS["4"][1]),
             "6": (condition_purple or STATUS_COLORS["6"][0], STATUS_COLORS["6"][1]),
+            "7": (condition_magenta or STATUS_COLORS["7"][0], STATUS_COLORS["7"][1]),
         }
         self._tcp_pool = tcp_pool
         self._connector_manager = connector_manager
@@ -1783,7 +1786,8 @@ class StatRepDetailDialog(QDialog):
         if not self._tcp_pool or not self._connector_manager or not self._row_data:
             return
 
-        is_event = self._row_data.get("scope") == "EVENT"
+        scope = (self._row_data.get("scope") or "").strip().upper()
+        is_incident = scope in ("EVENT", "ATTACK")
 
         if self._sr_datetime:
             try:
@@ -1795,7 +1799,7 @@ class StatRepDetailDialog(QDialog):
                     from PyQt5.QtWidgets import QMessageBox
                     msg = QMessageBox(self)
                     msg.setWindowTitle("Cannot Forward")
-                    kind = "Event" if is_event else "Status Report"
+                    kind = scope.capitalize() if is_incident else "Status Report"
                     msg.setText(
                         f"This {kind} cannot be forwarded because it is more than 24 hours old."
                     )
@@ -1806,9 +1810,9 @@ class StatRepDetailDialog(QDialog):
             except (ValueError, TypeError):
                 pass
 
-        if is_event:
-            from group_event import GroupEventDialog
-            dlg = GroupEventDialog(
+        if is_incident:
+            from group_incident import GroupIncidentDialog
+            dlg = GroupIncidentDialog(
                 self._tcp_pool, self._connector_manager, self,
                 module_background=self._module_bg,
             )
