@@ -4,10 +4,12 @@
 """
 qrz_lookup.py - QRZ Callsign Lookup Dialogs for CommStat
 
-Three modal dialog views:
-  - QRZLookupDialog     : standalone search (Tools → QRZ Lookup)
-  - StatRepDetailDialog : detail view when clicking a StatRep row
-  - MessageDetailDialog : detail view when clicking a Message row
+Dialogs:
+  - QRZLookupDialog               : callsign search + Internet direct message
+                                    (QRZ menu; Transmit > Internet Tools > Direct Message)
+  - StatRepDetailDialog           : detail view when clicking a Status Report row
+  - MessageDetailDialog           : detail view when clicking a Message row
+  - InternetDeliveryFailureDialog, DeliveryConfirmationDialog, NewMessagePopupDialog
 """
 
 import base64
@@ -21,56 +23,64 @@ import time
 import urllib.parse
 import urllib.request
 import webbrowser
-from typing import Callable, Dict, Optional
+from html import escape as _esc_html
+from typing import Callable, Dict, Optional, Tuple
 
 import folium
 import maidenhead as mh
-from PyQt5 import QtGui
 from PyQt5.QtCore import QBuffer, QByteArray, QObject, QSize, Qt, QThread, QUrl, pyqtSignal
-from PyQt5.QtGui import QColor, QCursor, QDesktopServices, QFont, QMovie, QPainter, QPixmap
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtGui import QColor, QCursor, QFont, QMovie, QPainter, QPixmap
+from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
 from PyQt5.QtWidgets import (
-    QComboBox, QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QMessageBox, QPlainTextEdit, QPushButton, QSizePolicy, QStyledItemDelegate,
+    QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
+    QMessageBox, QPlainTextEdit, QSizePolicy,
     QTextBrowser, QTextEdit, QVBoxLayout, QWidget,
 )
 
 from id_utils import generate_time_based_id
+from text_utils import base_callsign, title_case
 from qrz_client import QRZClient, get_qrz_cached, load_qrz_config, subscription_status
 from constants import (
+    COMMSRVR_URL, DATAFEED_URL,
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
-    COLOR_BTN_RED, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_GREEN, COLOR_BTN_HELP,
-    RIG_FREQ_DELAY_MS,
+    COLOR_BTN_RED, COLOR_BTN_GRAY, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_GREEN, COLOR_BTN_HELP,
 )
+from db_utils import db_connect
 # Single source of truth for mouse-wheel zoom dampening — see little_gucci.py
-from little_gucci import MAP_WHEEL_PX_PER_ZOOM, base_callsign, create_verified_ssl_context
-from ui_helpers import apply_standard_dialog_chrome, connect_single, show_help_dialog
+from little_gucci import MAP_WHEEL_PX_PER_ZOOM
+from ssl_utils import create_verified_ssl_context
+from ui_helpers import (
+    apply_standard_dialog_chrome, connect_single, make_button, make_input, make_title_strip,
+    show_help_dialog, open_external_url,
+)
 
-DB_PATH = "traffic.db3"
-_COMMSRVR_URL  = base64.b64decode("aHR0cHM6Ly9jb21tc3RhdC5hcHA=").decode()
-_DATAFEED_URL  = _COMMSRVR_URL + "/datafeed-808585.php"
+_COMMSRVR_URL  = COMMSRVR_URL
+_DATAFEED_URL  = DATAFEED_URL
 
 _PROG_BG    = DEFAULT_COLORS.get("program_background", "#000000")
 _PROG_FG    = DEFAULT_COLORS.get("program_foreground", "#FFFFFF")
+_PANEL_BG   = DEFAULT_COLORS.get("module_background",  "#DDDDDD")
+_PANEL_FG   = DEFAULT_COLORS.get("module_foreground",  "#000000")
 _DATA_BG    = DEFAULT_COLORS.get("data_background",    "#F8F6F4")
 _COL_CANCEL = "#555555"
 _COL_PURPLE = "#6f42c1"
 _COL_NAV    = "#e07b39"
+_GRID_LINE  = "#D2D0CF"   # status-grid and report borders
 
-# StatRep status field order: (display label, statrep row index)
+# StatRep status field order: (display label, statrep column name)
 STATUS_FIELDS = [
-    ("Map",    8),
-    ("Power",  9),
-    ("Water", 10),
-    ("Med",   11),
-    ("Comms", 12),
-    ("Travel",13),
-    ("Inet",  14),
-    ("Fuel",  15),
-    ("Food",  16),
-    ("Crime", 17),
-    ("Civil", 18),
-    ("Weather", 19),
+    ("Map",    "map"),
+    ("Power",  "power"),
+    ("Water",  "water"),
+    ("Med",    "med"),
+    ("Comms",  "telecom"),
+    ("Travel", "travel"),
+    ("Inet",   "internet"),
+    ("Fuel",   "fuel"),
+    ("Food",   "food"),
+    ("Crime",  "crime"),
+    ("Civil",  "civil"),
+    ("Weather", "political"),
 ]
 
 # Status value → (CSS color string, tooltip text)
@@ -94,20 +104,6 @@ def _mono_font() -> QFont:
     return QFont("Kode Mono")
 
 
-def _btn(label: str, color: str, min_w: int = 90) -> QPushButton:
-    b = QPushButton(label)
-    b.setMinimumWidth(min_w)
-    b.setStyleSheet(
-        f"QPushButton {{ background-color:{color}; color:#ffffff; border:none;"
-        f" padding:6px 11px; border-radius:4px; font-family:Roboto; font-size:15px;"
-        f" font-weight:bold; }}"
-        f"QPushButton:hover {{ background-color:{color}; opacity:0.9; }}"
-        f"QPushButton:pressed {{ background-color:{color}; }}"
-        f"QPushButton:disabled {{ background-color:#cccccc; color:#888888; }}"
-    )
-    return b
-
-
 def _normalize_qrz(data: dict) -> dict:
     """Normalize QRZ data to consistent display keys.
 
@@ -121,10 +117,10 @@ def _normalize_qrz(data: dict) -> dict:
     grid_override = (data.get("grid_override") or "").strip()
     return {
         "call":     (data.get("call") or data.get("callsign") or "").upper(),
-        "name":     " ".join(x for x in (
+        "name":     title_case(" ".join(x for x in (
                         (data.get("fname") or "").strip(),
                         (data.get("name") or "").strip()
-                    ) if x).title() or "",
+                    ) if x)),
         "born":     str(data.get("born") or ""),
         "expdate":  str(data.get("expdate") or ""),
         "addr1":    data.get("addr1") or data.get("address") or "",
@@ -203,7 +199,43 @@ def _hsep() -> QFrame:
     return sep
 
 
+def _esc(value) -> str:
+    """HTML-escape a value before it is put into rich text (labels, print HTML).
+    Everything shown here can come from other users (radio/Internet) or from QRZ."""
+    return _esc_html("" if value is None else str(value))
+
+
+# Workers that are running. Dropping the last Python reference to a running QThread
+# aborts the whole program ("QThread: Destroyed while thread is still running"), which
+# is what happened when a dialog replaced or released a worker mid-request (Next/Previous,
+# or a dialog being freed). Holding each worker here until it finishes makes that safe.
+_LIVE_WORKERS: set = set()
+
+
+def _start_worker(thread: QThread) -> QThread:
+    """Start a worker thread and keep it alive until it has finished."""
+    _LIVE_WORKERS.add(thread)
+    thread.finished.connect(lambda t=thread: _LIVE_WORKERS.discard(t))
+    thread.start()
+    return thread
+
+
+def _detach_loader(loader) -> None:
+    """Stop a replaced image loader from delivering a late image into the dialog.
+    The thread itself keeps running to completion (see _start_worker)."""
+    if loader is None:
+        return
+    for sig in (loader.image_loaded, loader.gif_loaded):
+        try:
+            sig.disconnect()
+        except (TypeError, RuntimeError):
+            pass
+
+
 # ── Background workers ─────────────────────────────────────────────────────
+
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024   # a profile photo bigger than this is not loaded
+
 
 class _ImageLoader(QThread):
     """Downloads and scales a QRZ profile image in the background.
@@ -228,9 +260,14 @@ class _ImageLoader(QThread):
         import netguard
         if not netguard.guard("Image load"):
             return
+        # The URL comes from a QRZ record; urlopen would also open file: and ftp: URLs.
+        if urllib.parse.urlparse(self.url).scheme.lower() not in ("http", "https"):
+            return
         try:
-            with urllib.request.urlopen(self.url, timeout=10) as resp:
-                data = resp.read()
+            with urllib.request.urlopen(self.url, timeout=10, context=create_verified_ssl_context()) as resp:
+                data = resp.read(_MAX_IMAGE_BYTES + 1)
+            if len(data) > _MAX_IMAGE_BYTES:
+                return
             if self.url.lower().split("?")[0].endswith(".gif"):
                 self.gif_loaded.emit(data)
                 return
@@ -254,13 +291,80 @@ class _ImageLoader(QThread):
 def _get_local_callsign() -> str:
     """Read the local station callsign from the controls table."""
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        with db_connect() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT callsign FROM controls WHERE id = 1")
             row = cursor.fetchone()
             return (row[0] or "").strip() if row else ""
     except Exception:
         return ""
+
+
+class _RemoteDeleteThread(QThread):
+    """Asks the commsrvr server to delete one of the user's own records for all users."""
+    done_with = pyqtSignal(str)   # "" = deleted, otherwise the reason it was not
+
+    def __init__(self, url: str):
+        super().__init__()
+        self.url = url
+
+    def run(self) -> None:
+        import netguard
+        if not netguard.guard("Remote record delete"):
+            self.done_with.emit("Internet access is turned off.")
+            return
+        try:
+            with urllib.request.urlopen(self.url, timeout=10, context=create_verified_ssl_context()) as resp:
+                reply = resp.read().decode(errors="replace").strip()
+        except Exception as e:
+            self.done_with.emit(f"Could not reach the server: {e}")
+            return
+        if reply.startswith("ERR::"):
+            self.done_with.emit(reply[5:].strip() or "The server refused the request.")
+        else:
+            self.done_with.emit("")
+
+
+def _delete_everywhere(parent: QDialog, url: str) -> bool:
+    """Delete a record from all CommStat users. The window stays responsive while the
+    request runs. On failure, ask whether to delete only the local copy; returns True
+    when the caller should go on and delete the local row."""
+    from PyQt5.QtCore import QEventLoop
+    thread = _RemoteDeleteThread(url)
+    loop = QEventLoop(parent)
+    result = []
+    thread.done_with.connect(lambda err: (result.append(err), loop.quit()))
+    thread.finished.connect(loop.quit)
+    parent.setEnabled(False)
+    parent.setCursor(Qt.WaitCursor)
+    try:
+        thread.start()
+        if not result:
+            loop.exec_()
+        thread.wait()
+    finally:
+        parent.unsetCursor()
+        parent.setEnabled(True)
+    err = result[0] if result else "No answer from the server."
+    if not err:
+        return True
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Warning)
+    box.setWindowTitle("Delete Failed")
+    box.setText(
+        "The record could NOT be deleted from the other CommStat users:\n"
+        f"{err}\n\nDelete it from this computer only?"
+    )
+    yes_btn = make_button("Delete Here Only", COLOR_BTN_RED)
+    cancel_btn = make_button("Cancel", COLOR_BTN_GRAY)
+    box.addButton(yes_btn, QMessageBox.YesRole)
+    box.addButton(cancel_btn, QMessageBox.RejectRole)
+    box.setDefaultButton(cancel_btn)
+    box.setEscapeButton(cancel_btn)
+    box.exec_()
+    clicked = box.clickedButton()
+    box.deleteLater()
+    return clicked is yes_btn
 
 
 class _ReadCountThread(QThread):
@@ -309,8 +413,13 @@ class _QRZThread(QThread):
         self.password = password
 
     def run(self) -> None:
-        client = QRZClient(self.username, self.password)
-        data = client.lookup(self.callsign)
+        # An exception escaping run() would abort the program, so report it as "no result".
+        try:
+            client = QRZClient(self.username, self.password)
+            data = client.lookup(self.callsign)
+        except Exception as e:
+            print(f"[QRZ] Lookup of {self.callsign} failed: {type(e).__name__}: {e}")
+            data = None
         if data:
             qrz_cache_notifier.record_written.emit(self.callsign.upper())
         self.result_ready.emit(data)
@@ -331,7 +440,7 @@ class _ClickableImageLabel(QLabel):
 
     def mousePressEvent(self, event) -> None:
         if self._url and event.button() == Qt.LeftButton:
-            QDesktopServices.openUrl(QUrl(self._url))
+            open_external_url(self.window(), QUrl(self._url))
         else:
             super().mousePressEvent(event)
 
@@ -440,13 +549,13 @@ class _QRZInfoSection(QWidget):
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
 
-        self.hdr = QLabel("QRZ API Lookup For:")
-        self.hdr.setFont(QFont("Roboto Slab", -1, QFont.Black))
-        self.hdr.setStyleSheet(
-            f"QLabel {{ background-color: {self._hdr_bg}; color: {self._hdr_fg}; font-size: 16px; padding-top: 9px; padding-bottom: 9px; }}"
-            if self._hdr_bg else ""
-        )
-        self.hdr.setAlignment(Qt.AlignCenter)
+        if self._hdr_bg:
+            self.hdr = make_title_strip("QRZ API Lookup For:", self._hdr_bg, self._hdr_fg or None)
+        else:
+            self.hdr = QLabel("QRZ API Lookup For:")
+            self.hdr.setFont(QFont("Roboto Slab", -1, QFont.Black))
+            self.hdr.setAlignment(Qt.AlignCenter)
+        self.hdr.setTextFormat(Qt.PlainText)
 
         self.lbl_call    = QLabel(); self.lbl_call.setFont(_mono_font())
         self.lbl_name    = QLabel(); self.lbl_name.setFont(_mono_font())
@@ -459,10 +568,14 @@ class _QRZInfoSection(QWidget):
         self.lbl_grid    = QLabel(); self.lbl_grid.setFont(_mono_font())
         self.lbl_lat     = QLabel(); self.lbl_lat.setFont(_mono_font())
         self.lbl_lon     = QLabel(); self.lbl_lon.setFont(_mono_font())
+        # Plain-text labels: their content is untrusted, so never interpret it as HTML.
+        for _lbl in (self.lbl_addr1, self.lbl_addr2):
+            _lbl.setTextFormat(Qt.PlainText)
 
         self.lbl_qrz_status = QLabel()
         self.lbl_qrz_status.setStyleSheet("QLabel { font-family:Roboto; font-size:13px; font-weight:bold; }")
         self.lbl_qrz_status.setWordWrap(True)
+        self.lbl_qrz_status.setTextFormat(Qt.PlainText)
         self.lbl_qrz_status.setVisible(False)
 
         self.last_seen_updated.connect(self._on_last_seen_updated)
@@ -494,6 +607,7 @@ class _QRZInfoSection(QWidget):
         self.lbl_moddate.setFont(QFont("Roboto"))
         self.lbl_moddate.setStyleSheet("QLabel { font-size: 13px; font-weight: normal; }")
         self.lbl_moddate.setAlignment(Qt.AlignRight)
+        self.lbl_moddate.setTextFormat(Qt.PlainText)
         moddate_row = QHBoxLayout()
         moddate_row.addStretch()
         moddate_row.addWidget(self.lbl_moddate)
@@ -516,7 +630,8 @@ class _QRZInfoSection(QWidget):
         memo_input.setTabChangesFocus(True)
         memo_input.setStyleSheet(
             f"QPlainTextEdit {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px 8px; }}"
+            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px 8px;"
+            f" font-family:'Kode Mono'; font-size:13px; }}"
         )
         memo_input.setPlaceholderText("Add a status report note…")
         self._main_layout.addWidget(memo_input, 1)
@@ -524,14 +639,8 @@ class _QRZInfoSection(QWidget):
 
     def _add_note_input(self, placeholder: str, trailing_space: int = 12) -> QLineEdit:
         self._main_layout.addSpacing(10)
-        memo_input = QLineEdit()
-        memo_input.setFont(_mono_font())
+        memo_input = make_input(placeholder=placeholder)
         memo_input.setMinimumHeight(34)
-        memo_input.setStyleSheet(
-            f"background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px 8px;"
-        )
-        memo_input.setPlaceholderText(placeholder)
         self._main_layout.addWidget(memo_input)
         if trailing_space:
             self._main_layout.addSpacing(trailing_space)
@@ -655,7 +764,7 @@ class _QRZInfoSection(QWidget):
 
     def _on_last_seen_updated(self, value: str) -> None:
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
-        self.lbl_last_seen.setText(f'<span style="{_k}">Last Seen:</span> {value}')
+        self.lbl_last_seen.setText(f'<span style="{_k}">Last Seen:</span> {_esc(value)}')
 
     def update_data(self, data: dict) -> None:
         """Populate all labels from raw QRZ data (API or cached format)."""
@@ -663,7 +772,7 @@ class _QRZInfoSection(QWidget):
 
         self.hdr.setText(f"QRZ API Lookup For: {d['call']}")
         self.lbl_call.setText("")
-        self.lbl_name.setText(f"<b>{d['name']}</b>" if d["name"] else "")
+        self.lbl_name.setText(f"<b>{_esc(d['name'])}</b>" if d["name"] else "")
 
         self.lbl_addr1.setText(d["addr1"])
         city_state = ", ".join(x for x in (d["addr2"], d["state"]) if x)
@@ -672,8 +781,8 @@ class _QRZInfoSection(QWidget):
         self.lbl_addr2.setText(city_state)
 
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
-        self.lbl_county.setText(f'<span style="{_k}">County:</span> {d["county"]}' if d["county"] else "")
-        self.lbl_country.setText(f'<span style="{_k}">Country:</span> {d["country"]}' if d["country"] else "")
+        self.lbl_county.setText(f'<span style="{_k}">County:</span> {_esc(d["county"])}' if d["county"] else "")
+        self.lbl_country.setText(f'<span style="{_k}">Country:</span> {_esc(d["country"])}' if d["country"] else "")
 
         if d["call"] and not self._skip_last_seen and d["call"] != self._last_seen_call:
             self._last_seen_call = d["call"]
@@ -681,16 +790,16 @@ class _QRZInfoSection(QWidget):
             self._fetch_last_seen(d["call"])
 
         if d["license"] and d["expdate"]:
-            self.lbl_license.setText(f'<span style="{_k}">License:</span> {d["license"]} (exp: {d["expdate"]})')
+            self.lbl_license.setText(f'<span style="{_k}">License:</span> {_esc(d["license"])} (exp: {_esc(d["expdate"])})')
         elif d["expdate"]:
-            self.lbl_license.setText(f'(exp: {d["expdate"]})')
+            self.lbl_license.setText(f'(exp: {_esc(d["expdate"])})')
         elif d["license"]:
-            self.lbl_license.setText(f'<span style="{_k}">License:</span> {d["license"]}')
+            self.lbl_license.setText(f'<span style="{_k}">License:</span> {_esc(d["license"])}')
         else:
             self.lbl_license.setText("")
-        self.lbl_grid.setText(f'<span style="{_k}">Grid:</span> {d["grid"]}' if d["grid"] else "")
-        self.lbl_lat.setText(f'<span style="{_k}">Lat:</span> {d["lat"]}' if d["lat"] else "")
-        self.lbl_lon.setText(f'<span style="{_k}">Lon:</span> {d["lon"]}' if d["lon"] else "")
+        self.lbl_grid.setText(f'<span style="{_k}">Grid:</span> {_esc(d["grid"])}' if d["grid"] else "")
+        self.lbl_lat.setText(f'<span style="{_k}">Lat:</span> {_esc(d["lat"])}' if d["lat"] else "")
+        self.lbl_lon.setText(f'<span style="{_k}">Lon:</span> {_esc(d["lon"])}' if d["lon"] else "")
 
         profile_url = f"https://www.qrz.com/db/{d['call']}" if d["call"] else ""
 
@@ -700,11 +809,13 @@ class _QRZInfoSection(QWidget):
 
         self.lbl_image.clear()
         self.lbl_image.set_url(profile_url)
+        _detach_loader(self._img_loader)
+        self._img_loader = None
         if d["image"]:
             self._img_loader = _ImageLoader(d["image"])
             self._img_loader.image_loaded.connect(self._on_image_loaded)
             self._img_loader.gif_loaded.connect(self._on_gif_loaded)
-            self._img_loader.start()
+            _start_worker(self._img_loader)
         else:
             self._load_default_image()
 
@@ -745,6 +856,8 @@ class _QRZInfoSection(QWidget):
 
     def show_no_data_placeholder(self) -> None:
         """Show label keys and default image with no QRZ data populated."""
+        _detach_loader(self._img_loader)
+        self._img_loader = None
         if self._gif_movie:
             self._gif_movie.stop()
             self._gif_movie = None
@@ -769,6 +882,8 @@ class _QRZInfoSection(QWidget):
         self._load_default_image()
 
     def clear(self) -> None:
+        _detach_loader(self._img_loader)
+        self._img_loader = None
         if self._gif_movie:
             self._gif_movie.stop()
             self._gif_movie = None
@@ -784,7 +899,7 @@ class _QRZInfoSection(QWidget):
 # ── Dialog 1: Standalone QRZ Lookup ───────────────────────────────────────
 
 class QRZLookupDialog(QDialog):
-    """Standalone QRZ callsign lookup (Tools → QRZ Lookup)."""
+    """QRZ callsign lookup and Internet direct message (QRZ menu, Transmit > Internet Tools)."""
 
     _send_result = pyqtSignal(str)
 
@@ -795,9 +910,11 @@ class QRZLookupDialog(QDialog):
                  initial_callsign: str = "",
                  initial_message: str = "",
                  refresh_callback=None,
-                 parent=None):
+                 parent=None,
+                 title: str = "QRZ Lookup"):
         super().__init__(parent)
-        apply_standard_dialog_chrome(self, "QRZ Lookup")
+        apply_standard_dialog_chrome(self, title)
+        self._title = title
         self.setModal(True)
         self.setMinimumSize(825, 500)
         self.resize(902, 580)
@@ -808,6 +925,7 @@ class QRZLookupDialog(QDialog):
         self._thread: Optional[_QRZThread] = None
         self._refresh_callback = refresh_callback
         self._internet_available = bool(self.parent() and getattr(self.parent(), '_internet_available', True))
+        self._pending_dm = None
         self._send_result.connect(self._on_send_result)
         self._setup_ui()
 
@@ -837,27 +955,16 @@ class QRZLookupDialog(QDialog):
         main.setSpacing(10)
 
         # Title
-        title = QLabel("QRZ Lookup")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Roboto Slab", -1, QFont.Black))
-        title.setFixedHeight(36)
-        title.setStyleSheet(
-            f"QLabel {{ background-color: {self._program_bg}; color: {self._program_fg}; "
-            "font-size: 16px; padding-top: 9px; padding-bottom: 9px; }"
-        )
-        main.addWidget(title)
+        main.addWidget(make_title_strip(self._title, self._program_bg, self._program_fg))
 
         row = QHBoxLayout()
-        self.cs_edit = QLineEdit()
-        self.cs_edit.setPlaceholderText("Enter callsign…")
-        self.cs_edit.setMaxLength(15)
-        self.cs_edit.setFont(_mono_font())
+        self.cs_edit = make_input(placeholder="Enter callsign…", max_len=15)
         self.cs_edit.setMinimumHeight(34)
         self.cs_edit.returnPressed.connect(self._search)
         self.cs_edit.textChanged.connect(self._force_upper)
         row.addWidget(self.cs_edit)
 
-        self.btn_search = _btn("Search", COLOR_BTN_BLUE)
+        self.btn_search = make_button("Search", COLOR_BTN_BLUE)
         self.btn_search.setFixedWidth(90)
         self.btn_search.setAutoDefault(False)
         self.btn_search.clicked.connect(self._search)
@@ -895,37 +1002,32 @@ class QRZLookupDialog(QDialog):
         main.addWidget(self.msg_edit)
         main.addStretch()
 
-        self.btn_clear_msg = _btn("Clear", _COL_CANCEL)
+        self.btn_clear_msg = make_button("Clear", _COL_CANCEL)
         self.btn_clear_msg.setVisible(False)
         self.btn_clear_msg.clicked.connect(self.msg_edit.clear)
-        self.btn_send = _btn("Send", COLOR_BTN_BLUE)
+        self.btn_send = make_button("Send", COLOR_BTN_BLUE)
         self.btn_send.setVisible(False)
         connect_single(self.btn_send, self._on_send_internet)
-        self.btn_close_lookup = _btn("Close", _COL_CANCEL)
+        self.btn_close_lookup = make_button("Close", _COL_CANCEL)
         self.btn_close_lookup.clicked.connect(self.reject)
 
-        if self._internet_available:
-            btn_row = QHBoxLayout()
-            btn_row.setSpacing(8)
-            btn_row.addStretch()
-            btn_row.addWidget(self.btn_clear_msg)
-            btn_row.addWidget(self.btn_send)
-            btn_row.addWidget(self.btn_close_lookup)
-            main.addLayout(btn_row)
-        else:
+        if not self._internet_available:
             no_inet = QLabel("No Internet Connection  ·  Direct Messaging Unavailable")
             no_inet.setAlignment(Qt.AlignCenter)
-            no_inet.setFont(QFont("Roboto Slab", -1, QFont.Black))
-            no_inet.setFixedHeight(36)
             no_inet.setStyleSheet(
-                f"QLabel {{ background-color: {self._program_bg}; color: {self._program_fg}; "
-                "font-size: 16px; padding-top: 9px; padding-bottom: 9px; }}"
+                f"QLabel {{ color:{self._module_fg}; background-color:transparent;"
+                f" font-family:Roboto; font-size:13px; font-weight:bold; }}"
             )
-            no_inet_row = QHBoxLayout()
-            no_inet_row.setSpacing(8)
-            no_inet_row.addWidget(no_inet, 1)
-            no_inet_row.addWidget(self.btn_close_lookup)
-            main.addLayout(no_inet_row)
+            main.addWidget(no_inet)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addStretch()
+        if self._internet_available:
+            btn_row.addWidget(self.btn_clear_msg)
+            btn_row.addWidget(self.btn_send)
+        btn_row.addWidget(self.btn_close_lookup)
+        main.addLayout(btn_row)
 
     def _adjust_for_image_width(self, img_width: int) -> None:
         if img_width > 275:
@@ -999,7 +1101,7 @@ class QRZLookupDialog(QDialog):
         self.qrz_info.show_no_data_placeholder()
         self._thread = _QRZThread(cs, username, password)
         self._thread.result_ready.connect(self._on_result)
-        self._thread.start()
+        _start_worker(self._thread)
 
     def _on_result(self, result) -> None:
         self.btn_search.setEnabled(True)
@@ -1020,7 +1122,7 @@ class QRZLookupDialog(QDialog):
         if not cs:
             return
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute(
                     "UPDATE qrz SET memo = ? WHERE callsign = ? COLLATE NOCASE",
                     (self.memo_edit.text(), cs)
@@ -1050,7 +1152,7 @@ class QRZLookupDialog(QDialog):
         if not my_cs:
             QMessageBox.warning(self, "Send Failed", "No operator callsign configured in Settings.")
             return
-        now = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         msg_id = generate_time_based_id()
         message_data = f"{my_cs}: {cs} MSG ,{msg_id},{text},{{^%3}}"
         data_string  = f"{now}\t0\t0\t30\t{message_data}"
@@ -1075,7 +1177,7 @@ class QRZLookupDialog(QDialog):
             global_id: The global ID returned by the commsrvr server (0 if unknown).
         """
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO messages "
                     "(global_id, datetime, date, freq, db, source, msg_id, from_callsign, target, message) "
@@ -1096,7 +1198,7 @@ class QRZLookupDialog(QDialog):
             req  = urllib.request.Request(_DATAFEED_URL, data=post, method='POST')
             with urllib.request.urlopen(req, timeout=5, context=create_verified_ssl_context()) as resp:
                 result = resp.read().decode().strip()
-            if result.lstrip('-').isdigit():
+            if result.isdigit():
                 print(f"[Commsrvr] Direct message submitted successfully (global_id={result})")
             else:
                 print(f"[Commsrvr] Direct message submission failed — server returned: {result}")
@@ -1106,323 +1208,178 @@ class QRZLookupDialog(QDialog):
             if isinstance(reason, TimeoutError):
                 err = "ERR::Server timeout — the server did not respond in time."
             else:
-                err = f"ERR::Connection Error — The CommStat server did not reply.\nURL: {_DATAFEED_URL}"
+                err = f"ERR::Connection error — {e}"
             print(f"[Commsrvr] Direct message submission failed — {err[5:]}")
             self._send_result.emit(err)
 
     def _on_send_result(self, result: str) -> None:
-        if result.startswith("ERR::"):
-            InternetDeliveryFailureDialog(result[5:], parent=self).exec_()
-        elif result.lstrip('-').isdigit():
+        if result.isdigit():
             if self._pending_dm:
                 self._save_to_local_messages(*self._pending_dm, global_id=int(result))
                 self._pending_dm = None
                 if self._refresh_callback:
                     self._refresh_callback()
             self.accept()
+            return
+        # Anything that is not a bare integer is a failure (datafeed contract)
+        message = result[5:] if result.startswith("ERR::") else (result or "Unknown server error")
+        InternetDeliveryFailureDialog(message, parent=self).exec_()
 
 
-# ── Dialog 2: JS8 Message (RF) ─────────────────────────────────────────────
+# ── Shared base of the two detail dialogs ──────────────────────────────────
 
-class JS8MessageDialog(QDialog):
-    """QRZ lookup with inline JS8 RF transmit controls (JS8 Message menu item)."""
+class _DetailDialogBase(QDialog):
+    """Plumbing shared by the Status Report and Message detail dialogs: window chrome,
+    common state, link opening, the contact note, the QRZ lookup with its worker
+    threads, and the reply dialogs."""
 
-    def __init__(self, program_background: str = "",
-                 program_foreground: str = "",
-                 module_background: str = "#f5f5f5",
-                 module_foreground: str = "#333333",
-                 tcp_pool=None,
-                 connector_manager=None,
-                 parent=None):
+    # The Message dialog shows stale cached QRZ data while a live lookup refreshes it.
+    _SHOW_STALE_WHILE_REFRESHING = False
+
+    def __init__(self, title: str, record_id, callsign: str, internet_available: bool,
+                 commsrvr_url: str, module_background: str, module_foreground: str,
+                 data_background: str, program_background: str, program_foreground: str,
+                 tcp_pool, connector_manager, refresh_callback, min_size: tuple, parent):
         super().__init__(parent)
-        apply_standard_dialog_chrome(self, "JS8 Message")
+        apply_standard_dialog_chrome(self, title)
         self.setModal(True)
-        self.setMinimumSize(825, 460)
-        self.resize(900, 530)
-        self._program_bg = program_background or _PROG_BG
-        self._program_fg = program_foreground or _PROG_FG
+        self.setMinimumSize(*min_size)
+        self.resize(*min_size)
+        self._record_id = record_id
+        self.callsign = callsign
+        self.internet_available = internet_available
+        self._commsrvr_url = commsrvr_url
         self._module_bg = module_background
         self._module_fg = module_foreground
+        self._data_bg = data_background
+        self._program_bg = program_background or _PROG_BG
+        self._program_fg = program_foreground or _PROG_FG
         self._tcp_pool = tcp_pool
         self._connector_manager = connector_manager
-        self._qrz_thread: Optional[_QRZThread] = None
-        self._setup_ui()
-        self._populate_rigs()
+        self._refresh_callback = refresh_callback
+        self._thread: Optional[_QRZThread] = None
+        self._rc_thread: Optional[_ReadCountThread] = None
+        self._reload_token: int = 0
+        self._map_loaded = False
+        self._last_nav: str = "older"
 
-    def _setup_ui(self) -> None:
-        self.setStyleSheet(
-            f"QDialog {{ background-color:{self._module_bg}; }}"
-            f"QLabel {{ color:{self._module_fg}; background-color: transparent; font-size: 13px; }}"
-            f"QLineEdit {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px 8px;"
-            f" font-family:'Kode Mono'; font-size:13px; }}"
-            f"QComboBox {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px 8px;"
-            f" font-family:'Kode Mono'; font-size:13px; combobox-popup:0; }}"
-            f"QComboBox QAbstractItemView::item {{ min-height:22px; padding:0 6px; }}"
+    # ── links, notes ──────────────────────────────────────────────────────
+
+    def _open_link(self, url) -> None:
+        open_external_url(
+            self, url, panel_bg=self._module_bg, prog_bg=self._program_bg, prog_fg=self._program_fg,
         )
-        main = QVBoxLayout(self)
-        main.setContentsMargins(15, 15, 15, 15)
-        main.setSpacing(10)
-
-        title = QLabel("JS8 MESSAGE")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Roboto Slab", -1, QFont.Black))
-        title.setFixedHeight(36)
-        title.setStyleSheet(
-            f"QLabel {{ background-color: {self._program_bg}; color: {self._program_fg}; "
-            "font-size: 16px; padding-top: 9px; padding-bottom: 9px; }"
-        )
-        main.addWidget(title)
-
-        search_row = QHBoxLayout()
-        self.cs_edit = QLineEdit()
-        self.cs_edit.setPlaceholderText("Enter callsign…")
-        self.cs_edit.setMaxLength(15)
-        self.cs_edit.setFont(_mono_font())
-        self.cs_edit.setMinimumHeight(34)
-        self.cs_edit.returnPressed.connect(self._search)
-        self.cs_edit.textChanged.connect(self._force_upper)
-        search_row.addWidget(self.cs_edit)
-        self.btn_search = _btn("Search", COLOR_BTN_BLUE)
-        self.btn_search.setFixedWidth(90)
-        self.btn_search.setAutoDefault(False)
-        self.btn_search.clicked.connect(self._search)
-        search_row.addWidget(self.btn_search)
-        main.addLayout(search_row)
-
-        self.lbl_status = QLabel()
-        self.lbl_status.setFont(QFont("Roboto"))
-        self.lbl_status.setStyleSheet("QLabel { color:#888888; font-size:10px; font-weight:normal; }")
-        main.addWidget(self.lbl_status)
-
-        self.qrz_info = _QRZInfoSection(hdr_bg=self._program_bg, hdr_fg=self._program_fg, parent=self)
-        self.qrz_info.image_width_ready.connect(self._adjust_for_image_width)
-        self.qrz_info.show_no_data_placeholder()
-        self.contact_memo_edit = self.qrz_info.add_memo_row()
-        self.contact_memo_edit.editingFinished.connect(self._save_contact_memo)
-        main.addWidget(self.qrz_info)
-
-        # RF controls row
-        rf_row = QHBoxLayout()
-        rf_row.setSpacing(12)
-
-        rig_lbl = QLabel("Rig:")
-        rig_lbl.setFont(_lbl_font())
-        self.rig_combo = QComboBox()
-        self.rig_combo.setFont(_mono_font())
-        self.rig_combo.setMinimumWidth(140)
-        self.rig_combo.setMaxVisibleItems(30)
-        self.rig_combo.setItemDelegate(QStyledItemDelegate(self.rig_combo))
-        self.rig_combo.currentTextChanged.connect(self._on_rig_changed)
-        rf_row.addWidget(rig_lbl)
-        rf_row.addWidget(self.rig_combo)
-
-        mode_lbl = QLabel("Mode:")
-        mode_lbl.setFont(_lbl_font())
-        self.mode_combo = QComboBox()
-        self.mode_combo.setFont(_mono_font())
-        self.mode_combo.setMaxVisibleItems(30)
-        self.mode_combo.setItemDelegate(QStyledItemDelegate(self.mode_combo))
-        self.mode_combo.addItems(["Normal", "Fast", "Turbo", "Ultra", "Slow"])
-        rf_row.addWidget(mode_lbl)
-        rf_row.addWidget(self.mode_combo)
-
-        freq_lbl = QLabel("Frequency:")
-        freq_lbl.setFont(_lbl_font())
-        self.freq_edit = QLineEdit()
-        self.freq_edit.setReadOnly(True)
-        self.freq_edit.setFont(_mono_font())
-        self.freq_edit.setPlaceholderText("—")
-        self.freq_edit.setMaximumWidth(100)
-        self.freq_edit.setStyleSheet(
-            f"background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:2px 4px;"
-            f" font-family:'Kode Mono'; font-size:13px;"
-        )
-        rf_row.addWidget(freq_lbl)
-        rf_row.addWidget(self.freq_edit)
-        rf_row.addStretch()
-        main.addLayout(rf_row)
-
-        # Message box — 2 rows, 100 char limit
-        self.msg_edit = QPlainTextEdit()
-        self.msg_edit.setFont(_mono_font())
-        self.msg_edit.setPlaceholderText("Enter message… (100 characters max)")
-        self.msg_edit.setStyleSheet(
-            f"background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px 8px;"
-            f" font-family:'Kode Mono'; font-size:13px;"
-        )
-        self.msg_edit.setFixedHeight(34)
-        self.msg_edit.textChanged.connect(self._on_msg_changed)
-        main.addWidget(self.msg_edit)
-
-        main.addStretch()
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
-        btn_row.addStretch()
-        self.btn_clear_msg = _btn("Clear", _COL_CANCEL)
-        self.btn_clear_msg.setVisible(False)
-        self.btn_clear_msg.clicked.connect(self.msg_edit.clear)
-        btn_row.addWidget(self.btn_clear_msg)
-        self.btn_transmit = _btn("Transmit", COLOR_BTN_CYAN)
-        self.btn_transmit.setVisible(False)
-        connect_single(self.btn_transmit, self._on_transmit)
-        btn_row.addWidget(self.btn_transmit)
-        self.btn_close = _btn("Close", _COL_CANCEL)
-        self.btn_close.clicked.connect(self.reject)
-        btn_row.addWidget(self.btn_close)
-        main.addLayout(btn_row)
-
-    def _adjust_for_image_width(self, img_width: int) -> None:
-        if img_width > 275:
-            self.resize(self.width() + (img_width - 275), self.height())
-
-    def _force_upper(self, text: str) -> None:
-        if text != text.upper():
-            self.cs_edit.blockSignals(True)
-            pos = self.cs_edit.cursorPosition()
-            self.cs_edit.setText(text.upper())
-            self.cs_edit.setCursorPosition(pos)
-            self.cs_edit.blockSignals(False)
-
-    def _populate_rigs(self) -> None:
-        self.rig_combo.clear()
-        if self._tcp_pool:
-            names = self._tcp_pool.get_all_rig_names()
-            if len(names) == 1:
-                self.rig_combo.addItems(names)
-                self._on_rig_changed(names[0])
-                return
-            if len(names) > 1:
-                self.rig_combo.addItem("Select a rig…")
-                self.rig_combo.addItems(names)
-                return
-        self.rig_combo.addItem("No rigs configured")
-
-    def _on_rig_changed(self, rig_name: str) -> None:
-        if not self._tcp_pool or not rig_name or rig_name in ("No rigs configured", "Select a rig…"):
-            self.freq_edit.setText("—")
-            return
-        client = self._tcp_pool.get_client(rig_name)
-        if not client or not client.is_connected():
-            self.freq_edit.setText("—")
-            return
-        # Show cached frequency immediately
-        if client.frequency:
-            self.freq_edit.setText(f"{client.frequency:.3f} MHz")
-        else:
-            self.freq_edit.setText("Fetching…")
-        # Connect signal for live updates and request a fresh value
-        try:
-            client.frequency_received.disconnect(self._on_frequency_received)
-        except (TypeError, RuntimeError):
-            pass
-        client.frequency_received.connect(self._on_frequency_received)
-        from PyQt5.QtCore import QTimer
-        QTimer.singleShot(RIG_FREQ_DELAY_MS, client.get_frequency)
-
-    def _on_frequency_received(self, rig_name: str, dial_freq: int) -> None:
-        self.freq_edit.setText(f"{dial_freq / 1_000_000:.3f} MHz")
-
-    def _search(self) -> None:
-        if self._qrz_thread is not None and self._qrz_thread.isRunning():
-            return
-        cs = self.cs_edit.text().strip().upper()
-        if not cs:
-            return
-        self.lbl_status.setText(f"Looking up {cs}…")
-        self.btn_search.setEnabled(False)
-        self.qrz_info.clear()
-        self.qrz_info.show_no_data_placeholder()
-        _, username, password = load_qrz_config()
-        self._qrz_thread = _QRZThread(cs, username, password)
-        self._qrz_thread.result_ready.connect(self._on_qrz_result)
-        self._qrz_thread.start()
-
-    def _on_qrz_result(self, result) -> None:
-        self.btn_search.setEnabled(True)
-        if result:
-            self.lbl_status.setText("")
-            self.qrz_info.update_data(result)
-            self.contact_memo_edit.blockSignals(True)
-            self.contact_memo_edit.setText(result.get("memo") or "")
-            self.contact_memo_edit.blockSignals(False)
-        else:
-            self.lbl_status.setText("No results found.")
-            self.qrz_info.show_no_data_placeholder()
-
-    def _on_msg_changed(self) -> None:
-        text = self.msg_edit.toPlainText()
-        if len(text) > 100:
-            cursor = self.msg_edit.textCursor()
-            pos = cursor.position()
-            self.msg_edit.blockSignals(True)
-            self.msg_edit.setPlainText(text[:100])
-            from PyQt5.QtGui import QTextCursor
-            c = self.msg_edit.textCursor()
-            c.setPosition(min(pos, 100))
-            self.msg_edit.setTextCursor(c)
-            self.msg_edit.blockSignals(False)
-            text = text[:100]
-        has_text = bool(text.strip())
-        self.btn_clear_msg.setVisible(has_text)
-        self.btn_transmit.setVisible(has_text)
 
     def _save_contact_memo(self) -> None:
-        cs = self.cs_edit.text().strip().upper()
-        if not cs:
-            return
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute(
                     "UPDATE qrz SET memo = ? WHERE callsign = ? COLLATE NOCASE",
-                    (self.contact_memo_edit.text(), cs)
+                    (self.contact_memo_edit.text(), self.callsign)
                 )
                 conn.commit()
         except sqlite3.Error as e:
-            print(f"[JS8MessageDialog] Contact memo save error: {e}")
+            print(f"[{type(self).__name__}] Contact memo save error: {e}")
 
-    @staticmethod
-    def _sanitize(text: str) -> str:
-        import re
-        text = text.replace('\r', '').replace('\n', '||')
-        return re.sub(r'[^\x20-\x7E]', '', text).strip()
+    # ── worker threads ────────────────────────────────────────────────────
 
-    def _on_transmit(self) -> None:
-        cs = self.cs_edit.text().strip().upper()
-        text = self._sanitize(self.msg_edit.toPlainText())
-        if not cs or not text:
+    def _cancel_workers(self) -> None:
+        """Stop the QRZ lookup and read-count threads from delivering into this dialog.
+        The threads finish on their own (see _start_worker); their late results are dropped."""
+        for attr, signal_name in (("_thread", "result_ready"), ("_rc_thread", "count_ready")):
+            worker = getattr(self, attr, None)
+            if worker is not None:
+                try:
+                    getattr(worker, signal_name).disconnect()
+                except (TypeError, RuntimeError):
+                    pass
+                setattr(self, attr, None)
+
+    def done(self, result: int) -> None:
+        # Closing the dialog: nothing may call back into it once it can be deleted.
+        self._cancel_workers()
+        super().done(result)
+
+    def _start_qrz(self) -> None:
+        cached_fresh = get_qrz_cached(self.callsign)
+        cached_any   = cached_fresh or get_qrz_cached(self.callsign, include_stale=True)
+        is_active, username, password = load_qrz_config()
+
+        if not username:
+            found_str = "found" if cached_any else "NOT found"
+            self.qrz_info.set_qrz_status(
+                f"QRZ Subscription not configured — {self.callsign} {found_str} in local database"
+            )
+            if cached_any:
+                self._on_qrz_result(cached_any)
+            else:
+                self.qrz_info.show_no_data_placeholder()
             return
-        if not self._tcp_pool:
-            QMessageBox.warning(self, "Transmit", "No TCP connection available.")
+
+        if not is_active:
+            found_str = "found" if cached_any else "NOT found"
+            self.qrz_info.set_qrz_status(
+                f"QRZ Subscription not enabled — {self.callsign} {found_str} in local database"
+            )
+            if cached_any:
+                self._on_qrz_result(cached_any)
+            else:
+                self.qrz_info.show_no_data_placeholder()
             return
-        rig_name = self.rig_combo.currentText()
-        if rig_name in ("No rigs configured", "Select a rig…"):
-            QMessageBox.warning(self, "Transmit", "Please select a rig.")
+
+        if cached_fresh:
+            self._on_qrz_result(cached_fresh)
             return
-        client = self._tcp_pool.get_client(rig_name)
-        if not client or not client.is_connected():
-            QMessageBox.warning(self, "Transmit", f"Rig '{rig_name}' is not connected.")
-            return
-        my_cs = _get_local_callsign()
-        if not my_cs:
-            QMessageBox.warning(self, "Transmit", "No operator callsign configured in Settings.")
-            return
-        client.send_message("MODE.SET_SPEED", params={"SPEED": self.mode_combo.currentIndex()})
-        msg_id = generate_time_based_id()
-        payload = f"{my_cs}: {cs} MSG ,{msg_id},{text},{{^%}}"
-        client.send_tx_message(payload)
-        QMessageBox.information(self, "JS8 Message", "Message queued for transmission.")
-        self.msg_edit.clear()
+
+        # No fresh cache (missing or stale): live lookup; QRZClient handles the stale refresh.
+        # The Message dialog shows the stale data first (the map pin does not go stale).
+        if self._SHOW_STALE_WHILE_REFRESHING and cached_any:
+            self._on_qrz_result(cached_any)
+
+        token = self._reload_token
+        self._thread = _QRZThread(self.callsign, username, password)
+        self._thread.result_ready.connect(
+            lambda result, t=token: self._on_qrz_result(result) if t == self._reload_token else None
+        )
+        _start_worker(self._thread)
+
+    # ── replies ───────────────────────────────────────────────────────────
+
+    def _reply_with_qrz_dialog(self, prefill: str) -> None:
+        """Internet reply: the QRZ Lookup dialog with the original text quoted."""
+        dlg = QRZLookupDialog(
+            module_background=self._module_bg,
+            module_foreground=self._module_fg,
+            program_background=self._program_bg,
+            program_foreground=self._program_fg,
+            initial_callsign=self.callsign,
+            initial_message=prefill,
+            refresh_callback=self._refresh_callback,
+            parent=self,
+        )
+        dlg.exec_()
+        dlg.deleteLater()
+
+    def _reply_with_js8(self, prefill: str) -> None:
+        """RF reply over JS8 Direct Message. The callsign is shown as a read-only
+        reminder (not forced into the roster-driven Target combo); the body is seeded
+        with the original text."""
+        from js8_direct_message import JS8DirectMessageDialog
+        dlg = JS8DirectMessageDialog(
+            tcp_pool=self._tcp_pool,
+            connector_manager=self._connector_manager,
+            refresh_callback=self._refresh_callback,
+            parent=self,
+        )
+        dlg.set_reply_context(self.callsign, prefill)
+        dlg.exec_()
+        dlg.deleteLater()
 
 
-# ── Dialog 3: StatRep Detail ───────────────────────────────────────────────
+# ── Dialog 2: Status Report Detail ───────────────────────────────────────────────
 
-class StatRepDetailDialog(QDialog):
-    """Detail view for a StatRep row: QRZ info + 12 status indicators + map + comments."""
+class StatRepDetailDialog(_DetailDialogBase):
+    """Detail view for a Status Report row: QRZ info + 12 status indicators + map + comments."""
 
     pin_changed = pyqtSignal(bool)
     record_deleted = pyqtSignal()
@@ -1433,8 +1390,8 @@ class StatRepDetailDialog(QDialog):
                  module_background: str = "#f5f5f5",
                  module_foreground: str = "#333333",
                  title_bar_background: str = "#555555",
-                 title_bar_foreground: str = "#D2D0CF",
-                 data_background: str = "#D2D0CF",
+                 title_bar_foreground: str = _GRID_LINE,
+                 data_background: str = _GRID_LINE,
                  program_background: str = "",
                  program_foreground: str = "",
                  condition_green: str = "",
@@ -1449,26 +1406,13 @@ class StatRepDetailDialog(QDialog):
                  record_list_provider: Optional[Callable[[], list]] = None,
                  refresh_callback=None,
                  parent=None):
-        super().__init__(parent)
-        self.setWindowFlags(
-            Qt.Window |
-            Qt.CustomizeWindowHint |
-            Qt.WindowTitleHint |
-            Qt.WindowCloseButtonHint |
-            Qt.WindowMaximizeButtonHint |
-            Qt.WindowStaysOnTopHint
+        super().__init__(
+            f"Status Report — {callsign}", record_id, callsign, internet_available, commsrvr_url,
+            module_background, module_foreground, data_background, program_background,
+            program_foreground, tcp_pool, connector_manager, refresh_callback, (996, 696), parent,
         )
-        self._record_id = record_id
-        self.callsign = callsign
-        self.internet_available = internet_available
-        self._commsrvr_url = commsrvr_url
-        self._module_bg = module_background
-        self._module_fg = module_foreground
         self._title_bg = title_bar_background
         self._title_fg = title_bar_foreground
-        self._data_bg = data_background
-        self._program_bg = program_background or _PROG_BG
-        self._program_fg = program_foreground or _PROG_FG
         self._status_colors = {
             "1": (condition_green  or STATUS_COLORS["1"][0], STATUS_COLORS["1"][1]),
             "2": (condition_yellow or STATUS_COLORS["2"][0], STATUS_COLORS["2"][1]),
@@ -1477,17 +1421,9 @@ class StatRepDetailDialog(QDialog):
             "6": (condition_purple or STATUS_COLORS["6"][0], STATUS_COLORS["6"][1]),
             "7": (condition_magenta or STATUS_COLORS["7"][0], STATUS_COLORS["7"][1]),
         }
-        self._tcp_pool = tcp_pool
-        self._connector_manager = connector_manager
-        self._thread: Optional[_QRZThread] = None
-        self._rc_thread: Optional[_ReadCountThread] = None
-        self._reload_token: int = 0
-        self._map_loaded = False
         self._map_ready = False
-        self._last_nav: str = "older"
         self._record_list: list = list(record_list) if record_list else []
         self._record_list_provider = record_list_provider
-        self._refresh_callback = refresh_callback
         self._global_id = 0
         self._row_data: dict = {}
         self._sr_datetime: str = ""
@@ -1496,12 +1432,6 @@ class StatRepDetailDialog(QDialog):
         self._statrep_grid: str = ""
         self._print_view: Optional[QWebEngineView] = None
         self._print_busy: bool = False
-        self.setWindowTitle(f"StatRep — {callsign}")
-        self.setModal(True)
-        self.setMinimumSize(996, 696)
-        self.resize(996, 696)
-        if os.path.exists("radiation-32.png"):
-            self.setWindowIcon(QtGui.QIcon("radiation-32.png"))
         self._setup_ui()
         self._load_statrep()
         self._start_qrz()
@@ -1526,7 +1456,7 @@ class StatRepDetailDialog(QDialog):
 
         # Status grid
         sg_widget = QWidget()
-        sg_widget.setStyleSheet(f"border-top:1px solid #D2D0CF; border-left:1px solid #D2D0CF;")
+        sg_widget.setStyleSheet(f"border-top:1px solid {_GRID_LINE}; border-left:1px solid {_GRID_LINE};")
         sg_grid = QGridLayout(sg_widget)
         sg_grid.setContentsMargins(0, 0, 0, 0)
         sg_grid.setSpacing(0)
@@ -1537,12 +1467,12 @@ class StatRepDetailDialog(QDialog):
             hdr.setFont(_lbl_font())
             hdr.setStyleSheet(
                 f"QLabel {{ background-color:{self._title_bg}; color:{self._title_fg};"
-                "border-right:1px solid #D2D0CF; border-bottom:1px solid #D2D0CF; padding: 5px 2px; }"
+                f"border-right:1px solid {_GRID_LINE}; border-bottom:1px solid {_GRID_LINE}; padding: 5px 2px; }}"
             )
             sg_grid.addWidget(hdr, 0, col_idx)
             sq = QLabel()
             sq.setFixedHeight(16)
-            sq.setStyleSheet("QLabel { background-color:rgb(255,255,255); border-right:1px solid #D2D0CF; border-bottom:1px solid #D2D0CF; }")
+            sq.setStyleSheet(f"QLabel {{ background-color:rgb(255,255,255); border-right:1px solid {_GRID_LINE}; border-bottom:1px solid {_GRID_LINE}; }}")
             sq.setToolTip("No status")
             sg_grid.addWidget(sq, 1, col_idx)
             sg_grid.setColumnStretch(col_idx, 1)
@@ -1561,11 +1491,12 @@ class StatRepDetailDialog(QDialog):
         self.comments.setFixedHeight(220)
         self.comments.setMinimumWidth(480)
         self.comments.setStyleSheet(
-            f"background-color:{self._data_bg}; color:#000000;"
+            f"background-color:{self._data_bg}; color:{COLOR_INPUT_TEXT};"
             f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px;"
+            f" font-family:'Kode Mono'; font-size:13px;"
         )
         self.comments.setOpenLinks(False)
-        self.comments.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
+        self.comments.anchorClicked.connect(self._open_link)
         lower.addWidget(self.comments)
         main.addLayout(lower)
 
@@ -1580,39 +1511,39 @@ class StatRepDetailDialog(QDialog):
         btn_row.addWidget(self.lbl_pin)
         btn_row.addStretch()
 
-        self.btn_delete = _btn("Delete", COLOR_BTN_RED)
+        self.btn_delete = make_button("Delete", COLOR_BTN_RED)
         self.btn_delete.clicked.connect(self._on_delete)
         btn_row.addWidget(self.btn_delete)
 
-        self.btn_older = _btn("Previous", _COL_NAV)
+        self.btn_older = make_button("Previous", _COL_NAV)
         self.btn_older.clicked.connect(self._on_older)
         btn_row.addWidget(self.btn_older)
 
-        self.btn_newer = _btn("Next", _COL_NAV)
+        self.btn_newer = make_button("Next", _COL_NAV)
         self.btn_newer.clicked.connect(self._on_newer)
         btn_row.addWidget(self.btn_newer)
 
-        self.btn_reply_sr = _btn("Reply", COLOR_BTN_BLUE)
+        self.btn_reply_sr = make_button("Reply", COLOR_BTN_BLUE)
         self.btn_reply_sr.clicked.connect(self._on_reply_clicked)
         btn_row.addWidget(self.btn_reply_sr)
 
-        self.btn_js8_reply_sr = _btn("JS8 Reply", COLOR_BTN_BLUE)
+        self.btn_js8_reply_sr = make_button("JS8 Reply", COLOR_BTN_BLUE)
         self.btn_js8_reply_sr.clicked.connect(self._on_js8_reply_clicked)
         btn_row.addWidget(self.btn_js8_reply_sr)
 
-        btn_brevity = _btn("Brevity", _COL_PURPLE)
+        btn_brevity = make_button("Brevity", _COL_PURPLE)
         btn_brevity.clicked.connect(self._on_brevity)
         btn_row.addWidget(btn_brevity)
 
-        btn_forward = _btn("Forward", COLOR_BTN_CYAN)
+        btn_forward = make_button("Forward", COLOR_BTN_CYAN)
         btn_forward.clicked.connect(self._on_forward)
         btn_row.addWidget(btn_forward)
 
-        btn_print = _btn("Print", COLOR_BTN_GREEN)
+        btn_print = make_button("Print", COLOR_BTN_GREEN)
         btn_print.clicked.connect(self._on_print)
         btn_row.addWidget(btn_print)
 
-        btn_close = _btn("Close", _COL_CANCEL)
+        btn_close = make_button("Close", _COL_CANCEL)
         btn_close.clicked.connect(self.reject)
         btn_row.addWidget(btn_close)
 
@@ -1625,7 +1556,8 @@ class StatRepDetailDialog(QDialog):
     def _load_statrep(self) -> None:
         """Load status fields, comments, and map from the database."""
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
+                conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT datetime, global_id, map, power, water, med, telecom, travel,
@@ -1640,48 +1572,50 @@ class StatRepDetailDialog(QDialog):
         if not row:
             return
 
-        self._sr_datetime = row[0] or ""
+        self._sr_datetime = row["datetime"] or ""
 
-        self._row_data = {
-            "map": row[2], "power": row[3], "water": row[4],
-            "med": row[5], "telecom": row[6], "travel": row[7],
-            "internet": row[8], "fuel": row[9], "food": row[10],
-            "crime": row[11], "civil": row[12], "political": row[13],
-            "comments": row[14], "grid": row[15],
-            "sr_id": row[16],
-            "scope": row[22],
+        self._row_data = {key: row[key] for _, key in STATUS_FIELDS}
+        self._row_data.update({
+            "comments": row["comments"], "grid": row["grid"],
+            "sr_id": row["sr_id"],
+            "scope": row["scope"],
             "origin_callsign": self.callsign,
-        }
+        })
 
-        global_id = row[1] or 0
+        global_id = row["global_id"] or 0
         self._global_id = global_id
-        freq_mhz = (float(row[17]) / 1_000_000) if row[17] else 0.0
-        sr_id    = row[16] or ""
-        group    = (row[18] or "").strip()
-        sr_grid  = row[15] or ""
-        source   = row[21] if row[21] is not None else 0
-        _source_map = {1: "RF via JS8Call", 2: "Internet", 3: "Internet Only"}
-        source_text  = _source_map.get(int(source), "Unknown")
+        try:
+            freq_mhz = (float(row["freq"]) / 1_000_000) if row["freq"] else 0.0
+        except (TypeError, ValueError):
+            freq_mhz = 0.0
+        sr_id    = row["sr_id"] or ""
+        group    = (row["target"] or "").strip()
+        sr_grid  = row["grid"] or ""
+        _source_map = {0: "Saved only (not transmitted)", 1: "RF via JS8Call", 2: "Internet", 3: "Internet Only"}
+        try:
+            source_text = _source_map.get(int(row["source"]), "Unknown")
+        except (TypeError, ValueError):
+            source_text = "Unknown"
 
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
         self.qrz_info.lbl_sr_posted.setText(
-            f'<span style="{_k}">Posted:</span>  {row[0]}' if row[0] else f'<span style="{_k}">Posted:</span>'
+            f'<span style="{_k}">Posted:</span>  {_esc(row["datetime"])}' if row["datetime"] else f'<span style="{_k}">Posted:</span>'
         )
         self.qrz_info.lbl_sr_source.setText(f'<span style="{_k}">Received via:</span>  {source_text}')
         self.qrz_info.lbl_sr_global_id.setText(
-            f'<span style="{_k}">Global ID:</span>  {global_id}' if global_id else f'<span style="{_k}">Global ID:</span>'
+            f'<span style="{_k}">Global ID:</span>  {_esc(global_id)}' if global_id else f'<span style="{_k}">Global ID:</span>'
         )
         self.qrz_info.lbl_sr_group.setText(
-            f'<span style="{_k}">Group:</span>  {group}' if group else f'<span style="{_k}">Group:</span>'
+            f'<span style="{_k}">Group:</span>  {_esc(group)}' if group else f'<span style="{_k}">Group:</span>'
         )
         self.qrz_info.lbl_sr_grid.setText(
-            f'<span style="{_k}">Grid:</span>  {sr_grid}' if sr_grid else f'<span style="{_k}">Grid:</span>'
+            f'<span style="{_k}">Grid:</span>  {_esc(sr_grid)}' if sr_grid else f'<span style="{_k}">Grid:</span>'
         )
         self.qrz_info.lbl_sr_freq.setText(
             f'<span style="{_k}">Freq:</span>  {freq_mhz:.3f} MHz' if freq_mhz else f'<span style="{_k}">Freq:</span>'
         )
         self.qrz_info.lbl_sr_sr_id.setText(
-            f'<span style="{_k}">Statrep ID:</span>  {sr_id}' if sr_id else f'<span style="{_k}">Statrep ID:</span>'
+            f'<span style="{_k}">Statrep ID:</span>  {_esc(sr_id)}' if sr_id else f'<span style="{_k}">Statrep ID:</span>'
         )
         self.qrz_info.lbl_sr_delivered.setText(f'<span style="{_k}">Delivered To:</span>')
 
@@ -1697,26 +1631,26 @@ class StatRepDetailDialog(QDialog):
                 self._rc_thread.count_ready.connect(
                     lambda text, t=rc_token: self._on_read_count(text) if t == self._reload_token else None
                 )
-                self._rc_thread.start()
+                _start_worker(self._rc_thread)
 
-        for i, (label_text, _) in enumerate(STATUS_FIELDS):
-            val = str(row[i + 2]) if row[i + 2] is not None else ""
+        for label_text, key in STATUS_FIELDS:
+            val = str(row[key]) if row[key] is not None else ""
             sq = self._squares[label_text]
             color_str, tip = self._status_colors.get(val, ("rgb(255,255,255)", "No status"))
-            sq.setStyleSheet(f"QLabel {{ background-color:{color_str}; border:1px solid #D2D0CF; }}")
+            sq.setStyleSheet(f"QLabel {{ background-color:{color_str}; border:1px solid {_GRID_LINE}; }}")
             sq.setToolTip(tip)
 
-        self.comments.setHtml(_text_to_html(_remarks_with_summary(row[14] or ""), self._data_bg))
+        self.comments.setHtml(_text_to_html(_remarks_with_summary(row["comments"] or ""), self._data_bg))
 
         self.statrep_memo_edit.blockSignals(True)
-        self.statrep_memo_edit.setPlainText(row[19] or "")
+        self.statrep_memo_edit.setPlainText(row["memo"] or "")
         self.statrep_memo_edit.blockSignals(False)
 
         self.pin_toggle.blockSignals(True)
-        self.pin_toggle.setChecked(bool(row[20]))
+        self.pin_toggle.setChecked(bool(row["pinned"]))
         self.pin_toggle.blockSignals(False)
 
-        grid = row[15]
+        grid = row["grid"]
         if grid:
             try:
                 coords = mh.to_location(grid, center=True)
@@ -1751,13 +1685,13 @@ class StatRepDetailDialog(QDialog):
         count_str = parts[0].strip()
         last_seen_str = parts[1].strip() if len(parts) > 1 else ""
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
-        self.qrz_info.lbl_sr_delivered.setText(f'<span style="{_k}">Delivered To:</span>  {count_str} CommStat users')
+        self.qrz_info.lbl_sr_delivered.setText(f'<span style="{_k}">Delivered To:</span>  {_esc(count_str)} CommStat users')
         self.qrz_info._on_last_seen_updated(last_seen_str if last_seen_str else "—")
 
     def _save_pinned(self, checked: bool) -> None:
         """Save pinned state to the database and notify the main window."""
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute(
                     "UPDATE statrep SET pinned = ? WHERE id = ?",
                     (1 if checked else 0, self._record_id)
@@ -1773,9 +1707,18 @@ class StatRepDetailDialog(QDialog):
             matches = _BREVITY_RE.findall(self.comments.toPlainText())
             if matches:
                 selected = matches[0]
+        existing = getattr(self, "_brevity_window", None)
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return
         from brevity import BrevityApp
         win = BrevityApp(self._module_bg, self._module_fg, selected or "", parent=self)
         self._brevity_window = win
+        # Free the window when it closes, and forget it so the next click makes a fresh one.
+        win.setAttribute(Qt.WA_DeleteOnClose)
+        win.destroyed.connect(lambda _=None: setattr(self, "_brevity_window", None))
+        win.setWindowModality(Qt.ApplicationModal)
         win.show()
         parent_center = self.frameGeometry().center()
         win_rect = win.frameGeometry()
@@ -1818,6 +1761,7 @@ class StatRepDetailDialog(QDialog):
             )
             dlg.prefill({**self._row_data, "pinned": self.pin_toggle.isChecked()})
             dlg.exec_()
+            dlg.deleteLater()
             return
 
         from statrep import StatRepDialog
@@ -1827,6 +1771,7 @@ class StatRepDetailDialog(QDialog):
         )
         dlg.prefill(self._row_data)
         dlg.exec_()
+        dlg.deleteLater()
 
     def _font_data_uri(self, ttf_path: str) -> str:
         """Read a .ttf file and return a base64 data URI for @font-face embedding."""
@@ -1849,21 +1794,19 @@ class StatRepDetailDialog(QDialog):
 
     def _build_print_html(self) -> str:
         """Build a self-contained HTML document mirroring the on-screen detail view."""
-        status_key_map = ["map", "power", "water", "med", "telecom", "travel",
-                          "internet", "fuel", "food", "crime", "civil", "political"]
         status_cells_hdr = []
         status_cells_val = []
-        for (label_text, _), key in zip(STATUS_FIELDS, status_key_map):
+        for label_text, key in STATUS_FIELDS:
             val = str(self._row_data.get(key) or "")
             color, _tip = self._status_colors.get(val, ("rgb(255,255,255)", "No status"))
             status_cells_hdr.append(
                 f'<td style="background-color:{self._title_bg};color:{self._title_fg};'
                 f'font-weight:bold;text-align:center;padding:4px 2px;'
-                f'border:1px solid #D2D0CF;">{label_text}</td>'
+                f'border:1px solid {_GRID_LINE};">{label_text}</td>'
             )
             status_cells_val.append(
                 f'<td style="background-color:{color};height:18px;'
-                f'border:1px solid #D2D0CF;">&nbsp;</td>'
+                f'border:1px solid {_GRID_LINE};">&nbsp;</td>'
             )
         status_table = (
             '<table style="width:100%;border-collapse:collapse;'
@@ -1873,11 +1816,13 @@ class StatRepDetailDialog(QDialog):
             '</table>'
         )
 
+        # lbl_addr1/lbl_addr2/lbl_moddate hold plain untrusted text; the other labels are
+        # rich text whose values were escaped when they were set.
         qrz_lines = [
             self.qrz_info.lbl_call.text(),
             self.qrz_info.lbl_name.text(),
-            self.qrz_info.lbl_addr1.text(),
-            self.qrz_info.lbl_addr2.text(),
+            _esc(self.qrz_info.lbl_addr1.text()),
+            _esc(self.qrz_info.lbl_addr2.text()),
             self.qrz_info.lbl_county.text(),
             self.qrz_info.lbl_country.text(),
             self.qrz_info.lbl_license.text(),
@@ -1887,7 +1832,7 @@ class StatRepDetailDialog(QDialog):
         ]
         qrz_block = "<br>".join(t for t in qrz_lines if t)
 
-        moddate = self.qrz_info.lbl_moddate.text()
+        moddate = _esc(self.qrz_info.lbl_moddate.text())
         moddate_html = f'<div style="font-size:11px;color:#555;">{moddate}</div>' if moddate else ""
 
         photo_html = ""
@@ -1933,7 +1878,7 @@ class StatRepDetailDialog(QDialog):
             map_html = (
                 f'<div style="font-family:\'Kode Mono\',monospace;font-size:13px;'
                 f'color:#0000CC;">'
-                f'Grid: {self._statrep_grid}</div>'
+                f'Grid: {_esc(self._statrep_grid)}</div>'
             )
 
         raw_comments = _remarks_with_summary(self._row_data.get("comments") or "")
@@ -1952,7 +1897,7 @@ class StatRepDetailDialog(QDialog):
             note_html = (
                 '<div class="section-title">Status Report Note</div>'
                 f'<pre style="white-space:pre-wrap;font-family:\'Kode Mono\',monospace;'
-                f'font-size:12px;margin:0;color:#0000CC;">{note_text}</pre>'
+                f'font-size:12px;margin:0;color:#0000CC;">{_esc(note_text)}</pre>'
             )
 
         contact_note_html = ""
@@ -1962,11 +1907,12 @@ class StatRepDetailDialog(QDialog):
                 '<div class="section-title">Contact Note</div>'
                 f'<div style="font-family:\'Kode Mono\',monospace;font-size:12px;'
                 f'color:#0000CC;">'
-                f'{contact_text}</div>'
+                f'{_esc(contact_text)}</div>'
             )
 
-        generated = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-        title_dt = self._sr_datetime or ""
+        generated = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        title_dt = _esc(self._sr_datetime or "")
+        cs_html = _esc(self.callsign)
 
         font_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
         roboto_reg   = self._font_data_uri(os.path.join(font_dir, "Roboto-Regular.ttf"))
@@ -1997,7 +1943,7 @@ class StatRepDetailDialog(QDialog):
             )
 
         return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>StatRep — {self.callsign}</title>
+<html><head><meta charset="utf-8"><title>StatRep — {cs_html}</title>
 <style>
   {font_face_css}
   body {{ background:#ffffff; color:#000000;
@@ -2027,7 +1973,7 @@ class StatRepDetailDialog(QDialog):
              border-top:1px solid #ddd; padding-top:6px; }}
 </style></head>
 <body>
-  <h1>Status Report — {self.callsign}</h1>
+  <h1>Status Report — {cs_html}</h1>
   <div class="subhead">{title_dt}</div>
 
   <div class="section-title">QRZ Lookup</div>
@@ -2080,11 +2026,14 @@ class StatRepDetailDialog(QDialog):
 
         safe_cs  = (self.callsign or "unknown").replace("/", "_").replace(" ", "_")
         safe_sr  = (str(self._row_data.get("sr_id") or "")).replace("/", "_").replace(" ", "_")
-        ts       = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+        ts       = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d-%H%M%S")
         fname    = f"statrep_{safe_cs}_{safe_sr}_{ts}.pdf" if safe_sr else f"statrep_{safe_cs}_{ts}.pdf"
         pdf_path = os.path.join(tempfile.gettempdir(), fname)
+        self._remove_old_pdfs(tempfile.gettempdir())
 
         view = QWebEngineView()
+        # The report is plain HTML; nothing in it needs scripts, so never run any.
+        view.settings().setAttribute(QWebEngineSettings.JavascriptEnabled, False)
         self._print_view = view
 
         def _on_load_finished(ok: bool) -> None:
@@ -2097,8 +2046,7 @@ class StatRepDetailDialog(QDialog):
         def _on_pdf_done(file_path: str, success: bool) -> None:
             if success and file_path:
                 try:
-                    abs_path = os.path.abspath(file_path).replace("\\", "/")
-                    webbrowser.open("file:///" + abs_path)
+                    webbrowser.open(QUrl.fromLocalFile(os.path.abspath(file_path)).toString())
                 except Exception as e:
                     print(f"[StatRepDetailDialog] PDF open error: {e}")
             else:
@@ -2108,6 +2056,24 @@ class StatRepDetailDialog(QDialog):
         view.loadFinished.connect(_on_load_finished)
         view.page().pdfPrintingFinished.connect(_on_pdf_done)
         view.setHtml(html, QUrl("http://localhost/"))
+
+    @staticmethod
+    def _remove_old_pdfs(folder: str, max_age_s: float = 24 * 3600) -> None:
+        """Delete this dialog's earlier statrep_*.pdf files from the temp folder (a day or older,
+        so one a PDF viewer still has open is left alone)."""
+        cutoff = time.time() - max_age_s
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            return
+        for name in names:
+            if name.startswith("statrep_") and name.endswith(".pdf"):
+                path = os.path.join(folder, name)
+                try:
+                    if os.path.getmtime(path) < cutoff:
+                        os.remove(path)
+                except OSError:
+                    pass
 
     def _cleanup_print_view(self) -> None:
         v = self._print_view
@@ -2121,35 +2087,11 @@ class StatRepDetailDialog(QDialog):
 
     def _on_reply_clicked(self) -> None:
         original = (self._row_data.get("comments") or "").replace("||", "\n")
-        prefill = "\n\n----------\n" + original
-        dlg = QRZLookupDialog(
-            module_background=self._module_bg,
-            module_foreground=self._module_fg,
-            program_background=self._program_bg,
-            program_foreground=self._program_fg,
-            initial_callsign=self.callsign,
-            initial_message=prefill,
-            refresh_callback=self._refresh_callback,
-            parent=self,
-        )
-        dlg.exec_()
+        self._reply_with_qrz_dialog("\n\n----------\n" + original)
 
     def _on_js8_reply_clicked(self) -> None:
-        """Reply to this StatRep over RF via JS8 Direct Message. The clicked
-        callsign is shown as a read-only reminder in the JS8 dialog (not forced
-        into its roster-driven Target combo); the body is seeded with the
-        original comments."""
-        from js8_direct_message import JS8DirectMessageDialog
         original = (self._row_data.get("comments") or "").replace("||", "\n")
-        prefill = "\n\n----------\n" + original
-        dlg = JS8DirectMessageDialog(
-            tcp_pool=self._tcp_pool,
-            connector_manager=self._connector_manager,
-            refresh_callback=self._refresh_callback,
-            parent=self,
-        )
-        dlg.set_reply_context(self.callsign, prefill)
-        dlg.exec_()
+        self._reply_with_js8("\n\n----------\n" + original)
 
     def _on_newer(self) -> None:
         self._last_nav = "newer"
@@ -2202,7 +2144,7 @@ class StatRepDetailDialog(QDialog):
             self._reload(next_id, next_cs)
             return
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 cursor = conn.cursor()
                 if direction == "newer":
                     cursor.execute(
@@ -2227,18 +2169,7 @@ class StatRepDetailDialog(QDialog):
         self._reload_token += 1
         self.btn_newer.setEnabled(False)
         self.btn_older.setEnabled(False)
-        if self._thread is not None:
-            try:
-                self._thread.result_ready.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            self._thread = None
-        if self._rc_thread is not None:
-            try:
-                self._rc_thread.count_ready.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            self._rc_thread = None
+        self._cancel_workers()
         self._record_id = record_id
         self.callsign = callsign
         self._map_loaded = False
@@ -2249,7 +2180,7 @@ class StatRepDetailDialog(QDialog):
         self._statrep_lat = None
         self._statrep_lon = None
         self._statrep_grid = ""
-        self.setWindowTitle(f"StatRep — {callsign}")
+        self.setWindowTitle(f"Status Report — {callsign}")
         self.map_view.setHtml("", QUrl("http://localhost/"))
         self._load_statrep()
         self._start_qrz()
@@ -2259,32 +2190,26 @@ class StatRepDetailDialog(QDialog):
         local_cs = _get_local_callsign()
         is_owner = bool(local_cs) and bool(self.callsign) and base_callsign(local_cs) == base_callsign(self.callsign)
         if is_owner:
-            from ui_helpers import confirm
-            if not confirm(
-                self, "Confirm Delete",
-                "This record will be deleted from the CommStat app of all users. "
-                "Do you want to proceed?",
-            ):
+            from ui_helpers import confirm_delete_record
+            choice = confirm_delete_record(self, "status report")
+            if choice == "cancel":
                 return
-            import netguard
-            if self._global_id and self._commsrvr_url and netguard.guard("Remote statrep delete"):
-                try:
-                    url = (f"{self._commsrvr_url}/record-delete-808585.php"
-                           f"?cs={urllib.parse.quote(local_cs)}&id={self._global_id}")
-                    with urllib.request.urlopen(url, timeout=10, context=create_verified_ssl_context()):
-                        pass
-                except Exception as e:
-                    print(f"[StatRepDetailDialog] Delete request failed: {e}")
+            if choice == "all" and self._global_id and self._commsrvr_url:
+                url = (f"{self._commsrvr_url}/record-delete-808585.php"
+                       f"?cs={urllib.parse.quote(local_cs)}&id={self._global_id}")
+                if not _delete_everywhere(self, url):
+                    return
         deleted_id = self._record_id
         direction = self._last_nav
         full_list = self._get_record_list()
         idx_before = self._find_index(full_list, deleted_id) if full_list else None
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute("DELETE FROM statrep WHERE id = ?", (deleted_id,))
                 conn.commit()
-        except sqlite3.Error:
-            pass
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Delete Failed", f"Could not delete this record:\n{e}")
+            return
         self.record_deleted.emit()
         if full_list:
             remaining = [(rid, cs) for (rid, cs) in full_list if str(rid) != str(deleted_id)]
@@ -2301,7 +2226,7 @@ class StatRepDetailDialog(QDialog):
             self._reload(next_id, next_cs)
             return
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 cursor = conn.cursor()
                 if direction == "newer":
                     cursor.execute(
@@ -2317,64 +2242,15 @@ class StatRepDetailDialog(QDialog):
         except sqlite3.Error:
             row = None
         if row:
-            self._record_id = row[0]
+            # _reload() switches self._record_id itself; setting it first would make
+            # its memo save write the deleted record's note onto this next record.
             self._reload(row[0], row[1] or "")
         else:
             self.accept()
 
-    def _start_qrz(self) -> None:
-        cached_fresh = get_qrz_cached(self.callsign)
-        cached_any   = cached_fresh or get_qrz_cached(self.callsign, include_stale=True)
-        is_active, username, password = load_qrz_config()
-
-        if not username:
-            found_str = "found" if cached_any else "NOT found"
-            self.qrz_info.set_qrz_status(
-                f"QRZ Subscription not configured — {self.callsign} {found_str} in local database"
-            )
-            if cached_any:
-                self._on_qrz_result(cached_any)
-            else:
-                self.qrz_info.show_no_data_placeholder()
-            return
-
-        if not is_active:
-            found_str = "found" if cached_any else "NOT found"
-            self.qrz_info.set_qrz_status(
-                f"QRZ Subscription not enabled — {self.callsign} {found_str} in local database"
-            )
-            if cached_any:
-                self._on_qrz_result(cached_any)
-            else:
-                self.qrz_info.show_no_data_placeholder()
-            return
-
-        if cached_fresh:
-            self._on_qrz_result(cached_fresh)
-            return
-
-        # No fresh cache (missing or stale) — live lookup; QRZClient handles stale refresh
-        token = self._reload_token
-        self._thread = _QRZThread(self.callsign, username, password)
-        self._thread.result_ready.connect(
-            lambda result, t=token: self._on_qrz_result(result) if t == self._reload_token else None
-        )
-        self._thread.start()
-
-    def _save_contact_memo(self) -> None:
-        try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
-                conn.execute(
-                    "UPDATE qrz SET memo = ? WHERE callsign = ? COLLATE NOCASE",
-                    (self.contact_memo_edit.text(), self.callsign)
-                )
-                conn.commit()
-        except sqlite3.Error as e:
-            print(f"[StatRepDetailDialog] Contact memo save error: {e}")
-
     def _save_statrep_memo(self) -> None:
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute(
                     "UPDATE statrep SET memo = ? WHERE id = ?",
                     (self.statrep_memo_edit.toPlainText(), self._record_id)
@@ -2463,18 +2339,44 @@ def _remarks_with_summary(raw: str) -> str:
     return "\n".join(parts)
 
 
+_URL_TRAILING = ".,;:!?'\")]}"
+
+
+def _split_url(match_text: str) -> Tuple[str, str]:
+    """Split a URL match into (url, trailing punctuation that is not part of it).
+
+    A closing ")" stays when the URL has its own "(" (e.g. .../Foo_(bar))."""
+    url = match_text
+    while url and url[-1] in _URL_TRAILING:
+        if url[-1] == ")" and url.count("(") >= url.count(")"):
+            break
+        url = url[:-1]
+    return url, match_text[len(url):]
+
+
 def _text_to_html(text: str, bg: str) -> str:
-    """Convert plain text to HTML, turning URLs into clickable links and highlighting brevity codes."""
-    escaped = _html_mod.escape(text)
-    highlighted = _BREVITY_RE.sub(
-        r'<span style="background-color:#FFD700;font-weight:bold;">\1</span>',
-        escaped
-    )
-    linked = _URL_RE.sub(
-        lambda m: f'<a href="{m.group(1)}" style="color:#0078d7;">{m.group(1)}</a>',
-        highlighted
-    )
-    lines = linked.replace("\n", "<br>")
+    """Convert plain text to HTML, turning URLs into clickable links and highlighting brevity codes.
+
+    URLs are found in the original text (before escaping) so a quote or an HTML
+    character next to a link is never swallowed into it, and punctuation that ends
+    a sentence ("see https://x.com/a.") stays outside the link."""
+    def _plain(segment: str) -> str:
+        return _BREVITY_RE.sub(
+            r'<span style="background-color:#FFD700;font-weight:bold;">\1</span>',
+            _html_mod.escape(segment),
+        )
+
+    parts = []
+    pos = 0
+    for m in _URL_RE.finditer(text):
+        url, tail = _split_url(m.group(1))
+        parts.append(_plain(text[pos:m.start()]))
+        shown = _html_mod.escape(url)
+        parts.append(f'<a href="{_html_mod.escape(url, quote=True)}" style="color:#0078d7;">{shown}</a>')
+        parts.append(_plain(tail))
+        pos = m.end()
+    parts.append(_plain(text[pos:]))
+    lines = "".join(parts).replace("\n", "<br>")
     return (
         f'<html><body style="background-color:{bg};color:#000000;'
         f'font-family:\'Kode Mono\';font-size:13px;">{lines}</body></html>'
@@ -2485,7 +2387,7 @@ def _text_to_html(text: str, bg: str) -> str:
 # Beside the feature it documents. Chrome comes from ui_helpers.
 
 _MSG_DETAIL_HELP_HTML = """
-<div style="font-family: Roboto; font-size: 13px; color: #333333;">
+<div style="font-family: Roboto; font-size: 13px;">
 
 <h3 style="color:#555555;">What Is an RFI?</h3>
 <p>A <b>Request for Information (RFI)</b> is a special CommStat message used
@@ -2517,64 +2419,40 @@ CommStat network for a response.</p>
 """
 
 
-class MessageDetailDialog(QDialog):
+class MessageDetailDialog(_DetailDialogBase):
     """Detail view for a Message row: QRZ info + map + message text."""
 
     record_deleted = pyqtSignal()
+    _SHOW_STALE_WHILE_REFRESHING = True
 
     def __init__(self, record_id, callsign: str, message_text: str,
                  internet_available: bool = True,
                  commsrvr_url: str = "",
                  module_background: str = "#f5f5f5",
                  module_foreground: str = "#333333",
-                 data_background: str = "#D2D0CF",
+                 data_background: str = _GRID_LINE,
                  program_background: str = "",
                  program_foreground: str = "",
                  msg_id: str = "",
                  tcp_pool=None,
                  connector_manager=None,
                  refresh_callback=None,
+                 record_id_provider: Optional[Callable[[], list]] = None,
                  parent=None):
-        super().__init__(parent)
-        self._record_id = record_id
-        self.setWindowFlags(
-            Qt.Window |
-            Qt.CustomizeWindowHint |
-            Qt.WindowTitleHint |
-            Qt.WindowCloseButtonHint |
-            Qt.WindowMaximizeButtonHint |
-            Qt.WindowStaysOnTopHint
+        super().__init__(
+            f"Message — {callsign}", record_id, callsign, internet_available, commsrvr_url,
+            module_background, module_foreground, data_background, program_background,
+            program_foreground, tcp_pool, connector_manager, refresh_callback, (996, 616), parent,
         )
-        self.callsign = callsign
         self.message_text = message_text
-        self._tcp_pool = tcp_pool
-        self._connector_manager = connector_manager
-        self.internet_available = internet_available
-        self._commsrvr_url = commsrvr_url
-        self._module_bg = module_background
-        self._module_fg = module_foreground
-        self._data_bg = data_background
-        self._program_bg = program_background or _PROG_BG
-        self._program_fg = program_foreground or _PROG_FG
         self._msg_id = msg_id
-        self._refresh_callback = refresh_callback
-        self._thread: Optional[_QRZThread] = None
-        self._rc_thread: Optional[_ReadCountThread] = None
-        self._reload_token: int = 0
-        self._map_loaded = False
+        self._record_id_provider = record_id_provider
         self._deleted_any = False
-        self._last_nav: str = "older"
         self._msg_datetime: str = ""
         self._target: str = ""
         self._rfi: int = 0
         self._source: Optional[int] = None
         self._global_id: int = 0
-        self.setWindowTitle(f"Message — {callsign}")
-        self.setModal(True)
-        self.setMinimumSize(996, 616)
-        self.resize(996, 616)
-        if os.path.exists("radiation-32.png"):
-            self.setWindowIcon(QtGui.QIcon("radiation-32.png"))
         self._setup_ui()
         self._fetch_message_details()
         self._start_qrz()
@@ -2607,10 +2485,12 @@ class MessageDetailDialog(QDialog):
         self.msg_text.setFixedHeight(220)
         self.msg_text.setMinimumWidth(480)
         self.msg_text.setStyleSheet(
-            f"background-color:{self._data_bg}; border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px;"
+            f"background-color:{self._data_bg}; color:{COLOR_INPUT_TEXT};"
+            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px;"
+            f" font-family:'Kode Mono'; font-size:13px;"
         )
         self.msg_text.setOpenLinks(False)
-        self.msg_text.anchorClicked.connect(lambda url: QDesktopServices.openUrl(url))
+        self.msg_text.anchorClicked.connect(self._open_link)
         self.msg_text.setHtml(_text_to_html(self.message_text.replace("||", "\n"), self._data_bg))
         lower.addWidget(self.msg_text)
         main.addLayout(lower)
@@ -2618,71 +2498,53 @@ class MessageDetailDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
-        self.btn_help = _btn("Help", COLOR_BTN_HELP, 60)
+        self.btn_help = make_button("Help", COLOR_BTN_HELP, 60)
         self.btn_help.clicked.connect(self._on_help_clicked)
         btn_row.addWidget(self.btn_help)
 
         btn_row.addStretch()
 
-        self.btn_delete = _btn("Delete", COLOR_BTN_RED)
+        self.btn_delete = make_button("Delete", COLOR_BTN_RED)
         self.btn_delete.clicked.connect(self._on_delete)
         btn_row.addWidget(self.btn_delete)
 
-        self.btn_older = _btn("Previous", _COL_NAV)
+        self.btn_older = make_button("Previous", _COL_NAV)
         self.btn_older.clicked.connect(self._on_older)
         btn_row.addWidget(self.btn_older)
 
-        self.btn_newer = _btn("Next", _COL_NAV)
+        self.btn_newer = make_button("Next", _COL_NAV)
         self.btn_newer.clicked.connect(self._on_newer)
         btn_row.addWidget(self.btn_newer)
 
-        self.btn_reply = _btn("Reply", COLOR_BTN_BLUE)
+        self.btn_reply = make_button("Reply", COLOR_BTN_BLUE)
         self.btn_reply.clicked.connect(self._on_reply_clicked)
         btn_row.addWidget(self.btn_reply)
 
-        self.btn_grp_reply = _btn("GRP Reply", COLOR_BTN_BLUE)
+        self.btn_grp_reply = make_button("GRP Reply", COLOR_BTN_BLUE)
         self.btn_grp_reply.clicked.connect(self._on_grp_reply_clicked)
         btn_row.addWidget(self.btn_grp_reply)
 
-        self.btn_js8_reply = _btn("JS8 Reply", COLOR_BTN_BLUE)
+        self.btn_js8_reply = make_button("JS8 Reply", COLOR_BTN_BLUE)
         self.btn_js8_reply.clicked.connect(self._on_js8_reply_clicked)
         btn_row.addWidget(self.btn_js8_reply)
 
-        self.btn_relay = _btn("Forward", COLOR_BTN_BLUE)
+        self.btn_relay = make_button("Forward", COLOR_BTN_BLUE)
         self.btn_relay.clicked.connect(self._on_relay_clicked)
         btn_row.addWidget(self.btn_relay)
 
-        self.btn_close = _btn("Close", _COL_CANCEL)
+        self.btn_close = make_button("Close", _COL_CANCEL)
         self.btn_close.clicked.connect(self._on_close_clicked)
         btn_row.addWidget(self.btn_close)
 
         main.addLayout(btn_row)
 
-    def _save_contact_memo(self) -> None:
-        try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
-                conn.execute(
-                    "UPDATE qrz SET memo = ? WHERE callsign = ? COLLATE NOCASE",
-                    (self.contact_memo_edit.text(), self.callsign)
-                )
-                conn.commit()
-        except sqlite3.Error as e:
-            print(f"[MessageDetailDialog] Contact memo save error: {e}")
-
     def _on_reply_clicked(self) -> None:
         original = self.message_text.replace("||", "\n")
-        prefill = "\n\n----------\n" + original
-        dlg = QRZLookupDialog(
-            module_background=self._module_bg,
-            module_foreground=self._module_fg,
-            program_background=self._program_bg,
-            program_foreground=self._program_fg,
-            initial_callsign=self.callsign,
-            initial_message=prefill,
-            refresh_callback=self._refresh_callback,
-            parent=self,
-        )
-        dlg.exec_()
+        self._reply_with_qrz_dialog("\n\n----------\n" + original)
+
+    def _on_js8_reply_clicked(self) -> None:
+        original = self.message_text.replace("||", "\n")
+        self._reply_with_js8("\n\n----------\n" + original)
 
     def _on_grp_reply_clicked(self) -> None:
         """Reply to this message via a new Group Message, seeded with the original body."""
@@ -2698,6 +2560,7 @@ class MessageDetailDialog(QDialog):
         )
         dlg.set_group_reply_context(self._target, prefill)
         dlg.exec_()
+        dlg.deleteLater()
 
     def _on_help_clicked(self) -> None:
         show_help_dialog(self, "Message Details Help", _MSG_DETAIL_HELP_HTML, width=520)
@@ -2716,23 +2579,7 @@ class MessageDetailDialog(QDialog):
         )
         dlg.set_relay_context(original)
         dlg.exec_()
-
-    def _on_js8_reply_clicked(self) -> None:
-        """Reply to this message over RF via JS8 Direct Message. The clicked
-        callsign is shown as a read-only reminder in the JS8 dialog (not forced
-        into its roster-driven Target combo); the body is seeded with the
-        original message text."""
-        from js8_direct_message import JS8DirectMessageDialog
-        original = self.message_text.replace("||", "\n")
-        prefill = "\n\n----------\n" + original
-        dlg = JS8DirectMessageDialog(
-            tcp_pool=self._tcp_pool,
-            connector_manager=self._connector_manager,
-            refresh_callback=self._refresh_callback,
-            parent=self,
-        )
-        dlg.set_reply_context(self.callsign, prefill)
-        dlg.exec_()
+        dlg.deleteLater()
 
     def _on_close_clicked(self) -> None:
         if self._deleted_any:
@@ -2745,7 +2592,7 @@ class MessageDetailDialog(QDialog):
             self._populate_message_labels("", None, "", None)
             return
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 cur = conn.cursor()
                 cur.execute(
                     "SELECT datetime, freq, target, source, global_id, msg_id, rfi FROM messages WHERE id = ?",
@@ -2764,7 +2611,7 @@ class MessageDetailDialog(QDialog):
     def _populate_message_labels(self, datetime_str: str, freq, target: str, source,
                                   global_id: int = 0, rfi: int = 0) -> None:
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
-        _source_map = {1: "RF via JS8Call", 2: "Internet", 3: "Internet Only"}
+        _source_map = {0: "Saved only (not transmitted)", 1: "RF via JS8Call", 2: "Internet", 3: "Internet Only"}
 
         self._rfi = int(rfi) if rfi else 0
         self._global_id = global_id
@@ -2781,21 +2628,21 @@ class MessageDetailDialog(QDialog):
         )
 
         self.qrz_info.lbl_msg_posted.setText(
-            f'<span style="{_k}">Posted:</span>  {datetime_str}' if datetime_str
+            f'<span style="{_k}">Posted:</span>  {_esc(datetime_str)}' if datetime_str
             else f'<span style="{_k}">Posted:</span>'
         )
         self.qrz_info.lbl_msg_id.setText(
-            f'<span style="{_k}">Message ID:</span>  {self._msg_id}' if self._msg_id
+            f'<span style="{_k}">Message ID:</span>  {_esc(self._msg_id)}' if self._msg_id
             else f'<span style="{_k}">Message ID:</span>'
         )
         target_text = target.strip() if target else ""
         self._target = target_text
         self.qrz_info.lbl_msg_target.setText(
-            f'<span style="{_k}">To:</span>  {target_text}' if target_text
+            f'<span style="{_k}">To:</span>  {_esc(target_text)}' if target_text
             else f'<span style="{_k}">To:</span>'
         )
         self.qrz_info.lbl_msg_global_id.setText(
-            f'<span style="{_k}">Global ID:</span>  {global_id}' if global_id
+            f'<span style="{_k}">Global ID:</span>  {_esc(global_id)}' if global_id
             else f'<span style="{_k}">Global ID:</span>'
         )
         self.qrz_info.lbl_msg_delivered.setText(f'<span style="{_k}">Delivered To:</span>')
@@ -2811,7 +2658,7 @@ class MessageDetailDialog(QDialog):
             self._rc_thread.count_ready.connect(
                 lambda text, t=rc_token: self._on_read_count(text) if t == self._reload_token else None
             )
-            self._rc_thread.start()
+            _start_worker(self._rc_thread)
         try:
             freq_mhz = (float(freq) / 1_000_000) if freq else 0.0
         except (TypeError, ValueError):
@@ -2839,7 +2686,7 @@ class MessageDetailDialog(QDialog):
         count_str = text.split(",", 1)[0].strip()
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
         self.qrz_info.lbl_msg_delivered.setText(
-            f'<span style="{_k}">Delivered To:</span>  {count_str} CommStat users'
+            f'<span style="{_k}">Delivered To:</span>  {_esc(count_str)} CommStat users'
         )
 
     def _reload(self, record_id, callsign: str, message_text: str, msg_datetime: str,
@@ -2848,12 +2695,7 @@ class MessageDetailDialog(QDialog):
         self._reload_token += 1
         self.btn_newer.setEnabled(False)
         self.btn_older.setEnabled(False)
-        if self._rc_thread is not None:
-            try:
-                self._rc_thread.count_ready.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            self._rc_thread = None
+        self._cancel_workers()
         self._record_id = record_id
         self._msg_id = msg_id
         self.callsign = callsign
@@ -2868,32 +2710,56 @@ class MessageDetailDialog(QDialog):
         self.contact_memo_edit.blockSignals(False)
         self.qrz_info.update_data({"call": callsign})
         self._populate_message_labels(msg_datetime, freq, target, source, global_id, rfi)
-        if self._thread is not None:
-            try:
-                self._thread.result_ready.disconnect()
-            except (TypeError, RuntimeError):
-                pass
-            self._thread = None
         self._start_qrz()
         self._update_nav_buttons()
+
+    _MSG_COLS = "id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi"
+
+    def _visible_ids(self) -> Optional[list]:
+        """Message ids in table order (newest first) when the caller supplied them, else None."""
+        if self._record_id_provider is None:
+            return None
+        try:
+            return list(self._record_id_provider() or [])
+        except Exception as e:
+            print(f"[MessageDetailDialog] record_id_provider error: {e}")
+            return None
+
+    def _neighbor_row(self, conn, direction: str):
+        """The row after/before this one: among the rows the table shows when it
+        supplied them, otherwise among all messages by id. None when there is none."""
+        ids = self._visible_ids()
+        if ids is not None:
+            pos = next((i for i, rid in enumerate(ids) if str(rid) == str(self._record_id)), None)
+            if pos is None:
+                return None
+            j = pos - 1 if direction == "newer" else pos + 1
+            if j < 0 or j >= len(ids):
+                return None
+            return conn.execute(
+                f"SELECT {self._MSG_COLS} FROM messages WHERE id = ?", (ids[j],)
+            ).fetchone()
+        # Ordered by the messages table's own primary key (id), not msg_id
+        # (a 3-char hour+minute code recycled daily, not unique across
+        # senders/days) or datetime (which can tie).
+        if direction == "newer":
+            return conn.execute(
+                f"SELECT {self._MSG_COLS} FROM messages WHERE id > ? ORDER BY id ASC LIMIT 1",
+                (self._record_id,)
+            ).fetchone()
+        return conn.execute(
+            f"SELECT {self._MSG_COLS} FROM messages WHERE id < ? ORDER BY id DESC LIMIT 1",
+            (self._record_id,)
+        ).fetchone()
 
     def _update_nav_buttons(self) -> None:
         has_newer = False
         has_older = False
         if self._record_id is not None:
             try:
-                with sqlite3.connect(DB_PATH, timeout=10) as conn:
-                    cur = conn.cursor()
-                    cur.execute(
-                        "SELECT 1 FROM messages WHERE id > ? LIMIT 1",
-                        (self._record_id,)
-                    )
-                    has_newer = cur.fetchone() is not None
-                    cur.execute(
-                        "SELECT 1 FROM messages WHERE id < ? LIMIT 1",
-                        (self._record_id,)
-                    )
-                    has_older = cur.fetchone() is not None
+                with db_connect() as conn:
+                    has_newer = self._neighbor_row(conn, "newer") is not None
+                    has_older = self._neighbor_row(conn, "older") is not None
             except sqlite3.Error:
                 pass
         self.btn_newer.setEnabled(has_newer)
@@ -2908,29 +2774,12 @@ class MessageDetailDialog(QDialog):
         self._navigate("older")
 
     def _navigate(self, direction: str) -> None:
-        # Ordered by the messages table's own primary key (id), not msg_id
-        # (a 3-char hour+minute code recycled daily, not unique across
-        # senders/days) or datetime (which can tie) — id is the only column
-        # guaranteed to identify this exact row and order unambiguously.
         if self._record_id is None:
             self._update_nav_buttons()
             return
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
-                cur = conn.cursor()
-                if direction == "newer":
-                    cur.execute(
-                        "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi "
-                        "FROM messages WHERE id > ? ORDER BY id ASC LIMIT 1",
-                        (self._record_id,)
-                    )
-                else:
-                    cur.execute(
-                        "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi "
-                        "FROM messages WHERE id < ? ORDER BY id DESC LIMIT 1",
-                        (self._record_id,)
-                    )
-                row = cur.fetchone()
+            with db_connect() as conn:
+                row = self._neighbor_row(conn, direction)
         except sqlite3.Error as e:
             print(f"[MessageDetailDialog] Navigate error: {e}")
             return
@@ -2948,47 +2797,28 @@ class MessageDetailDialog(QDialog):
         local_cs = _get_local_callsign()
         is_owner = bool(local_cs) and bool(self.callsign) and base_callsign(local_cs) == base_callsign(self.callsign)
         if is_owner:
-            from ui_helpers import confirm
-            if not confirm(
-                self, "Confirm Delete",
-                "This record will be deleted from the CommStat app of all users. "
-                "Do you want to proceed?",
-            ):
+            from ui_helpers import confirm_delete_record
+            choice = confirm_delete_record(self, "message")
+            if choice == "cancel":
                 return
-            import netguard
-            if self._global_id and self._commsrvr_url and netguard.guard("Remote message delete"):
-                try:
-                    url = (f"{self._commsrvr_url}/record-delete-808585.php"
-                           f"?cs={urllib.parse.quote(local_cs)}&msg={self._global_id}")
-                    with urllib.request.urlopen(url, timeout=10, context=create_verified_ssl_context()):
-                        pass
-                except Exception as e:
-                    print(f"[MessageDetailDialog] Delete request failed: {e}")
+            if choice == "all" and self._global_id and self._commsrvr_url:
+                url = (f"{self._commsrvr_url}/record-delete-808585.php"
+                       f"?cs={urllib.parse.quote(local_cs)}&msg={self._global_id}")
+                if not _delete_everywhere(self, url):
+                    return
         deleted_id = self._record_id
         direction = self._last_nav
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 cur = conn.cursor()
                 cur.execute("DELETE FROM messages WHERE id = ?", (deleted_id,))
                 conn.commit()
                 self._deleted_any = True
                 next_row = None
                 if deleted_id is not None:
-                    if direction == "newer":
-                        cur.execute(
-                            "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi "
-                            "FROM messages WHERE id > ? ORDER BY id ASC LIMIT 1",
-                            (deleted_id,)
-                        )
-                    else:
-                        cur.execute(
-                            "SELECT id, msg_id, from_callsign, message, datetime, freq, target, source, global_id, rfi "
-                            "FROM messages WHERE id < ? ORDER BY id DESC LIMIT 1",
-                            (deleted_id,)
-                        )
-                    next_row = cur.fetchone()
-        except sqlite3.Error:
-            self.accept()
+                    next_row = self._neighbor_row(conn, direction)
+        except sqlite3.Error as e:
+            QMessageBox.critical(self, "Delete Failed", f"Could not delete this record:\n{e}")
             return
         self.record_deleted.emit()
         if not next_row:
@@ -2997,49 +2827,6 @@ class MessageDetailDialog(QDialog):
         self._reload(next_row[0], next_row[2] or "", next_row[3] or "", next_row[4] or "",
                      msg_id=next_row[1] or "", freq=next_row[5], target=next_row[6] or "", source=next_row[7],
                      global_id=next_row[8] or 0, rfi=next_row[9] or 0)
-
-    def _start_qrz(self) -> None:
-        cached_fresh = get_qrz_cached(self.callsign)
-        cached_any   = cached_fresh or get_qrz_cached(self.callsign, include_stale=True)
-        is_active, username, password = load_qrz_config()
-
-        if not username:
-            found_str = "found" if cached_any else "NOT found"
-            self.qrz_info.set_qrz_status(
-                f"QRZ Subscription not configured — {self.callsign} {found_str} in local database"
-            )
-            if cached_any:
-                self._on_qrz_result(cached_any)
-            else:
-                self.qrz_info.show_no_data_placeholder()
-            return
-
-        if not is_active:
-            found_str = "found" if cached_any else "NOT found"
-            self.qrz_info.set_qrz_status(
-                f"QRZ Subscription not enabled — {self.callsign} {found_str} in local database"
-            )
-            if cached_any:
-                self._on_qrz_result(cached_any)
-            else:
-                self.qrz_info.show_no_data_placeholder()
-            return
-
-        if cached_fresh:
-            self._on_qrz_result(cached_fresh)
-            return
-
-        # No fresh cache — show stale cached data now (the map pin doesn't go
-        # stale) while a live lookup refreshes the profile fields in the background.
-        if cached_any:
-            self._on_qrz_result(cached_any)
-
-        token = self._reload_token
-        self._thread = _QRZThread(self.callsign, username, password)
-        self._thread.result_ready.connect(
-            lambda result, t=token: self._on_qrz_result(result) if t == self._reload_token else None
-        )
-        self._thread.start()
 
     def _on_qrz_result(self, result) -> None:
         if not result:
@@ -3086,33 +2873,26 @@ class InternetDeliveryFailureDialog(QDialog):
         self.setModal(True)
         self.setFixedWidth(420)
 
-        self.setStyleSheet("QDialog { background-color:#f5f5f5; }")
+        self.setStyleSheet(f"QDialog {{ background-color:{_PANEL_BG}; }}")
 
         main = QVBoxLayout(self)
         main.setContentsMargins(15, 15, 15, 15)
         main.setSpacing(10)
 
-        title = QLabel("Internet Delivery Failure")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Roboto Slab", -1, QFont.Black))
-        title.setStyleSheet(
-            f"QLabel {{ background-color: {_PROG_BG}; color: {_PROG_FG};"
-            " font-size: 16px; padding-top: 9px; padding-bottom: 9px; }"
-        )
-        main.addWidget(title)
+        main.addWidget(make_title_strip("Internet Delivery Failure"))
 
         body = QLabel(message)
         body.setWordWrap(True)
         body.setAlignment(Qt.AlignCenter)
         body.setStyleSheet(
-            "QLabel { color:#333333; font-family:Roboto; font-size:15px;"
+            f"QLabel {{ color:{_PANEL_FG}; font-family:Roboto; font-size:15px;"
             " font-weight:bold; padding: 12px 8px; }"
         )
         main.addWidget(body)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        btn = _btn("Close", _COL_CANCEL)
+        btn = make_button("Close", _COL_CANCEL)
         btn.clicked.connect(self.accept)
         btn_row.addWidget(btn)
         main.addLayout(btn_row)
@@ -3135,19 +2915,6 @@ class DeliveryConfirmationDialog(QDialog):
     _PHOTO_MAX_W = 440      # cap photo width — wide banners shrink in height to fit
     _PHOTO_DEFAULT_W = 460  # column-2 budget at default dialog width; grow only if exceeded
 
-    # Subclasses override these to repurpose the dialog for related states.
-    _WINDOW_TITLE       = "Delivery Confirmation"
-    _BANNER_TEXT        = "Delivery Confirmation"
-    _BANNER_BG_OVERRIDE: Optional[str] = None   # None → use program_background
-    _BANNER_FG_OVERRIDE: Optional[str] = None
-    _FOOTER_TEXT        = "This Message Was Delivered Successfully"
-    _FOOTER_COLOR_OVERRIDE: Optional[str] = None  # None → module_foreground
-    _FOOTER_AS_BANNER   = False                   # True → render footer with banner font/size (program colors by default)
-    _FOOTER_BANNER_BG_OVERRIDE: Optional[str] = None  # When _FOOTER_AS_BANNER: override bg (use "transparent" for no fill)
-    _FOOTER_BANNER_FG_OVERRIDE: Optional[str] = None  # When _FOOTER_AS_BANNER: override text color
-    _MSG_BG_OVERRIDE: Optional[str] = None        # Message box background — None → #e9ecef
-    _MSG_FG_OVERRIDE: Optional[str] = None        # Message box text color — None → #333333
-    _MSG_BOLD           = False                   # When True, message text rendered bold
 
     def __init__(self, callsign: str, message: str,
                  module_background: str = "#f5f5f5",
@@ -3156,7 +2923,7 @@ class DeliveryConfirmationDialog(QDialog):
                  program_foreground: str = "",
                  parent=None):
         super().__init__(parent)
-        apply_standard_dialog_chrome(self, self._WINDOW_TITLE)
+        apply_standard_dialog_chrome(self, "Delivery Confirmation")
         self.setModal(True)
         self.resize(510, 440)
         self.setMinimumSize(510, 440)
@@ -3173,32 +2940,20 @@ class DeliveryConfirmationDialog(QDialog):
         self._populate_qrz()
 
     def _setup_ui(self) -> None:
-        msg_bg = self._MSG_BG_OVERRIDE or "#e9ecef"
-        msg_fg = self._MSG_FG_OVERRIDE or "#333333"
-        msg_weight = "font-weight:bold;" if self._MSG_BOLD else ""
         self.setStyleSheet(
             f"QDialog {{ background-color:{self._module_bg}; }}"
             f"QLabel {{ color:{self._module_fg}; background-color: transparent; font-size: 13px; }}"
-            f"QPlainTextEdit {{ background-color:{msg_bg}; color:{msg_fg};"
+            f"QPlainTextEdit {{ background-color:#e9ecef; color:{COLOR_INPUT_TEXT};"
             f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px 8px;"
-            f" font-family:'Kode Mono'; font-size:13px; {msg_weight} }}"
+            f" font-family:'Kode Mono'; font-size:13px; }}"
         )
 
         main = QVBoxLayout(self)
         main.setContentsMargins(15, 15, 15, 15)
         main.setSpacing(10)
 
-        # Title bar (program colors, or override for special-state subclasses)
-        banner_bg = self._BANNER_BG_OVERRIDE or self._program_bg
-        banner_fg = self._BANNER_FG_OVERRIDE or self._program_fg
-        title = QLabel(self._BANNER_TEXT)
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Roboto Slab", -1, QFont.Black))
-        title.setStyleSheet(
-            f"QLabel {{ background-color: {banner_bg}; color: {banner_fg};"
-            " font-size: 16px; padding-top: 9px; padding-bottom: 9px; }"
-        )
-        main.addWidget(title)
+        # Title bar (program colors)
+        main.addWidget(make_title_strip("Delivery Confirmation", self._program_bg, self._program_fg))
 
         # ── Two-column row ───────────────────────────────────────────────
         cols = QHBoxLayout()
@@ -3216,6 +2971,8 @@ class DeliveryConfirmationDialog(QDialog):
         self.lbl_grid    = QLabel(); self.lbl_grid.setFont(_mono_font())
         self.lbl_county  = QLabel(); self.lbl_county.setFont(_mono_font())
         self.lbl_country = QLabel(); self.lbl_country.setFont(_mono_font())
+        for _lbl in (self.lbl_addr1, self.lbl_addr2):
+            _lbl.setTextFormat(Qt.PlainText)
 
         for row, w in enumerate((
             self.lbl_call, self.lbl_name, self.lbl_addr1, self.lbl_addr2,
@@ -3249,23 +3006,13 @@ class DeliveryConfirmationDialog(QDialog):
         self.msg_view.setFixedHeight(_fm.lineSpacing() * 4 + 14 + 40)
         main.addWidget(self.msg_view)
 
-        confirm_lbl = QLabel(self._FOOTER_TEXT)
+        confirm_lbl = QLabel("This Message Was Delivered Successfully")
         confirm_lbl.setAlignment(Qt.AlignCenter)
-        if self._FOOTER_AS_BANNER:
-            footer_banner_bg = self._FOOTER_BANNER_BG_OVERRIDE or banner_bg
-            footer_banner_fg = self._FOOTER_BANNER_FG_OVERRIDE or banner_fg
-            confirm_lbl.setFont(QFont("Roboto Slab", -1, QFont.Black))
-            confirm_lbl.setStyleSheet(
-                f"QLabel {{ background-color: {footer_banner_bg}; color: {footer_banner_fg};"
-                " font-size: 16px; padding-top: 9px; padding-bottom: 9px; }"
-            )
-        else:
-            footer_color = self._FOOTER_COLOR_OVERRIDE or self._module_fg
-            confirm_lbl.setFont(QFont("Roboto", -1, QFont.Bold))
-            confirm_lbl.setStyleSheet(
-                f"QLabel {{ color:{footer_color}; background-color: transparent;"
-                " font-family:Roboto; font-size:13px; font-weight:bold; padding-top:6px; }"
-            )
+        confirm_lbl.setFont(QFont("Roboto", -1, QFont.Bold))
+        confirm_lbl.setStyleSheet(
+            f"QLabel {{ color:{self._module_fg}; background-color: transparent;"
+            " font-family:Roboto; font-size:13px; font-weight:bold; padding-top:6px; }"
+        )
         main.addWidget(confirm_lbl)
         main.addStretch()
 
@@ -3273,7 +3020,7 @@ class DeliveryConfirmationDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
         btn_row.addStretch()
-        self.btn_close = _btn("Close", _COL_CANCEL)
+        self.btn_close = make_button("Close", _COL_CANCEL)
         self.btn_close.clicked.connect(self.accept)
         btn_row.addWidget(self.btn_close)
         main.addLayout(btn_row)
@@ -3295,7 +3042,7 @@ class DeliveryConfirmationDialog(QDialog):
         if is_active and username:
             self._qrz_thread = _QRZThread(self._callsign, username, password)
             self._qrz_thread.result_ready.connect(self._on_qrz_result)
-            self._qrz_thread.start()
+            _start_worker(self._qrz_thread)
 
     def _on_qrz_result(self, result) -> None:
         if result:
@@ -3305,8 +3052,8 @@ class DeliveryConfirmationDialog(QDialog):
         d = _normalize_qrz(data)
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
 
-        self.lbl_call.setText(f"<span style='{_k}'>Callsign:</span> {d['call']}")
-        self.lbl_name.setText(f"<b>{d['name']}</b>" if d["name"] else "")
+        self.lbl_call.setText(f"<span style='{_k}'>Callsign:</span> {_esc(d['call'])}")
+        self.lbl_name.setText(f"<b>{_esc(d['name'])}</b>" if d["name"] else "")
         self.lbl_addr1.setText(d["addr1"])
         city_state = ", ".join(x for x in (d["addr2"], d["state"]) if x)
         if d["zip"]:
@@ -3314,28 +3061,30 @@ class DeliveryConfirmationDialog(QDialog):
         self.lbl_addr2.setText(city_state)
 
         self.lbl_grid.setText(
-            f'<span style="{_k}">Grid:</span> {d["grid"]}' if d["grid"] else ""
+            f'<span style="{_k}">Grid:</span> {_esc(d["grid"])}' if d["grid"] else ""
         )
         self.lbl_county.setText(
-            f'<span style="{_k}">County:</span> {d["county"]}' if d["county"] else ""
+            f'<span style="{_k}">County:</span> {_esc(d["county"])}' if d["county"] else ""
         )
         self.lbl_country.setText(
-            f'<span style="{_k}">Country:</span> {d["country"]}' if d["country"] else ""
+            f'<span style="{_k}">Country:</span> {_esc(d["country"])}' if d["country"] else ""
         )
 
+        _detach_loader(self._img_loader)
+        self._img_loader = None
         if d["image"]:
             self._img_loader = _ImageLoader(
                 d["image"], max_size=(self._PHOTO_MAX_W, self._PHOTO_H)
             )
             self._img_loader.image_loaded.connect(self._on_image_loaded)
             self._img_loader.gif_loaded.connect(self._on_gif_loaded)
-            self._img_loader.start()
+            _start_worker(self._img_loader)
         else:
             self._load_default_image()
 
     def _show_placeholder(self) -> None:
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
-        self.lbl_call.setText(f"<span style='{_k}'>Callsign:</span> {self._callsign}")
+        self.lbl_call.setText(f"<span style='{_k}'>Callsign:</span> {_esc(self._callsign)}")
         self.lbl_grid.setText(f"<span style='{_k}'>Grid:</span>")
         self.lbl_county.setText(f"<span style='{_k}'>County:</span>")
         self.lbl_country.setText(f"<span style='{_k}'>Country:</span>")
@@ -3398,24 +3147,6 @@ class DeliveryConfirmationDialog(QDialog):
             self.resize(self.width() + deficit + 4, self.height())
 
 
-# ── Dialog: Message Expired popup (commsrvr ::EXPIRED::) ──────────────────
-
-class MessageExpiredDialog(DeliveryConfirmationDialog):
-    """Variant of DeliveryConfirmationDialog shown when a message's delivery
-    window expires before the recipient retrieves it.
-
-    Uses program-colored banners top and bottom — the wording itself ("This
-    Message Was Not Delivered" / "Recipient Did not retrieve it") signals
-    non-delivery and keeps the popup visually distinct from the delivered
-    dialog (which has a small text footer, not a banner).
-    """
-
-    _WINDOW_TITLE     = "Message Expired"
-    _BANNER_TEXT      = "This Message Was Not Delivered"
-    _FOOTER_TEXT      = "Recipient Did Not Retrieve It"
-    _FOOTER_AS_BANNER = True
-
-
 # ── Dialog: New Message notification popup ─────────────────────────────────
 
 class NewMessagePopupDialog(QDialog):
@@ -3461,14 +3192,14 @@ class NewMessagePopupDialog(QDialog):
         banner.setGeometry((w - banner_w) // 2, (h - banner_h) // 2, banner_w, banner_h)
         banner.raise_()
 
-        self.btn_close = _btn("Close", _COL_CANCEL)
+        self.btn_close = make_button("Close", _COL_CANCEL)
         self.btn_close.setParent(self)
         self.btn_close.clicked.connect(self.accept)
         self.btn_close.adjustSize()
         self.btn_close.move(w - self.btn_close.width() - 12, h - self.btn_close.height() - 12)
         self.btn_close.raise_()
 
-        self.btn_open = _btn("Open Message", COLOR_BTN_GREEN)
+        self.btn_open = make_button("Open Message", COLOR_BTN_GREEN)
         self.btn_open.setParent(self)
         self.btn_open.clicked.connect(lambda: self.done(self.Opened))
         self.btn_open.adjustSize()

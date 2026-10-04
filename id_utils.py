@@ -1,3 +1,14 @@
+# Copyright (c) 2026 Manuel Ochoa
+# This file is part of CommStat.
+# Licensed under the GNU General Public License v3.0.
+"""
+id_utils.py - Time-based message IDs.
+
+IDs are an hour letter plus the minute, so they repeat every day and two items
+created in the same UTC minute share one. They are only unique together with
+the rest of the record (date, sender, ...).
+"""
+
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 

@@ -31,10 +31,10 @@ until someone flips the switch or their connection drops.
 """
 
 import threading
-from configparser import ConfigParser
 from pathlib import Path
 from typing import Callable, List
 
+from config_utils import read_config, write_config
 from constants import CONFIG_FILE
 
 _SECTION = "DIRECTEDCONFIG"
@@ -49,22 +49,26 @@ def _config_path() -> Path:
 
 
 def _read_from_disk() -> bool:
-    config = ConfigParser()
-    config.read(_config_path())
-    if config.has_section(_SECTION):
-        return config.getboolean(_SECTION, _KEY, fallback=True)
+    """Saved preference; Online when the file, section or value is missing or
+    unreadable. This runs at import, so it must never raise: a damaged
+    config.ini would otherwise stop the whole app from starting."""
+    try:
+        config = read_config(_config_path())
+        if config.has_section(_SECTION):
+            return config.getboolean(_SECTION, _KEY, fallback=True)
+    except ValueError as e:
+        print(f"[netguard] Could not read {_KEY} from {_config_path()}: {e}. Assuming Online.")
     return True
 
 
-def _write_to_disk(value: bool) -> None:
-    path = _config_path()
-    config = ConfigParser()
-    config.read(path)
+def _write_to_disk(value: bool) -> bool:
+    """Persist the preference. Returns False (the reason is printed) instead of
+    raising, so a read-only or full disk can't crash a Qt slot."""
+    config = read_config(_config_path())
     if not config.has_section(_SECTION):
         config.add_section(_SECTION)
     config.set(_SECTION, _KEY, str(value))
-    with open(path, "w") as f:
-        config.write(f)
+    return write_config(config, _config_path())
 
 
 _user_enabled: bool = _read_from_disk()
@@ -108,8 +112,8 @@ def set_user_enabled(value: bool) -> None:
     with _lock:
         before = _user_enabled and _reachable
         _user_enabled = value
-        _write_to_disk(value)
         changed = before != (_user_enabled and _reachable)
+    _write_to_disk(value)   # file I/O outside the lock
     _notify_if_changed(changed)
 
 

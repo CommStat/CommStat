@@ -22,16 +22,19 @@ import os
 import io
 import re
 import csv
-import base64
 import json
 import faulthandler
 import socket
+import ssl
+import zipfile
 import sqlite3
+import queue
 import threading
+from enum import IntEnum
+import traceback
 import subprocess
 import urllib.request
 import urllib.parse
-import ssl
 
 # Print a C-level traceback on segfaults so silent Qt crashes (especially on
 # Linux) leave something actionable in the terminal instead of vanishing.
@@ -64,7 +67,6 @@ import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 from email.utils import parsedate_to_datetime
-from configparser import ConfigParser
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple, Set
 
@@ -88,8 +90,24 @@ from PyQt5.QtWebEngineCore import QWebEngineUrlSchemeHandler, QWebEngineUrlSchem
 from PyQt5.QtMultimedia import QSoundEffect
 from connector_manager import ConnectorManager
 from js8_tcp_client import TCPConnectionPool
-from id_utils import generate_time_based_id
-from constants import *
+from config_utils import read_config, write_config
+from html import escape as html_escape
+import functools
+from id_utils import parse_message_datetime
+from text_utils import base_callsign, title_case
+from constants import (
+    COLOR_BTN_CLOSE, COLOR_BTN_CYAN, COLOR_BTN_GRAY, COLOR_BTN_GREEN, COLOR_BTN_HELP,
+    COLOR_BTN_RED, COLOR_INPUT_BORDER, COLOR_INPUT_TEXT, COMMSRVR_URL, CONFIG_FILE,
+    CONTACTS_RETENTION_HOURS, ConsoleColors, DATABASE_FILE, DEFAULT_COLORS,
+    DEFAULT_FILTER_START, DEFAULT_OBJECT_COLOR, DEFAULT_OBJECT_SHAPE, DEFAULT_RSS_FEEDS,
+    DEV_RELOAD_DIALOGS, FONT_MONO, HEARTBEAT_DELAY_MS, HEARTBEAT_INTERVAL_MS, ICON_FILE,
+    INTERNET_CHECK_INTERVAL, INTERNET_MONITOR_INTERVAL, MAP_HEIGHT, MAP_WIDTH, MAX_GROUP_NAME_LENGTH, NEWSFEED_PAUSE_MS,
+    NEWSFEED_SCROLL_DURATION_MS, NEWSFEED_TYPE_INTERVAL_MS, SCOPE_RADIUS, SCOPE_RADIUS_DEFAULT,
+    SLIDESHOW_INTERVAL, SOUNDS_DIR, STATREP_HEADERS, USER_AGENT, VERSION,
+    WATCHLIST_OBJECT_COLORS, WINDOW_SIZE, WINDOW_TITLE, scope_db_text_for_code,
+)
+from db_utils import db_connect
+from ssl_utils import create_verified_ssl_context
 import netguard
 
 
@@ -99,7 +117,7 @@ import netguard
 
 # Commsrvr server for remote announcements and slideshow images
 # This allows the developer to push messages/images to all CommStat users
-_COMMSRVR = base64.b64decode("aHR0cHM6Ly9jb21tc3RhdC5hcHA=").decode()
+_COMMSRVR = COMMSRVR_URL   # from constants (star import)
 _PING = _COMMSRVR + "/heartbeat-808585.php"
 
 # Default hyperlink blue - used to style the StatRep table's clickable
@@ -118,9 +136,8 @@ MAP_WHEEL_PX_PER_ZOOM = 360
 # Bottom-left map pin sizing. Pin COLOR conveys status (green/orange/red);
 # pin RADIUS conveys the StatRep's scope (how local the report is). Values are
 # CircleMarker pixel radii, so on-screen diameter is 2x these numbers.
-# SCOPE_RADIUS / SCOPE_RADIUS_DEFAULT come from constants.py (imported above
-# via `from constants import *`) and understand both the old and future scope
-# label sets.
+# SCOPE_RADIUS / SCOPE_RADIUS_DEFAULT come from constants.py and understand
+# both the old and current scope label sets.
 
 # Contacts capture (Direct Message Part 1):
 #  - The sender of the RX.DIRECTED (from_call) is the RELAY — the station we
@@ -174,19 +191,46 @@ SOLAR_IMAGE_DIALOGS = [
      "Loading solar conditions...", "Failed to load solar data"),
 ]
 
+# QMenuBar has no per-item spacing (QMenuBar::item padding applies to every item
+# alike), so a wider gap after "Exit" and "What's New" - separating the app
+# actions from the website links - is made by padding those two labels.
+_MENUBAR_GAP = " " * 10
+
 # qrz columns left out of Tools > Export CSVs: internal bookkeeping or not
 # useful outside the app.
 QRZ_EXPORT_EXCLUDED_COLUMNS = {
     "active", "effdate", "expdate", "image", "areacode", "memo", "moddate", "grid_override",
 }
 
-# Live weather map links opened in the user's browser from the Tools menu.
+# Live weather map links opened in the user's browser from the Websites menu.
 WEATHER_MAP_LINKS = [
     ("Nat'l Weather Service", "https://www.weather.gov/"),
     ("Ventusky", "https://www.ventusky.com/"),
     ("Windy.com", "https://www.windy.com/"),
     ("Zoom Earth", "https://zoom.earth/"),
 ]
+
+
+_PLAIN_GROUP_TOKEN = re.compile(r"^@[\w/-]+$")
+
+
+def csv_safe(value):
+    """Neutralize spreadsheet formulas in an exported CSV cell.
+
+    Exported StatRep/contact fields are typed by other users. A text cell that
+    starts with = + - @ (or a tab/CR) is executed as a formula when the CSV is
+    opened in Excel or Sheets, so such cells get a leading apostrophe, which
+    spreadsheets treat as "this is text". Numbers and other types pass through.
+    A plain "@GROUP" token (the statrep target column) is left alone: it has no
+    parentheses or operators, so it can't run anything."""
+    if not isinstance(value, str) or not value:
+        return value
+    first = value[0]
+    if first in ("=", "+", "-", "\t", "\r"):
+        return "'" + value
+    if first == "@" and not _PLAIN_GROUP_TOKEN.match(value):
+        return "'" + value
+    return value
 
 
 def hz_to_mhz(freq_hz: float, offset: float = 0) -> float:
@@ -386,7 +430,7 @@ def strip_duplicate_callsign(value: str, from_call: str) -> str:
         Cleaned message text with duplicate removed
     """
     # Extract base callsign (remove /P, /M suffixes)
-    base_call = from_call.split("/")[0] if from_call else ""
+    base_call = base_callsign(from_call)
     if not base_call:
         return value
 
@@ -411,24 +455,6 @@ def sanitize_ascii(text: str) -> str:
         Sanitized text with only printable ASCII characters
     """
     return re.sub(r'[^ -~]+', '', text).strip()
-
-
-def parse_message_datetime(utc: str) -> tuple:
-    """
-    Parse UTC timestamp and generate time-based ID.
-
-    Args:
-        utc: UTC timestamp string (format: "YYYY-MM-DD   HH:MM:SS" or "YYYY-MM-DD HH:MM:SS")
-
-    Returns:
-        (date_only_str, time_based_id)
-    """
-    dt_str = utc.replace("   ", " ").strip()
-    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-    date_only = utc.split()[0] if utc else ""
-    msg_id = generate_time_based_id(dt)
-
-    return (date_only, msg_id)
 
 
 def expand_plus_shorthand(srcode: str) -> str:
@@ -527,31 +553,6 @@ def map_f301_digits_to_fields(digits: str) -> dict:
     return f304_fields
 
 
-def _strip_cs_suffix(callsign: str) -> str:
-    """Return the base callsign: everything before the first '/', uppercased."""
-    if not callsign:
-        return ""
-    return callsign.split("/", 1)[0].upper()
-
-
-def base_callsign(callsign: str) -> str:
-    """
-    Return the longest '/'-delimited token, uppercased — used for duplicate matching.
-
-    N0DDK/P -> N0DDK, KH6/N0DDK -> N0DDK. The stored from_callsign keeps its suffix
-    (that's what the operator transmitted), so duplicate detection has to compare the
-    base form: the same record can arrive as N0DDK/P over RF and N0DDK from the
-    commsrvr, and both must resolve to one row.
-
-    Matches the convention already used by qrz_client.QRZClient.lookup. Kept separate
-    from _strip_cs_suffix(), which the contacts-capture path relies on for its
-    everything-before-the-first-slash behavior.
-    """
-    if not callsign:
-        return ""
-    return max(callsign.upper().split("/"), key=len)
-
-
 def _append_statrep_comment(row_id: int, addition: str, retries: int = 3) -> bool:
     """
     Atomically append text to a statrep row's comments column.
@@ -569,7 +570,7 @@ def _append_statrep_comment(row_id: int, addition: str, retries: int = 3) -> boo
     """
     for attempt in range(retries):
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute(
                     "UPDATE statrep SET comments = COALESCE(comments, '') || ? WHERE id = ?",
                     (addition, row_id)
@@ -612,7 +613,7 @@ def parse_contacts_observation(value: str) -> Optional[Tuple[str, int]]:
     keyword = " ".join(raw_kw.upper().split())
     if keyword not in _CONTACTS_ALLOWED_KEYWORDS:
         return None
-    base_cs = _strip_cs_suffix(raw_cs)
+    base_cs = base_callsign(raw_cs)
     if not _CONTACTS_BASE_CS_PATTERN.match(base_cs):
         return None
     try:
@@ -645,7 +646,7 @@ def parse_hearing_observation(value: str) -> Optional[List[str]]:
     seen: Set[str] = set()
     heard: List[str] = []
     for token in tail.split():
-        base = _strip_cs_suffix(token)
+        base = base_callsign(token)
         if not _CONTACTS_BASE_CS_PATTERN.match(base):
             continue
         if base in seen:
@@ -656,45 +657,25 @@ def parse_hearing_observation(value: str) -> Optional[List[str]]:
 
 
 # =============================================================================
-# Helper Functionsn
-# =============================================================================
-
-def create_insecure_ssl_context():
-    """Create SSL context that bypasses certificate verification.
-
-    Some ham radio sites and RSS feeds have certificate issues,
-    so we need to disable verification for those requests.
-    """
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-    return ssl_context
-
-
-def create_verified_ssl_context():
-    """Create a cert-VERIFYING SSL context for the commsrvr heartbeat channel.
-
-    Unlike RSS (create_insecure_ssl_context), the heartbeat reply can drive
-    _handle_db_update (runs server-supplied SQL) and _handle_program_update
-    (downloads + installs a zip), so verification must stay ON to prevent MITM.
-
-    We prefer certifi's bundle when available so a stale OS/Python trust store
-    isn't a silent failure point (commstat.app uses a Let's Encrypt cert whose
-    ISRG root may be missing on un-updated machines).
-    """
-    try:
-        import certifi
-        return ssl.create_default_context(cafile=certifi.where())
-    except Exception:
-        return ssl.create_default_context()
-
-
-# =============================================================================
 # Tile Scheme Handler for Map
 # =============================================================================
 
+# The map's web engine cannot see the fonts registered with QFontDatabase (checked: a
+# page asking for "Roboto" falls back to the default font), so the bundled Roboto files
+# are served through the tiles:// scheme and pulled in with @font-face. Only these two
+# files are ever served from the fonts folder.
+_MAP_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+_MAP_FONT_FILES = frozenset({"Roboto-Regular.ttf", "Roboto-Bold.ttf"})
+MAP_FONT_FACE_CSS = (
+    "@font-face{font-family:'Roboto';font-style:normal;font-weight:400;"
+    "src:url('tiles://local/fonts/Roboto-Regular.ttf') format('truetype');}"
+    "@font-face{font-family:'Roboto';font-style:normal;font-weight:700;"
+    "src:url('tiles://local/fonts/Roboto-Bold.ttf') format('truetype');}"
+)
+
+
 class TileSchemeHandler(QWebEngineUrlSchemeHandler):
-    """Serves map tiles from tilesPNG2 via the tiles:// custom URL scheme."""
+    """Serves map tiles from tilesPNG2, and the bundled Roboto fonts, via the tiles:// scheme."""
 
     # Why: cap the in-flight buffer set so a missed `job.destroyed` signal
     # (e.g. when the renderer crashes mid-load) can't grow the set without
@@ -711,8 +692,19 @@ class TileSchemeHandler(QWebEngineUrlSchemeHandler):
 
     def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:
         path = job.requestUrl().path().lstrip('/')
-        tile_path = os.path.join(self._tile_dir, path)
-        if os.path.exists(tile_path):
+        if path.startswith("fonts/"):
+            font_name = os.path.basename(path)
+            tile_path = os.path.join(_MAP_FONT_DIR, font_name) if font_name in _MAP_FONT_FILES else ""
+            mime = b'font/ttf'
+        else:
+            tile_path = os.path.realpath(os.path.join(self._tile_dir, path))
+            # Only files inside the tile folder: a path such as "../traffic.db3" or
+            # "..%2f..%2fconfig.ini" must never reach the web page.
+            tile_root = os.path.realpath(self._tile_dir)
+            if not tile_path.startswith(tile_root + os.sep):
+                tile_path = ""
+            mime = b'image/png'
+        if tile_path and os.path.exists(tile_path):
             try:
                 with open(tile_path, 'rb') as f:
                     data = f.read()
@@ -732,7 +724,7 @@ class TileSchemeHandler(QWebEngineUrlSchemeHandler):
 
                 job.destroyed.connect(_drop)
                 buf.aboutToClose.connect(_drop)
-                job.reply(b'image/png', buf)
+                job.reply(mime, buf)
             except Exception:
                 job.fail(QWebEngineUrlRequestJob.RequestFailed)
         else:
@@ -753,29 +745,7 @@ class ClickableLabel(QtWidgets.QLabel):
         super().mousePressEvent(event)
 
 
-class UpperCaseLineEdit(QtWidgets.QLineEdit):
-    """QLineEdit that auto-uppercases typed and pasted text.
-
-    Uppercasing happens in keyPressEvent (typing) and insertFromMimeData
-    (paste / drag-drop) — the widget-level hooks that run before any
-    text-modified signal is emitted. Not a QValidator and not a
-    textChanged slot: rewriting text from inside a signal slot re-enters
-    Qt's dispatch loop, which corrupts the C++ iterator on Linux/Qt5.
-    """
-
-    def keyPressEvent(self, event):
-        text = event.text()
-        if text and text != text.upper():
-            self.insert(text.upper())
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def insertFromMimeData(self, source):
-        if source is not None and source.hasText():
-            mime = QtCore.QMimeData()
-            mime.setText(source.text().upper())
-            super().insertFromMimeData(mime)
+from ui_helpers import UpperCaseLineEdit
 
 
 class _FilterHeader(QtWidgets.QHeaderView):
@@ -901,6 +871,7 @@ def _extract_youtube_id(url: str) -> Optional[str]:
 _VIDEO_PLAYER_HTML = """<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
+""" + MAP_FONT_FACE_CSS + """
 html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden;}
 :root{--vb-w:100vw;--vb-h:100vh;--vb-l:0px;--vb-t:0px;}
 #player{position:absolute;top:calc(var(--vb-t) - 95px);left:var(--vb-l);
@@ -920,17 +891,17 @@ z-index:3;pointer-events:none;}
 #prev,#next{position:absolute;bottom:8px;z-index:10;
 opacity:0;pointer-events:none;transition:opacity .15s ease;
 background:rgba(0,0,0,0.65);color:#fff;border:1px solid #999;
-border-radius:4px;padding:4px 12px;font-family:sans-serif;font-size:13px;cursor:pointer;}
+border-radius:4px;padding:4px 12px;font-family:Roboto, sans-serif;font-size:13px;cursor:pointer;}
 #prev{left:8px;}
 #next{right:8px;}
 #prev:hover,#next:hover{background:rgba(40,167,69,0.85);}
 #bottomCenter{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);z-index:10;
 display:flex;opacity:0;pointer-events:none;transition:opacity .15s ease;}
 #youtube{background:rgba(0,0,0,0.65);color:#fff;border:1px solid #999;
-border-radius:4px;padding:4px 12px;font-family:sans-serif;font-size:13px;cursor:pointer;
+border-radius:4px;padding:4px 12px;font-family:Roboto, sans-serif;font-size:13px;cursor:pointer;
 margin-right:8px;}
 #youtube:hover{background:rgba(40,167,69,0.85);}
-#delete{background:rgba(220,53,69,0.85);color:#fff;font-family:sans-serif;
+#delete{background:rgba(220,53,69,0.85);color:#fff;font-family:Roboto, sans-serif;
 font-size:13px;font-weight:bold;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;}
 #delete:hover{background:rgba(200,35,51,0.9);}
 #delete:active{background:rgba(189,33,48,0.95);}
@@ -1002,7 +973,7 @@ height:100%;aspect-ratio:9/16;}
 #player{width:100%;height:100%;border:0;}
 #skip{position:absolute;top:8px;right:8px;z-index:10;background:rgba(0,0,0,0.65);
 color:#fff;border:1px solid #999;border-radius:4px;padding:4px 12px;
-font-family:sans-serif;font-size:13px;cursor:pointer;}
+font-family:Roboto, sans-serif;font-size:13px;cursor:pointer;}
 #skip:hover{background:rgba(40,167,69,0.85);}
 </style></head>
 <body>
@@ -1032,6 +1003,12 @@ class CustomWebEnginePage(QWebEnginePage):
         """Intercept custom URL schemes for statrep links and video events."""
         url_str = url.toString()
 
+        # The video buttons only mean something while the video player is showing; a
+        # page that sends one of these from another view (a popup, say) is ignored.
+        if url_str.startswith("commstat://video-") and url.host() != "video-youtube" \
+                and getattr(self.parent_widget, '_current_view_mode', '') != "videos":
+            return False
+
         # Handle video-ended event
         if url_str == "commstat://video-ended":
             if hasattr(self.parent_widget, '_on_video_ended'):
@@ -1051,7 +1028,7 @@ class CustomWebEnginePage(QWebEnginePage):
         # Handle video YouTube button: open the video in the system browser
         if url.host() == "video-youtube":
             video_id = url.path().lstrip("/")
-            if video_id:
+            if re.fullmatch(r"[A-Za-z0-9_-]{11}", video_id):   # a real YouTube id only
                 youtube_url = f"https://www.youtube.com/watch?v={video_id}"
                 if hasattr(self.parent_widget, '_open_external_link'):
                     self.parent_widget._open_external_link(youtube_url, "YouTube video")
@@ -1080,13 +1057,16 @@ class CustomWebEnginePage(QWebEnginePage):
 
         # Handle watchlist pin clicks: commstat://watchlist-pin/{callsign}
         if url.host() == "watchlist-pin":
-            callsign = url.path().lstrip("/")
+            callsign = urllib.parse.unquote(url.path(QtCore.QUrl.FullyEncoded).lstrip("/"))
             if hasattr(self.parent_widget, '_on_watchlist_pin_clicked'):
                 self.parent_widget._on_watchlist_pin_clicked(callsign)
             return False
 
-        # Open USGS earthquake event links in the user's browser.
-        if url.scheme() in ("http", "https") and "earthquake.usgs.gov" in url.host():
+        # Open USGS earthquake event links in the user's browser. The host must BE
+        # earthquake.usgs.gov (or a subdomain), not merely contain the name.
+        _host = url.host().lower()
+        if url.scheme() in ("http", "https") and (
+                _host == "earthquake.usgs.gov" or _host.endswith(".earthquake.usgs.gov")):
             if hasattr(self.parent_widget, '_open_external_link'):
                 self.parent_widget._open_external_link(url.toString(), "USGS earthquake link")
             else:
@@ -1094,60 +1074,36 @@ class CustomWebEnginePage(QWebEnginePage):
             return False
 
         # Handle statrep links from map popups: /statrep/{id}/{callsign}
-        if url.path().startswith("/statrep/"):
-            parts = url.path().strip("/").split("/")
-            if len(parts) >= 3:
+        if url.host() == "localhost" and url.path().startswith("/statrep/"):
+            # The callsign is percent-encoded in the link (it may contain "/", e.g. W1AW/P)
+            parts = url.path(QtCore.QUrl.FullyEncoded).strip("/").split("/")
+            if len(parts) >= 3 and parts[1].isdigit():
                 sr_id = parts[1]
-                callsign = parts[2]
+                callsign = urllib.parse.unquote(parts[2])
                 mw = self.parent_widget
                 if sr_id and callsign and mw:
                     def _open_dialog(sr_id=sr_id, callsign=callsign, mw=mw):
                         try:
-                            from qrz_lookup import StatRepDetailDialog
-                            _FC = 3
-                            table = mw.statrep_table
-                            def build_record_list():
-                                items = []
-                                for r in range(table.rowCount()):
-                                    ci = table.item(r, _FC)
-                                    if ci:
-                                        rid = ci.data(QtCore.Qt.UserRole)
-                                        if rid is not None:
-                                            items.append((rid, ci.text().strip()))
-                                return items
-                            dlg = StatRepDetailDialog(
-                                sr_id, callsign, mw._internet_available,
-                                commsrvr_url=_COMMSRVR,
-                                module_background=mw.config.get_color('module_background'),
-                                module_foreground=mw.config.get_color('module_foreground'),
-                                title_bar_background=mw.config.get_color('title_bar_background'),
-                                title_bar_foreground=mw.config.get_color('title_bar_foreground'),
-                                data_background=mw.config.get_color('data_background'),
-                                program_background=mw.config.get_color('program_background'),
-                                program_foreground=mw.config.get_color('program_foreground'),
-                                condition_green=mw.config.get_color('condition_green'),
-                                condition_yellow=mw.config.get_color('condition_yellow'),
-                                condition_red=mw.config.get_color('condition_red'),
-                                condition_gray=mw.config.get_color('condition_gray'),
-                                condition_purple=mw.config.get_color('condition_purple'),
-                                condition_magenta=mw.config.get_color('condition_magenta'),
-                                tcp_pool=mw.tcp_pool,
-                                connector_manager=mw.connector_manager,
-                                record_list_provider=build_record_list,
-                                parent=mw
-                            )
-                            dlg.pin_changed.connect(
-                                lambda _: mw._save_map_position(callback=mw._load_map)
-                            )
-                            dlg.record_deleted.connect(mw._load_statrep_data)
-                            dlg.record_deleted.connect(
-                                lambda: mw._save_map_position(callback=mw._load_map)
-                            )
-                            dlg.exec_()
+                            mw._open_statrep_detail(sr_id, callsign)
                         except Exception as e:
                             print(f"[Map popup] Failed to open StatRepDetailDialog: {e}")
                     QTimer.singleShot(0, _open_dialog)
             return False  # Prevent navigation
+
+        # Nothing else may load into the map view itself. Pages inside it (the
+        # YouTube/Instagram players, popups) are subframes and stay allowed, but the
+        # main frame is only ever our own page (http://localhost/): a link or script
+        # that tries to send it to another site goes to the browser (Off-Grid aware)
+        # when it was a click, and is dropped otherwise. Unknown commstat:// actions
+        # do nothing.
+        scheme = url.scheme().lower()
+        if scheme == "commstat":
+            return False
+        if scheme in ("http", "https") and is_main_frame and url.host().lower() != "localhost":
+            if navigation_type == QWebEnginePage.NavigationTypeLinkClicked:
+                if hasattr(self.parent_widget, '_open_external_link'):
+                    self.parent_widget._open_external_link(url.toString(), url.host())
+            return False
         return super().acceptNavigationRequest(url, navigation_type, is_main_frame)
 
 
@@ -1171,127 +1127,79 @@ class ConfigManager:
         self.filter_settings: Dict[str, Any] = {}
         self._load()
 
+    def _defaults(self) -> Dict[str, Any]:
+        """Every DIRECTEDCONFIG setting with its default value: the one table used for a
+        new install, a missing section, and a missing or unreadable key alike. The type
+        of each default decides how its saved text is read back."""
+        sound = self._default_sound_files()
+        return {
+            'hide_heartbeat': False, 'show_every_group': False,
+            'show_alerts': False,
+            'hide_internet_feed': False, 'hide_live_feed': False,
+            'save_all_alerts': False, 'save_all_messages': False, 'save_all_videos': False,
+            'selected_rss_feed': list(DEFAULT_RSS_FEEDS.keys())[0],
+            'apply_text_normalization': True,
+            'unchecked_groups': '',
+            'sound_alert_enabled': True,   'sound_alert_file':   sound['alert'],
+            'sound_message_enabled': True, 'sound_message_file': sound['message'],
+            'sound_statrep_enabled': True, 'sound_statrep_file': sound['statrep'],
+            'weather_radar': False,
+            'weather_radar_refresh': 5,
+            'show_radar_timestamp': True,
+            'earthquake_layer': False,
+            'earthquake_min_mag': 2.5,
+            'earthquake_region': 'Worldwide',
+            'earthquake_refresh': 10,
+            'wildfire_layer': False,
+            'wildfire_min_acres': 10.0,
+            'wildfire_refresh': 30,
+            'shown_watchlists': '',
+            'map_theme': 'dark',
+            'carto_api_key': '',
+        }
+
+    @staticmethod
+    def _read_setting(config, key: str, default):
+        """One saved setting, converted to the type of its default. A value that is not
+        valid for that type (for example "maybe" for a yes/no setting) is reported and
+        replaced by the default instead of stopping the program."""
+        try:
+            if isinstance(default, bool):
+                return config.getboolean("DIRECTEDCONFIG", key, fallback=default)
+            if isinstance(default, int):
+                return config.getint("DIRECTEDCONFIG", key, fallback=default)
+            if isinstance(default, float):
+                return config.getfloat("DIRECTEDCONFIG", key, fallback=default)
+            return config.get("DIRECTEDCONFIG", key, fallback=default)
+        except ValueError as e:
+            print(f"[config] Ignoring invalid {key} in config.ini ({e}); using {default!r}")
+            return default
+
     def _load(self) -> None:
         """Load configuration from file."""
         # Initialize filter settings (always reset on startup)
-        from datetime import datetime
         today = datetime.now().strftime("%Y-%m-%d")
         self.filter_settings = {
             'start': today,
             'end': ''
         }
 
-        # Load toggle settings from config if it exists
-        default_feed = list(DEFAULT_RSS_FEEDS.keys())[0]
-        sound_defaults = self._default_sound_files()
+        defaults = self._defaults()
+        config = read_config(self.config_path)   # never raises: a bad file means defaults
 
-        def _legacy_default(legacy_val: Optional[bool]) -> bool:
-            # If the old single-toggle `notification_sounds` key is still in the
-            # config file, use its value to seed all three per-event enable flags
-            # once. Otherwise default to True.
-            return True if legacy_val is None else legacy_val
+        # An old single-toggle `notification_sounds` key, if still in the file, seeds
+        # the three per-event sound enable flags once (they default to True otherwise).
+        try:
+            legacy = config.getboolean("DIRECTEDCONFIG", "notification_sounds", fallback=None)
+        except ValueError:
+            legacy = None
+        if legacy is not None:
+            for event in ("alert", "message", "statrep"):
+                defaults[f"sound_{event}_enabled"] = legacy
 
-        if not self.config_path.exists():
-            self.directed_config = {
-                'hide_heartbeat': False, 'show_every_group': True,
-                'hide_map': False, 'show_alerts': False, 'show_contacts': False,
-                'hide_internet_feed': False, 'hide_live_feed': False,
-                'save_all_alerts': False, 'save_all_messages': False, 'save_all_videos': False,
-                'selected_rss_feed': default_feed, 'apply_text_normalization': False,
-                'unchecked_groups': '',
-                'sound_alert_enabled':   True, 'sound_alert_file':   sound_defaults['alert'],
-                'sound_message_enabled': True, 'sound_message_file': sound_defaults['message'],
-                'sound_statrep_enabled': True, 'sound_statrep_file': sound_defaults['statrep'],
-                'weather_radar': False,
-                'weather_radar_refresh': 5,
-                'show_radar_timestamp': True,
-                'earthquake_layer': False,
-                'earthquake_min_mag': 2.5,
-                'earthquake_region': 'Worldwide',
-                'earthquake_refresh': 10,
-                'wildfire_layer': False,
-                'wildfire_min_acres': 10.0,
-                'wildfire_refresh': 30,
-                'shown_watchlists': '',
-            }
-            return
-
-        config = ConfigParser()
-        config.read(self.config_path)
-
-        legacy_master = None
-        if config.has_section("DIRECTEDCONFIG") and config.has_option("DIRECTEDCONFIG", "notification_sounds"):
-            legacy_master = config.getboolean("DIRECTEDCONFIG", "notification_sounds")
-        seed = _legacy_default(legacy_master)
-
-        if config.has_section("DIRECTEDCONFIG"):
-            self.directed_config = {
-                'hide_heartbeat': config.getboolean("DIRECTEDCONFIG", "hide_heartbeat", fallback=False),
-                'show_every_group': config.getboolean("DIRECTEDCONFIG", "show_every_group", fallback=False),
-                'hide_map': config.getboolean("DIRECTEDCONFIG", "hide_map", fallback=False),
-                'show_alerts': config.getboolean("DIRECTEDCONFIG", "show_alerts", fallback=False),
-                'show_contacts': config.getboolean("DIRECTEDCONFIG", "show_contacts", fallback=False),
-                'hide_internet_feed': config.getboolean("DIRECTEDCONFIG", "hide_internet_feed", fallback=False),
-                'hide_live_feed': config.getboolean("DIRECTEDCONFIG", "hide_live_feed", fallback=False),
-                'save_all_alerts': config.getboolean("DIRECTEDCONFIG", "save_all_alerts", fallback=False),
-                'save_all_messages': config.getboolean("DIRECTEDCONFIG", "save_all_messages", fallback=False),
-                'save_all_videos': config.getboolean("DIRECTEDCONFIG", "save_all_videos", fallback=False),
-                'selected_rss_feed': config.get("DIRECTEDCONFIG", "selected_rss_feed", fallback=default_feed),
-                'apply_text_normalization': config.getboolean("DIRECTEDCONFIG", "apply_text_normalization", fallback=True),
-                'unchecked_groups': config.get("DIRECTEDCONFIG", "unchecked_groups", fallback=""),
-                'sound_alert_enabled':   config.getboolean("DIRECTEDCONFIG", "sound_alert_enabled",   fallback=seed),
-                'sound_alert_file':      config.get("DIRECTEDCONFIG", "sound_alert_file",      fallback=sound_defaults['alert']),
-                'sound_message_enabled': config.getboolean("DIRECTEDCONFIG", "sound_message_enabled", fallback=seed),
-                'sound_message_file':    config.get("DIRECTEDCONFIG", "sound_message_file",    fallback=sound_defaults['message']),
-                'sound_statrep_enabled': config.getboolean("DIRECTEDCONFIG", "sound_statrep_enabled", fallback=seed),
-                'sound_statrep_file':    config.get("DIRECTEDCONFIG", "sound_statrep_file",    fallback=sound_defaults['statrep']),
-                'weather_radar':          config.getboolean("DIRECTEDCONFIG", "weather_radar",          fallback=False),
-                'weather_radar_refresh':  config.getint("DIRECTEDCONFIG", "weather_radar_refresh",  fallback=5),
-                'show_radar_timestamp':   config.getboolean("DIRECTEDCONFIG", "show_radar_timestamp",   fallback=True),
-                'earthquake_layer':       config.getboolean("DIRECTEDCONFIG", "earthquake_layer",       fallback=False),
-                'earthquake_min_mag':     config.getfloat("DIRECTEDCONFIG", "earthquake_min_mag",     fallback=2.5),
-                'earthquake_region':      config.get("DIRECTEDCONFIG", "earthquake_region",      fallback="Worldwide"),
-                'earthquake_refresh':     config.getint("DIRECTEDCONFIG", "earthquake_refresh",     fallback=10),
-                'wildfire_layer':         config.getboolean("DIRECTEDCONFIG", "wildfire_layer",         fallback=False),
-                'wildfire_min_acres':     config.getfloat("DIRECTEDCONFIG", "wildfire_min_acres",     fallback=10.0),
-                'wildfire_refresh':       config.getint("DIRECTEDCONFIG", "wildfire_refresh",       fallback=30),
-                'shown_watchlists':       config.get("DIRECTEDCONFIG", "shown_watchlists",       fallback=""),
-                'map_theme':              config.get("DIRECTEDCONFIG", "map_theme",              fallback='dark'),
-                'carto_api_key':          config.get("DIRECTEDCONFIG", "carto_api_key",          fallback=""),
-            }
-        else:
-            self.directed_config = {
-                'hide_heartbeat': False, 'show_every_group': True,
-                'hide_map': False, 'show_alerts': False, 'show_contacts': False,
-                'hide_internet_feed': False, 'hide_live_feed': False,
-                'save_all_alerts': False, 'save_all_messages': False, 'save_all_videos': False,
-                'selected_rss_feed': default_feed, 'apply_text_normalization': False,
-                'unchecked_groups': '',
-                'sound_alert_enabled':   True, 'sound_alert_file':   sound_defaults['alert'],
-                'sound_message_enabled': True, 'sound_message_file': sound_defaults['message'],
-                'sound_statrep_enabled': True, 'sound_statrep_file': sound_defaults['statrep'],
-                'weather_radar': False,
-                'weather_radar_refresh': 5,
-                'show_radar_timestamp': True,
-                'earthquake_layer': False,
-                'earthquake_min_mag': 2.5,
-                'earthquake_region': 'Worldwide',
-                'earthquake_refresh': 10,
-                'wildfire_layer': False,
-                'wildfire_min_acres': 10.0,
-                'wildfire_refresh': 30,
-                'shown_watchlists': '',
-                'map_theme': 'dark',
-                'carto_api_key': '',
-            }
-
-        # Load user-edited UI colors from config.ini [COLORS].
-        # Values here override DEFAULT_COLORS without touching constants.py.
-        if config.has_section("COLORS"):
-            for key, value in config.items("COLORS"):
-                if key in self.colors and value:
-                    self.colors[key] = value.strip()
-
+        self.directed_config = {
+            key: self._read_setting(config, key, default) for key, default in defaults.items()
+        }
 
     @staticmethod
     def _default_sound_files() -> Dict[str, str]:
@@ -1317,32 +1225,20 @@ class ConfigManager:
         }
 
     def get_color(self, key: str) -> str:
-        """Get a color value by key."""
+        """Get a color value by key. Every color comes from constants.DEFAULT_COLORS."""
         return self.colors.get(key, '#FFFFFF')
 
-    def set_color(self, key: str, value: str) -> None:
-        """Save a UI color override to config.ini."""
-        if key not in self.colors:
-            return
-        self.colors[key] = value
-        config = ConfigParser()
-        config.read(self.config_path)
-        if not config.has_section("COLORS"):
-            config.add_section("COLORS")
-        config.set("COLORS", key, value)
-        with open(self.config_path, 'w') as f:
-            config.write(f)
-
     def _save_setting(self, key: str, value) -> None:
-        """Save a setting to both memory and config file."""
+        """Save a setting to both memory and config file. A setting that already has this
+        value is left alone: nothing is written (every write rewrites the whole file)."""
+        if key in self.directed_config and self.directed_config[key] == value:
+            return
         self.directed_config[key] = value
-        config = ConfigParser()
-        config.read(self.config_path)
+        config = read_config(self.config_path)
         if not config.has_section("DIRECTEDCONFIG"):
             config.add_section("DIRECTEDCONFIG")
         config.set("DIRECTEDCONFIG", key, str(value))
-        with open(self.config_path, 'w') as f:
-            config.write(f)
+        write_config(config, self.config_path)
 
     def get_hide_heartbeat(self) -> bool:
         return self.directed_config.get('hide_heartbeat', False)
@@ -1361,12 +1257,6 @@ class ConfigManager:
 
     def set_hide_live_feed(self, value: bool) -> None:
         self._save_setting('hide_live_feed', value)
-
-    def get_hide_map(self) -> bool:
-        return self.directed_config.get('hide_map', False)
-
-    def set_hide_map(self, value: bool) -> None:
-        self._save_setting('hide_map', value)
 
     def get_show_every_group(self) -> bool:
         return self.directed_config.get('show_every_group', False)
@@ -1416,12 +1306,6 @@ class ConfigManager:
 
     def set_sound_file(self, event: str, filename: str) -> None:
         self._save_setting(f'sound_{event}_file', filename)
-
-    def get_show_contacts(self) -> bool:
-        return self.directed_config.get('show_contacts', False)
-
-    def set_show_contacts(self, value: bool) -> None:
-        self._save_setting('show_contacts', value)
 
     def get_apply_text_normalization(self) -> bool:
         return self.directed_config.get('apply_text_normalization', True)
@@ -1534,6 +1418,32 @@ class ConfigManager:
 # RSSFetcher - Fetches and parses RSS news feeds
 # =============================================================================
 
+def _plain_tooltip(text: str) -> str:
+    """A tooltip that always shows `text` as typed. Qt renders a tooltip as rich text when
+    it merely looks like markup, and remarks/memos can contain "<" characters."""
+    return QtCore.Qt.convertFromPlainText(str(text))
+
+
+def _guard_slot(func):
+    """Decorator for UI slots that open dialogs: an exception escaping a Qt slot aborts
+    the whole program, so log it and tell the user instead."""
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            return func(self, *args, **kwargs)
+        except Exception as e:
+            traceback.print_exc()
+            from ui_helpers import show_error
+            show_error(self, f"That action failed: {type(e).__name__}: {e}")
+    return wrapper
+
+
+def _as_utc(moment: datetime) -> datetime:
+    """A feed date without a timezone (e.g. an RSS "-0000" or an Atom date with no
+    offset) is taken as UTC, so it can be compared with timezone-aware times."""
+    return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
+
+
 class RSSFetcher:
     """Fetches and caches RSS news headlines."""
 
@@ -1583,7 +1493,7 @@ class RSSFetcher:
         try:
             request = urllib.request.Request(feed_url)
 
-            with urllib.request.urlopen(request, timeout=10, context=create_insecure_ssl_context()) as response:
+            with urllib.request.urlopen(request, timeout=10, context=create_verified_ssl_context()) as response:
                 content = response.read().decode('utf-8', errors='replace')
 
             # Parse RSS XML
@@ -1604,7 +1514,7 @@ class RSSFetcher:
                     # Parse publication date
                     if pubdate_elem is not None and pubdate_elem.text:
                         try:
-                            pub_date = parsedate_to_datetime(pubdate_elem.text)
+                            pub_date = _as_utc(parsedate_to_datetime(pubdate_elem.text))
                             # Filter out articles older than 6 hours
                             if pub_date < cutoff_time:
                                 continue
@@ -1620,7 +1530,10 @@ class RSSFetcher:
                 ns = {'atom': 'http://www.w3.org/2005/Atom'}
                 for entry in root.findall('.//atom:entry', ns):
                     title_elem = entry.find('atom:title', ns)
-                    published_elem = entry.find('atom:published', ns) or entry.find('atom:updated', ns)
+                    # Not "a or b": an XML element with no children counts as false
+                    published_elem = entry.find('atom:published', ns)
+                    if published_elem is None:
+                        published_elem = entry.find('atom:updated', ns)
 
                     if title_elem is not None and title_elem.text:
                         title = title_elem.text.strip()
@@ -1630,7 +1543,7 @@ class RSSFetcher:
                         if published_elem is not None and published_elem.text:
                             try:
                                 # Atom uses ISO 8601 format
-                                pub_date = datetime.fromisoformat(published_elem.text.replace('Z', '+00:00'))
+                                pub_date = _as_utc(datetime.fromisoformat(published_elem.text.replace('Z', '+00:00')))
                                 # Filter out articles older than 6 hours
                                 if pub_date < cutoff_time:
                                     continue
@@ -1643,7 +1556,9 @@ class RSSFetcher:
                 if not articles:
                     for entry in root.findall('.//entry'):
                         title_elem = entry.find('title')
-                        published_elem = entry.find('published') or entry.find('updated')
+                        published_elem = entry.find('published')
+                        if published_elem is None:
+                            published_elem = entry.find('updated')
 
                         if title_elem is not None and title_elem.text:
                             title = title_elem.text.strip()
@@ -1651,7 +1566,7 @@ class RSSFetcher:
 
                             if published_elem is not None and published_elem.text:
                                 try:
-                                    pub_date = datetime.fromisoformat(published_elem.text.replace('Z', '+00:00'))
+                                    pub_date = _as_utc(datetime.fromisoformat(published_elem.text.replace('Z', '+00:00')))
                                     if pub_date < cutoff_time:
                                         continue
                                 except Exception:
@@ -1678,8 +1593,12 @@ class RSSFetcher:
 
         except Exception as e:
             print(f"Error fetching RSS feed: {e}")
+            reason = getattr(e, 'reason', e)
+            if isinstance(reason, ssl.SSLError):
+                # Never show (or keep showing) headlines from a server we could not verify.
+                self._headlines = ["News feed unavailable - its security certificate could not be verified"]
             # Keep old headlines if fetch fails
-            if not self._headlines:
+            elif not self._headlines:
                 self._headlines = ["Unable to fetch news - check internet connection"]
 
         finally:
@@ -1708,6 +1627,87 @@ class RSSFetcher:
         self._current_url = ""
 
 
+def _inject_before_body_end(page_html: str, snippet: str) -> str:
+    """Insert *snippet* before the page's first </body> (folium defines the map
+    variables after it, so injected JS must wait for the window load event)."""
+    return page_html.replace("</body>", snippet + "\n</body>", 1)
+
+
+# =============================================================================
+# StatRep row layout
+# =============================================================================
+
+class StatRepCol(IntEnum):
+    """Position of each field in a StatRep row returned by
+    DatabaseManager.get_statrep_data(). Each name is the statrep column name
+    upper-cased, and STATREP_SELECT is built from this list, so the SELECT and
+    the indexes can't drift apart. The first len(STATREP_HEADERS) fields (up to
+    COMMENTS) are also the StatRep table's columns; SOURCE, ID and MEMO are
+    data-only and are never shown."""
+    DB = 0
+    DATETIME = 1
+    FREQ = 2
+    FROM_CALLSIGN = 3
+    TARGET = 4
+    GLOBAL_ID = 5
+    SR_ID = 6
+    GRID = 7
+    SCOPE = 8
+    MAP = 9
+    POWER = 10
+    WATER = 11
+    MED = 12
+    TELECOM = 13
+    TRAVEL = 14
+    INTERNET = 15
+    FUEL = 16
+    FOOD = 17
+    CRIME = 18
+    CIVIL = 19
+    POLITICAL = 20
+    COMMENTS = 21
+    SOURCE = 22
+    ID = 23
+    MEMO = 24
+
+
+STATREP_SELECT = ", ".join(col.name.lower() for col in StatRepCol)
+assert StatRepCol.COMMENTS == len(STATREP_HEADERS) - 1, "StatRep table columns and StatRepCol are out of step"
+
+
+class _BackgroundWriter:
+    """Runs submitted calls one at a time, in order, on a single worker thread.
+
+    Used for database writes that must not make the GUI thread wait on SQLite's
+    write lock (another thread, such as the heartbeat worker, may hold it for
+    a while). A call that raises is logged and the worker carries on.
+    """
+
+    def __init__(self, name: str):
+        self._queue: "queue.Queue" = queue.Queue()
+        self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+        self._thread.start()
+
+    def submit(self, func, *args) -> None:
+        self._queue.put((func, args))
+
+    def _run(self) -> None:
+        while True:
+            item = self._queue.get()
+            if item is None:
+                return
+            func, args = item
+            try:
+                func(*args)
+            except Exception:
+                traceback.print_exc()
+
+    def stop(self, timeout: float = 3.0) -> None:
+        """Finish the queued calls (up to *timeout* seconds), then end the worker."""
+        self._queue.put(None)
+        self._thread.join(timeout)
+
+
 # =============================================================================
 # DatabaseManager - Handles all database operations
 # =============================================================================
@@ -1724,6 +1724,10 @@ class DatabaseManager:
         """
         self.db_path = db_path
 
+    def _connect(self):
+        """Open the database for one operation (commit/rollback, always closed)."""
+        return db_connect(self.db_path)
+
     def _execute(self, operation, default=None):
         """Execute a database operation with error handling.
 
@@ -1735,7 +1739,7 @@ class DatabaseManager:
             Result of operation, or default on error
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 return operation(cursor, connection)
         except sqlite3.Error as error:
@@ -1755,7 +1759,7 @@ class DatabaseManager:
         Fetch StatRep data from database.
 
         Args:
-            groups: List of active group names (empty list returns no data unless show_all)
+            groups: List of checked group names (empty list returns no data unless show_all)
             start: Start date filter (required)
             end: End date filter (optional, empty string means no upper limit)
             show_all: If True, return all statreps (subject to exclude_groups)
@@ -1765,12 +1769,12 @@ class DatabaseManager:
         Returns:
             List of tuples containing StatRep records
         """
-        # If no active groups and not showing all, return empty list
+        # If no groups are checked and not showing all, return empty list
         if not groups and not show_all and not user_callsign:
             return []
 
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
 
                 # Build date condition based on whether end date is provided
@@ -1787,9 +1791,7 @@ class DatabaseManager:
                         excl_with_at = ["@" + g for g in exclude_groups]
                         placeholders = ",".join("?" * len(excl_with_at))
                         query = f"""
-                            SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
-                                   power, water, med, telecom, travel, internet,
-                                   fuel, food, crime, civil, political, comments, source, id, memo
+                            SELECT {STATREP_SELECT}
                             FROM statrep
                             WHERE target NOT IN ({placeholders})
                               AND ({date_condition} OR pinned = 1)
@@ -1798,9 +1800,7 @@ class DatabaseManager:
                         params = excl_with_at + date_params
                     else:
                         query = f"""
-                            SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
-                                   power, water, med, telecom, travel, internet,
-                                   fuel, food, crime, civil, political, comments, source, id, memo
+                            SELECT {STATREP_SELECT}
                             FROM statrep
                             WHERE {date_condition} OR pinned = 1
                             ORDER BY datetime DESC
@@ -1816,9 +1816,7 @@ class DatabaseManager:
                         return []
                     placeholders = ",".join("?" * len(target_list))
                     query = f"""
-                        SELECT db, datetime, freq, from_callsign, target, global_id, sr_id, grid, scope, map,
-                               power, water, med, telecom, travel, internet,
-                               fuel, food, crime, civil, political, comments, source, id, memo
+                        SELECT {STATREP_SELECT}
                         FROM statrep
                         WHERE target IN ({placeholders}) AND ({date_condition} OR pinned = 1)
                         ORDER BY datetime DESC
@@ -1842,7 +1840,7 @@ class DatabaseManager:
         Fetch message data from database.
 
         Args:
-            groups: List of active group names
+            groups: List of checked group names
             start: Start date filter (required)
             end: End date filter (optional, empty string means no upper limit)
             show_all: If True, return all messages regardless of group
@@ -1851,7 +1849,7 @@ class DatabaseManager:
             List of tuples containing message records
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
 
                 # Build date condition based on whether end date is provided
@@ -1870,7 +1868,7 @@ class DatabaseManager:
                                ORDER BY datetime DESC"""
                     params = date_params
                 elif groups:
-                    # Filter by active groups (add @ prefix for matching)
+                    # Filter by checked groups (add @ prefix for matching)
                     groups_with_at = ["@" + g for g in groups]
                     placeholders = ",".join("?" * len(groups_with_at))
                     query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id, rfi
@@ -1901,7 +1899,7 @@ class DatabaseManager:
         if not name:
             return False
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 today = datetime.now().strftime("%Y-%m-%d")
                 cursor.execute(
@@ -1939,6 +1937,19 @@ class DatabaseManager:
             return cursor.rowcount > 0
         return self._execute(op, False)
 
+    # One contacts row per (target_cs, relay_cs): a new observation refreshes the
+    # row in place instead of growing the table.
+    _UPSERT_CONTACT_SQL = (
+        "INSERT INTO contacts "
+        "(freq, relay_snr, relay_cs, target_cs, target_snr, insert_date) "
+        "VALUES (?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(target_cs, relay_cs) DO UPDATE SET "
+        "freq        = excluded.freq, "
+        "relay_snr   = excluded.relay_snr, "
+        "target_snr  = excluded.target_snr, "
+        "insert_date = excluded.insert_date"
+    )
+
     def upsert_contacts_pair(
         self,
         relay_cs: str,
@@ -1964,18 +1975,9 @@ class DatabaseManager:
         if not target_cs or not relay_cs:
             return False
         now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        sql = (
-            "INSERT INTO contacts "
-            "(freq, relay_snr, relay_cs, target_cs, target_snr, insert_date) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(target_cs, relay_cs) DO UPDATE SET "
-            "freq        = excluded.freq, "
-            "relay_snr   = excluded.relay_snr, "
-            "target_snr  = excluded.target_snr, "
-            "insert_date = excluded.insert_date"
-        )
+        sql = self._UPSERT_CONTACT_SQL
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 cursor.execute(
                     sql,
@@ -2019,18 +2021,9 @@ class DatabaseManager:
         if not relay_cs or not heard_list:
             return False
         now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        sql = (
-            "INSERT INTO contacts "
-            "(freq, relay_snr, relay_cs, target_cs, target_snr, insert_date) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(target_cs, relay_cs) DO UPDATE SET "
-            "freq        = excluded.freq, "
-            "relay_snr   = excluded.relay_snr, "
-            "target_snr  = excluded.target_snr, "
-            "insert_date = excluded.insert_date"
-        )
+        sql = self._UPSERT_CONTACT_SQL
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 for heard_cs in heard_list:
                     cursor.execute(sql, (freq_mhz, snr, relay_cs, heard_cs, snr, now_utc))
@@ -2087,18 +2080,9 @@ class DatabaseManager:
         if not cs:
             return False
         now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        sql = (
-            "INSERT INTO contacts "
-            "(freq, relay_snr, relay_cs, target_cs, target_snr, insert_date) "
-            "VALUES (?, ?, ?, ?, ?, ?) "
-            "ON CONFLICT(target_cs, relay_cs) DO UPDATE SET "
-            "freq        = excluded.freq, "
-            "relay_snr   = excluded.relay_snr, "
-            "target_snr  = excluded.target_snr, "
-            "insert_date = excluded.insert_date"
-        )
+        sql = self._UPSERT_CONTACT_SQL
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 cursor.execute(sql, (freq_mhz, snr, cs, cs, snr, now_utc))
                 connection.commit()
@@ -2197,10 +2181,10 @@ class DatabaseManager:
                       object_shape: str = DEFAULT_OBJECT_SHAPE) -> bool:
         """Add a new watchlist. Returns False on duplicate name."""
         name = name.strip().upper()
-        if not name:
+        if not name or ',' in name:   # the shown-on-map list is stored comma-separated
             return False
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 cursor.execute(
                     "INSERT INTO watchlists (name, comment, object_color, object_shape, date_added) "
@@ -2221,6 +2205,8 @@ class DatabaseManager:
                          object_color: str = DEFAULT_OBJECT_COLOR,
                          object_shape: str = DEFAULT_OBJECT_SHAPE) -> bool:
         """Rename a watchlist and update its comment and object style."""
+        if ',' in new_name:   # the shown-on-map list is stored comma-separated
+            return False
         def op(cursor, conn):
             cursor.execute(
                 "UPDATE watchlists SET name = ?, comment = ?, object_color = ?, object_shape = ? "
@@ -2309,7 +2295,7 @@ class DatabaseManager:
     def add_watchlist_member(self, watchlist_id: int, member_id: int) -> bool:
         """Add a qrz contact to a watchlist. Returns False if already a member."""
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as connection:
+            with self._connect() as connection:
                 cursor = connection.cursor()
                 cursor.execute(
                     "INSERT INTO watchlistMembers (watchlist_id, member_id) VALUES (?, ?)",
@@ -2394,7 +2380,7 @@ class DatabaseManager:
             try:
                 cursor.execute(
                     "INSERT INTO qrz (callsign, active, name, city, state, grid) VALUES (?, 1, ?, ?, ?, ?)",
-                    (cs, name.strip().title(), city.strip().title(),
+                    (cs, title_case(name.strip()), title_case(city.strip()),
                      state.strip().upper(), grid.strip())
                 )
                 conn.commit()
@@ -2653,8 +2639,8 @@ class DatabaseManager:
         return self._execute(op, False)
 
     def get_notify_enabled(self) -> bool:
-        """Get whether message notifications (new-message, delivery-
-        confirmation, and expired popups) are enabled; defaults to True."""
+        """Get whether message notifications (new-message and
+        delivery-confirmation popups) are enabled; defaults to True."""
         def op(cursor, conn):
             try:
                 cursor.execute("SELECT mssgNotify FROM controls WHERE id = 1")
@@ -2665,8 +2651,8 @@ class DatabaseManager:
         return self._execute(op, True)
 
     def set_notify_enabled(self, enabled: bool) -> bool:
-        """Save whether message notifications (new-message, delivery-
-        confirmation, and expired popups) are enabled."""
+        """Save whether message notifications (new-message and
+        delivery-confirmation popups) are enabled."""
         def op(cursor, conn):
             try:
                 cursor.execute(
@@ -2758,31 +2744,39 @@ class DatabaseManager:
         def op(cursor, conn):
             cursor.execute(
                 "DELETE FROM alerts WHERE id = ("
-                "SELECT id FROM alerts ORDER BY datetime DESC LIMIT 1 OFFSET ?)",
+                "SELECT id FROM alerts ORDER BY datetime DESC, id DESC LIMIT 1 OFFSET ?)",
                 (offset,)
             )
             conn.commit()
             return cursor.rowcount > 0
         return self._execute(op, False)
 
-    def get_alert_at_offset(self, offset: int) -> Optional[Tuple[str, str, int, str, str, str]]:
+    def delete_alert_by_id(self, alert_id: int) -> bool:
+        """Delete one alert by its primary key."""
+        def op(cursor, conn):
+            cursor.execute("DELETE FROM alerts WHERE id = ?", (alert_id,))
+            conn.commit()
+            return cursor.rowcount > 0
+        return self._execute(op, False)
+
+    def get_alert_at_offset(self, offset: int) -> Optional[Tuple[str, str, int, str, str, str, int]]:
         """Get an alert at the specified offset from most recent.
 
         Args:
             offset: 0 for most recent, 1 for second most recent, etc.
 
         Returns:
-            Tuple of (title, message, color, datetime, from_callsign, group) or None.
+            Tuple of (title, message, color, datetime, from_callsign, group, id) or None.
         """
         def op(cursor, conn):
             cursor.execute(
-                "SELECT title, message, color, datetime, from_callsign, target "
-                "FROM alerts ORDER BY datetime DESC LIMIT 1 OFFSET ?",
+                "SELECT title, message, color, datetime, from_callsign, target, id "
+                "FROM alerts ORDER BY datetime DESC, id DESC LIMIT 1 OFFSET ?",
                 (offset,)
             )
             result = cursor.fetchone()
             if result:
-                return (result[0], result[1], result[2], result[3], result[4] or "", result[5] or "")
+                return (result[0], result[1], result[2], result[3], result[4] or "", result[5] or "", result[6])
             return None
         return self._execute(op, None)
 
@@ -2971,11 +2965,15 @@ class SoundPlayer:
             if self._preview_proc is not None:
                 self._preview_proc.terminate()
                 self._preview_proc = None
-            self._preview_proc = subprocess.Popen(
+            proc = subprocess.Popen(
                 ["/usr/bin/afplay", abs_path],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
+            self._preview_proc = proc
+            # Reap the process when it exits (finished or terminated above)
+            # so it doesn't linger as a zombie.
+            threading.Thread(target=proc.wait, daemon=True).start()
         else:
             effect = QSoundEffect()
             effect.setVolume(self.VOLUME)
@@ -2992,6 +2990,11 @@ class MainWindow(QtWidgets.QMainWindow):
     # Collapse a burst of inbound events into a single notification sound.
     _SOUND_DEBOUNCE_MS = 300
 
+    # netguard calls its listeners on whichever thread changed the state (the
+    # connectivity probe runs on a worker thread); this signal hands the change
+    # over to the GUI thread.
+    _netguard_state_changed = QtCore.pyqtSignal(bool)
+
     def __init__(self, config: ConfigManager, db: DatabaseManager):
         """
         Initialize the main window.
@@ -3003,6 +3006,9 @@ class MainWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.config = config
         self.db = db
+        # Contacts-roster writes (one or more SQLite writes per received frame)
+        # run here so a busy database never freezes the window.
+        self._contacts_writer = _BackgroundWriter("contacts-writer")
 
         self._sound_player = SoundPlayer(config)
         self._pending_sound_type: Optional[str] = None
@@ -3018,7 +3024,6 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Initialize JS8Call connector manager and TCP connection pool
         self.connector_manager = ConnectorManager()
-        self.connector_manager.init_connectors_table()
         self.tcp_pool = TCPConnectionPool(self.connector_manager, self)
         self.tcp_pool.any_message_received.connect(self._handle_tcp_message)
         self.tcp_pool.any_connection_changed.connect(self._handle_connection_changed)
@@ -3031,6 +3036,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.rig_grids: Dict[str, str] = {}
         self.rig_states: Dict[str, str] = {}
         self.rig_status_logged: Set[str] = set()  # Track which rigs have logged initial status
+        # Set by _insert_message_data (per thread) when an insert failed with a database error
+        # (not a duplicate): the commsrvr feed must not move its cursor past such a record.
+        self._insert_state = threading.local()
+        # Only one heartbeat check may run at a time (see _check_commsrvr).
+        self._commsrvr_lock = threading.Lock()
+        # Background QRZ grid lookups for records saved with a missing/short grid (see _defer_grid_upgrade)
+        import queue as _queue
+        self._grid_lock = threading.Lock()
+        self._grid_queue = _queue.Queue()
+        self._grid_pending: Dict[str, list] = {}
+        self._grid_thread: Optional[threading.Thread] = None
+        # STATREP auto-acks waiting for JS8Call's "is a call selected?" answer, per rig:
+        # rig_name -> list of (group, from_callsign, sr_id, date_only). See _send_statrep_ack.
+        self._ack_pending: Dict[str, list] = {}
+        self._ack_timers: Dict[str, QTimer] = {}
+        self._ack_clients: Dict[str, object] = {}   # rig_name -> client the reply slot is connected to
 
         # Live feed message buffer (stores messages from all TCP connections)
         self.feed_messages: List[str] = []
@@ -3087,11 +3108,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _restore_window_position(self) -> None:
         """Restore window geometry from config.ini."""
-        config = ConfigParser()
         if not os.path.exists(CONFIG_FILE):
             return
 
-        config.read(CONFIG_FILE)
+        config = read_config(CONFIG_FILE)
         if not config.has_section("WINDOW"):
             return
 
@@ -3114,9 +3134,17 @@ class MainWindow(QtWidgets.QMainWindow):
         except (ValueError, TypeError):
             return
 
-        if width is not None and height is not None:
+        # A saved size or position can be wrong for this desktop (a monitor was
+        # unplugged, or the file was edited): keep the default rather than restore a
+        # window that is tiny, bigger than any screen, or out of reach.
+        if width is not None and height is not None and self._saved_size_is_usable(width, height):
             self.resize(width, height)
+        else:
+            width = height = None
         if x is None or y is None:
+            return
+        if not self._saved_position_is_visible(x, y, width or self.width()):
+            print(f"[window] Saved position ({x}, {y}) is not on a connected screen; using the default position")
             return
 
         # move(x, y) before show() places the visible frame's top-left corner
@@ -3138,6 +3166,29 @@ class MainWindow(QtWidgets.QMainWindow):
 
         QTimer.singleShot(0, _verify)
 
+    @staticmethod
+    def _saved_size_is_usable(width: int, height: int) -> bool:
+        """True if a saved window size is plausible: at least 640x400 and no larger than
+        the combined area of the connected screens."""
+        screens = QtWidgets.QApplication.screens()
+        if not screens:
+            return True
+        union = screens[0].availableGeometry()
+        for screen in screens[1:]:
+            union = union.united(screen.availableGeometry())
+        return 640 <= width <= union.width() and 400 <= height <= union.height()
+
+    @staticmethod
+    def _saved_position_is_visible(x: int, y: int, width: int) -> bool:
+        """True if the title bar of a window at (x, y) would be at least partly on a
+        connected screen (80 px wide, 30 px tall), so it can still be grabbed."""
+        title_bar = QtCore.QRect(x, y, max(width, 80), 30)
+        for screen in QtWidgets.QApplication.screens():
+            overlap = screen.availableGeometry().intersected(title_bar)
+            if overlap.width() >= 80 and overlap.height() >= 30:
+                return True
+        return not QtWidgets.QApplication.screens()
+
     def closeEvent(self, event) -> None:
         """Clean up resources and save window position before closing."""
         # Stop all timers
@@ -3155,6 +3206,10 @@ class MainWindow(QtWidgets.QMainWindow):
             print("Closing TCP connections...")
             self.tcp_pool.disconnect_all()
 
+        # Let queued contacts writes finish before the process ends
+        if hasattr(self, '_contacts_writer'):
+            self._contacts_writer.stop()
+
         # Save window position
         self._save_window_position()
         event.accept()
@@ -3169,9 +3224,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         self._window_position_saved = True
 
-        config = ConfigParser()
-        if os.path.exists(CONFIG_FILE):
-            config.read(CONFIG_FILE)
+        config = read_config(CONFIG_FILE)
 
         if not config.has_section("WINDOW"):
             config.add_section("WINDOW")
@@ -3207,11 +3260,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if pane_width:
             config.set("WINDOW", "map_pane_width", str(pane_width))
 
-        try:
-            with open(CONFIG_FILE, 'w') as f:
-                config.write(f)
-        except IOError as e:
-            print(f"Warning: Could not save window position: {e}")
+        write_config(config, CONFIG_FILE)   # prints its own warning if it cannot save
 
     def _setup_ui(self) -> None:
         """Build the user interface."""
@@ -3317,18 +3366,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # Commsrvr check will start automatically after 30 seconds via timer
 
-    def _start_internet_check(self) -> None:
-        """Probe connectivity on a background thread so the up-to-3s worst
-        case (see check_internet()'s own comment) never blocks the UI
-        thread. Polls for completion via QTimer rather than a cross-thread
-        signal, matching the pattern already used for the image-fetch
-        dialog and _check_commsrvr_content_async — safe because the poll
-        timer itself is always scheduled from the main thread.
-
-        Called from _load_initial_data(), after _setup_ui() has already
-        built the timers/menu actions _on_internet_check_complete() may
-        need to touch on a False->True transition.
-        """
+    def _probe_internet(self, on_result) -> None:
+        """Run check_internet() on a worker thread (up to 3 s of probing) and call
+        on_result(is_available) on the GUI thread, so the window never freezes on it.
+        Polls for completion with a QTimer rather than a cross-thread signal, matching
+        _check_commsrvr_content_async; safe because the poll is always scheduled from
+        the GUI thread."""
         result: Dict[str, bool] = {}
 
         def worker() -> None:
@@ -3338,19 +3381,25 @@ class MainWindow(QtWidgets.QMainWindow):
 
         def poll() -> None:
             if 'available' in result:
-                self._on_internet_check_complete(result['available'])
+                on_result(result['available'])
             else:
                 QTimer.singleShot(100, poll)
 
         QTimer.singleShot(100, poll)
+
+    def _start_internet_check(self) -> None:
+        """Startup connectivity probe (see _probe_internet). Called from
+        _load_initial_data(), after _setup_ui() has already built the timers and menu
+        actions _on_internet_check_complete() may need to touch."""
+        self._probe_internet(self._on_internet_check_complete)
 
     def _on_internet_check_complete(self, is_available: bool) -> None:
         """Handle the startup connectivity probe's result."""
         self._internet_available = is_available
         if is_available:
             print("Internet connectivity: Available")
-            if hasattr(self, 'internet_timer'):
-                self.internet_timer.stop()
+            # Keep watching: a dropped connection is noticed by the periodic re-check
+            self.internet_timer.start(INTERNET_MONITOR_INTERVAL)
             self._on_internet_became_available()
             # _load_map() may already have rendered offline-only if it ran
             # before this background probe resolved — refresh it once so
@@ -3365,19 +3414,24 @@ class MainWindow(QtWidgets.QMainWindow):
             print("Internet connectivity: Not available (will retry in 30 minutes)")
 
     def _open_external_link(self, url: str, label: str = "This link") -> None:
-        """Open an external URL in the OS browser, unless Off-Grid Mode is on."""
+        """Open an external URL in the OS browser, unless Off-Grid Mode is on. http/https only."""
+        if not url.lower().startswith(("http://", "https://")):
+            return
         if not netguard.guard(f'"{label}" link'):
-            QtWidgets.QMessageBox.information(
-                self, "Off-Grid Mode",
-                f"\"{label}\" opens an external website and is disabled while Off-Grid Mode is on.\n\n"
-                "Switch back to ONLINE in the header to use it."
-            )
+            from ui_helpers import show_offgrid_notice
+            show_offgrid_notice(self, label, **self._help_theme_colors())
             return
         QDesktopServices.openUrl(QUrl(url))
 
-    def _refresh_network_toggle_ui(self) -> None:
+    def _refresh_network_toggle_ui(self, _online: bool = False) -> None:
         """Sync the header switch's checked-state, label, and color to netguard's
-        effective state (user preference AND real reachability)."""
+        effective state (user preference AND real reachability).
+
+        Also the slot for MainWindow._netguard_state_changed, which fires
+        whenever the effective state changes from anywhere: a manual click
+        (also handled directly by _set_network_mode) or a connectivity probe
+        finding the connection came back or dropped. Runs on the GUI thread;
+        the argument is ignored because the state is re-read here."""
         online = netguard.is_network_enabled()
         self.network_toggle_btn.blockSignals(True)
         self.network_toggle_btn.setChecked(online)
@@ -3404,13 +3458,6 @@ class MainWindow(QtWidgets.QMainWindow):
                 " border: none; border-radius: 4px; font-weight: bold; }"
                 " QPushButton:hover { background-color: #444444; }"
             )
-
-    def _on_netguard_state_changed(self, online: bool) -> None:
-        """netguard listener: keep the header switch in sync whenever the
-        effective state changes from anywhere — a manual click (handled
-        directly by _set_network_mode too) or a real-connectivity probe
-        finding the connection came back or dropped on its own."""
-        self._refresh_network_toggle_ui()
 
     def _on_network_toggle_clicked(self, checked: bool) -> None:
         """Handle a click on the header Off-Grid/Online switch."""
@@ -3456,9 +3503,15 @@ class MainWindow(QtWidgets.QMainWindow):
             # pins stay visible fine as-is.
             return
 
-        # Coming back Online: re-probe real connectivity and restart
-        # everything that depends on it.
-        self._internet_available = check_internet()
+        # Coming back Online: re-probe real connectivity (in the background, so the click
+        # never freezes the window) and restart everything that depends on it.
+        self._probe_internet(self._on_online_click_result)
+
+    def _on_online_click_result(self, is_available: bool) -> None:
+        """Finish going Online once the connectivity probe has answered (GUI thread)."""
+        if not netguard.get_user_enabled():
+            return   # switched back to Off-Grid while the probe was running
+        self._internet_available = is_available
         self._sync_weather_radar_action()
         self._sync_earthquake_action()
         self._sync_wildfire_action()
@@ -3481,6 +3534,8 @@ class MainWindow(QtWidgets.QMainWindow):
             # being idle through the off-grid period, rather than hitting
             # it immediately in this same click-handler call stack.
             QTimer.singleShot(1500, lambda: self._save_map_position(callback=self._load_map))
+            if hasattr(self, 'internet_timer'):
+                self.internet_timer.start(INTERNET_MONITOR_INTERVAL)
         else:
             print("Internet connectivity: Not available (will retry in 30 minutes)")
             self.newsfeed_label.setText("  No internet connection")
@@ -3504,12 +3559,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if callsign:
             self._log_startup(f"[User Settings Found] {callsign}, {grid}, {state}")
         else:
-            self._log_startup("[User Settings NOT Found] Go to Menu -> Config -> User Settings")
+            self._log_startup("[User Settings NOT Found] Go to Settings -> User Settings")
 
         # Groups (stored with @ prefix in DB; displayed without)
         group_names = [g.lstrip('@') for g in self.db.get_all_groups()]
         if not group_names:
-            self._log_startup("[Groups NOT Found] Go to Menu -> Config -> Manage Groups")
+            self._log_startup("[Groups NOT Found] Go to Settings -> Manage Groups")
         elif len(group_names) == 1:
             self._log_startup(f"[Group Found] {group_names[0]}")
         else:
@@ -3520,12 +3575,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if qrz_username:
             self._log_startup("[QRZ Settings Found]")
         else:
-            self._log_startup("[QRZ Settings NOT Found] Go to Menu -> Config -> QRZ Settings")
+            self._log_startup("[QRZ Settings NOT Found] Go to Settings -> QRZ Settings")
 
         # JS8 connectors — only log NOT Found if none configured.
         # Existing TCP "Attempting to connect" / "Connected" messages cover the rest.
         if not self.connector_manager.get_all_connectors(enabled_only=False):
-            self._log_startup("[JS8 Connectors NOT Found] Go to Menu -> Config -> JS8 Connectors")
+            self._log_startup("[JS8 Connectors NOT Found] Go to Settings -> JS8 Connectors")
         # Initiate TCP connections (status messages emitted via status_message signal).
         # Each auto_connect=1 row is re-enabled and reconnected; auto_connect=0 rows
         # stay quiescent until the user clicks Reconnect.
@@ -3552,21 +3607,48 @@ class MainWindow(QtWidgets.QMainWindow):
         self._sync_earthquake_action()
         self._sync_wildfire_action()
         self._restart_radar_refresh_timer()
+        if self.config.get_selected_rss_feed() != "Disable":
+            self._start_rss_fetch()
 
     def _retry_internet_check(self) -> None:
-        """Retry internet connectivity check (called by timer)."""
-        was_available = self._internet_available
-        self._internet_available = check_internet()
+        """Periodic connectivity re-check (timer): every 30 minutes while offline, every
+        5 minutes while online so a dropped connection is noticed. Off-Grid Mode forced
+        by the user means no probing at all."""
+        if not netguard.get_user_enabled():
+            return
+        self._probe_internet(self._on_internet_recheck_result)
 
-        if self._internet_available and not was_available:
-            # Internet just became available
+    def _on_internet_recheck_result(self, is_available: bool) -> None:
+        """Result of _retry_internet_check (runs on the GUI thread)."""
+        if not netguard.get_user_enabled():
+            return   # switched to Off-Grid while the probe was running
+        was_available = self._internet_available
+        self._internet_available = is_available
+
+        if is_available and not was_available:
             print("Internet connectivity: Now available")
-            self.internet_timer.stop()
+            self.internet_timer.start(INTERNET_MONITOR_INTERVAL)
             self._on_internet_became_available()
             if self.config.get_weather_radar() or self.config.get_earthquake_layer() or self.config.get_wildfire_layer():
                 self._save_map_position(callback=self._load_map)
-        elif not self._internet_available:
+        elif was_available and not is_available:
+            print("Internet connectivity: Lost (will re-check every 30 minutes)")
+            self.internet_timer.start(INTERNET_CHECK_INTERVAL)
+            self._on_internet_lost()
+        elif not is_available:
             print("Internet connectivity: Still not available (will retry in 30 minutes)")
+
+    def _on_internet_lost(self) -> None:
+        """The connection dropped while the app was online: gray out what needs it and
+        say so in the ticker. netguard already flipped the header switch (check_internet
+        reports the loss), and the heartbeat/RSS timers skip while _internet_available
+        is False."""
+        self._sync_weather_radar_action()
+        self._sync_earthquake_action()
+        self._sync_wildfire_action()
+        self.newsfeed_timer.stop()
+        self.newsfeed_pause_timer.stop()
+        self.newsfeed_label.setText("  No internet connection")
 
     def _menubar_qss(self) -> str:
         """Shared stylesheet for the menu bar and all of its menus/submenus.
@@ -3792,7 +3874,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.transmit_menu.addAction(internet_lbl)
 
         inet_msg_action = QtWidgets.QAction("Direct Message", self)
-        inet_msg_action.triggered.connect(self._on_qrz_lookup)
+        inet_msg_action.triggered.connect(self._on_internet_direct_message)
         self.transmit_menu.addAction(inet_msg_action)
         self.actions["internet_message"] = inet_msg_action
 
@@ -3902,15 +3984,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.map_radar_action.triggered.connect(self._set_weather_radar)
         self.map_theme_menu.addAction(self.map_radar_action)
 
-        self.map_radar_refresh_menu = self.map_theme_menu.addMenu("Radar Refresh")
-        self.map_radar_refresh_actions = {}
-        for minutes, label in [(0, "Off"), (2, "2 Minutes"), (5, "5 Minutes"), (10, "10 Minutes")]:
-            action = QtWidgets.QAction(label, self)
-            action.setCheckable(True)
-            action.setChecked(self.config.get_weather_radar_refresh() == minutes)
-            action.triggered.connect(lambda checked=False, m=minutes: self._set_weather_radar_refresh(m))
-            self.map_radar_refresh_menu.addAction(action)
-            self.map_radar_refresh_actions[minutes] = action
+        self._add_choice_menu(
+            self.map_theme_menu, "Radar Refresh",
+            [(0, "Off"), (2, "2 Minutes"), (5, "5 Minutes"), (10, "10 Minutes")],
+            self.config.get_weather_radar_refresh(), self._set_weather_radar_refresh,
+        )
 
         self.map_radar_timestamp_action = QtWidgets.QAction("Show Radar Timestamp", self)
         self.map_radar_timestamp_action.setCheckable(True)
@@ -3927,35 +4005,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.map_earthquake_action.triggered.connect(self._set_earthquake_layer)
         self.map_theme_menu.addAction(self.map_earthquake_action)
 
-        self.map_eq_region_menu = self.map_theme_menu.addMenu("Earthquake Region")
-        self.map_eq_region_actions = {}
-        for region in ["USA", "North America", "Worldwide"]:
-            action = QtWidgets.QAction(region, self)
-            action.setCheckable(True)
-            action.setChecked(self.config.get_earthquake_region() == region)
-            action.triggered.connect(lambda checked=False, r=region: self._set_earthquake_region(r))
-            self.map_eq_region_menu.addAction(action)
-            self.map_eq_region_actions[region] = action
-
-        self.map_eq_mag_menu = self.map_theme_menu.addMenu("Earthquake Min Magnitude")
-        self.map_eq_mag_actions = {}
-        for mag_value, label in [(0.0, "All"), (2.5, "2.5+"), (4.5, "4.5+"), (5.5, "5.5+")]:
-            action = QtWidgets.QAction(label, self)
-            action.setCheckable(True)
-            action.setChecked(abs(self.config.get_earthquake_min_mag() - mag_value) < 0.01)
-            action.triggered.connect(lambda checked=False, m=mag_value: self._set_earthquake_min_mag(m))
-            self.map_eq_mag_menu.addAction(action)
-            self.map_eq_mag_actions[mag_value] = action
-
-        self.map_eq_refresh_menu = self.map_theme_menu.addMenu("Earthquake Refresh")
-        self.map_eq_refresh_actions = {}
-        for minutes, label in [(5, "5 Minutes"), (10, "10 Minutes"), (30, "30 Minutes")]:
-            action = QtWidgets.QAction(label, self)
-            action.setCheckable(True)
-            action.setChecked(self.config.get_earthquake_refresh() == minutes)
-            action.triggered.connect(lambda checked=False, m=minutes: self._set_earthquake_refresh(m))
-            self.map_eq_refresh_menu.addAction(action)
-            self.map_eq_refresh_actions[minutes] = action
+        self._add_choice_menu(
+            self.map_theme_menu, "Earthquake Region",
+            [(r, r) for r in ("USA", "North America", "Worldwide")],
+            self.config.get_earthquake_region(), self._set_earthquake_region,
+        )
+        self._add_choice_menu(
+            self.map_theme_menu, "Earthquake Min Magnitude",
+            [(0.0, "All"), (2.5, "2.5+"), (4.5, "4.5+"), (5.5, "5.5+")],
+            self.config.get_earthquake_min_mag(), self._set_earthquake_min_mag,
+        )
+        self._add_choice_menu(
+            self.map_theme_menu, "Earthquake Refresh",
+            [(5, "5 Minutes"), (10, "10 Minutes"), (30, "30 Minutes")],
+            self.config.get_earthquake_refresh(), self._set_earthquake_refresh,
+        )
 
         self.map_theme_menu.addSeparator()
 
@@ -3966,25 +4030,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self.map_wildfire_action.triggered.connect(self._set_wildfire_layer)
         self.map_theme_menu.addAction(self.map_wildfire_action)
 
-        self.map_wildfire_acres_menu = self.map_theme_menu.addMenu("Wildfire Min Size")
-        self.map_wildfire_acres_actions = {}
-        for acres_value, label in [(0.0, "All"), (10.0, "10+ Acres"), (100.0, "100+ Acres"), (1000.0, "1,000+ Acres")]:
-            action = QtWidgets.QAction(label, self)
-            action.setCheckable(True)
-            action.setChecked(abs(self.config.get_wildfire_min_acres() - acres_value) < 0.01)
-            action.triggered.connect(lambda checked=False, a=acres_value: self._set_wildfire_min_acres(a))
-            self.map_wildfire_acres_menu.addAction(action)
-            self.map_wildfire_acres_actions[acres_value] = action
-
-        self.map_wildfire_refresh_menu = self.map_theme_menu.addMenu("Wildfire Refresh")
-        self.map_wildfire_refresh_actions = {}
-        for minutes, label in [(10, "10 Minutes"), (30, "30 Minutes"), (60, "60 Minutes")]:
-            action = QtWidgets.QAction(label, self)
-            action.setCheckable(True)
-            action.setChecked(self.config.get_wildfire_refresh() == minutes)
-            action.triggered.connect(lambda checked=False, m=minutes: self._set_wildfire_refresh(m))
-            self.map_wildfire_refresh_menu.addAction(action)
-            self.map_wildfire_refresh_actions[minutes] = action
+        self._add_choice_menu(
+            self.map_theme_menu, "Wildfire Min Size",
+            [(0.0, "All"), (10.0, "10+ Acres"), (100.0, "100+ Acres"), (1000.0, "1,000+ Acres")],
+            self.config.get_wildfire_min_acres(), self._set_wildfire_min_acres,
+        )
+        self._add_choice_menu(
+            self.map_theme_menu, "Wildfire Refresh",
+            [(10, "10 Minutes"), (30, "30 Minutes"), (60, "60 Minutes")],
+            self.config.get_wildfire_refresh(), self._set_wildfire_refresh,
+        )
 
         # WATCHLIST OVERLAY section — one checkbox per watchlist that has members,
         # inserted dynamically by _populate_watchlist_pins_menu above the next
@@ -4043,8 +4098,8 @@ class MainWindow(QtWidgets.QMainWindow):
         create_action(self.tools_menu, "Watchlist Callsigns", "export_watchlist_callsigns", self._on_export_watchlist_callsigns)
         create_action(self.tools_menu, "Watchlist Members", "export_watchlist_members", self._on_export_watchlist_members)
 
-        # HAMSQL Tools section - solar/radio image dialogs
-        add_section_header(self.tools_menu, "HAMSQL Tools")
+        # HamQSL Tools section - solar/radio image dialogs
+        add_section_header(self.tools_menu, "HamQSL Tools")
         for menu_label, url, link, load_text, err_prefix in SOLAR_IMAGE_DIALOGS:
             create_action(
                 self.tools_menu, menu_label, menu_label.lower().replace(" ", "_"),
@@ -4110,8 +4165,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # close() rather than qApp.quit() so Exit runs the same closeEvent path
         # as the title-bar X: timers stopped, TCP pool disconnected, position
         # saved while the window is still alive.
-        create_action(self.menubar, "Exit" + " " * 10, "exit", self.close)
-        create_action(self.menubar, "What's New" + " " * 10, "whats_new", self._on_whats_new)
+        create_action(self.menubar, "Exit" + _MENUBAR_GAP, "exit", self.close)
+        create_action(self.menubar, "What's New" + _MENUBAR_GAP, "whats_new", self._on_whats_new)
         create_action(self.menubar, "Live Better", "live_better", self._on_live_better)
 
         # Add status bar
@@ -4246,6 +4301,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # News ticker (scrolling text)
         self.newsfeed_label = QtWidgets.QLabel(self.header_widget)
+        self.newsfeed_label.setTextFormat(Qt.PlainText)   # headlines come from the feed: never rich text
         self.newsfeed_label.setFixedHeight(32)
         self.newsfeed_label.setMinimumWidth(0)
         self.newsfeed_label.setSizePolicy(QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed)
@@ -4296,7 +4352,8 @@ class MainWindow(QtWidgets.QMainWindow):
         self.network_toggle_btn.setFont(_btn_font)
         self.network_toggle_btn.clicked.connect(self._on_network_toggle_clicked)
         self.header_layout.addWidget(self.network_toggle_btn)
-        netguard.add_listener(self._on_netguard_state_changed)
+        self._netguard_state_changed.connect(self._refresh_network_toggle_ui)
+        netguard.add_listener(self._netguard_state_changed.emit)
         self._refresh_network_toggle_ui()
 
         self.header_layout.addSpacing(22)
@@ -4556,8 +4613,8 @@ class MainWindow(QtWidgets.QMainWindow):
             (self._cf_clear_btn, COLOR_BTN_RED),
             (self._cf_save_btn, COLOR_BTN_GREEN),
             (self._cf_delete_btn, COLOR_BTN_RED),
-            (self._cf_help_btn, "#e83e8c"),
-            (self._cf_close_btn, "#555555"),
+            (self._cf_help_btn, COLOR_BTN_HELP),
+            (self._cf_close_btn, COLOR_BTN_CLOSE),
         ]
         # connect_single: a second click while the name prompt is up would
         # otherwise stack two dialogs.
@@ -4600,7 +4657,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for lbl in self._cf_conj_labels:
             lbl.setStyleSheet(
                 f"background: transparent; color: {bar_fg};"
-                " font-family: Roboto; font-weight: bold; font-size: 12px;"
+                " font-family: Roboto; font-weight: bold; font-size: 13px;"
             )
         # The placeholder names the box now that the labels are gone, so it is
         # darkened from Qt's default near-invisible gray - but kept clearly
@@ -4611,10 +4668,10 @@ class MainWindow(QtWidgets.QMainWindow):
         _ph_palette.setColor(QtGui.QPalette.PlaceholderText, QtGui.QColor("#8A8A8A"))
         for edit in self._cf_inputs.values():
             edit.setStyleSheet(
-                "QLineEdit { background-color: #FFFFFF; color: #333333;"
+                f"QLineEdit {{ background-color: #FFFFFF; color: {COLOR_INPUT_TEXT};"
                 " border: 1px solid rgba(0,0,0,0.25); border-radius: 3px;"
-                " padding: 1px 5px; font-family: Roboto; font-size: 12px; }"
-                "QLineEdit:focus { border: 1px solid #28a745; }"
+                " padding: 1px 5px; font-family: Roboto; font-size: 13px; }"
+                f"QLineEdit:focus {{ border: 1px solid {COLOR_BTN_GREEN}; }}"
             )
             edit.setPalette(_ph_palette)
         # Both dropdowns match the criteria boxes. Two rules that look harmless
@@ -4623,13 +4680,13 @@ class MainWindow(QtWidgets.QMainWindow):
         # is a separate top-level widget, so QAbstractItemView must be styled
         # here or the list falls back to the platform palette.
         _combo_qss = (
-            "QComboBox { background-color: #FFFFFF; color: #333333;"
+            f"QComboBox {{ background-color: #FFFFFF; color: {COLOR_INPUT_TEXT};"
             " border: 1px solid rgba(0,0,0,0.25); border-radius: 3px;"
-            " padding: 1px 5px; font-family: Roboto; font-size: 12px; }"
-            "QComboBox:focus { border: 1px solid #28a745; }"
-            "QComboBox QAbstractItemView { background-color: #FFFFFF; color: #333333;"
+            " padding: 1px 5px; font-family: Roboto; font-size: 13px; }"
+            f"QComboBox:focus {{ border: 1px solid {COLOR_BTN_GREEN}; }}"
+            f"QComboBox QAbstractItemView {{ background-color: #FFFFFF; color: {COLOR_INPUT_TEXT};"
             " selection-background-color: #cce5ff; selection-color: #000000;"
-            " font-family: Roboto; font-size: 12px; }"
+            " font-family: Roboto; font-size: 13px; }"
         )
         self._cf_saved_combo.setStyleSheet(_combo_qss)
         self._cf_mode_combo.setStyleSheet(_combo_qss)
@@ -4638,7 +4695,7 @@ class MainWindow(QtWidgets.QMainWindow):
             btn.setStyleSheet(
                 f"QPushButton {{ background-color: {color}; color: #FFFFFF;"
                 " border: none; border-radius: 4px;"
-                " font-family: Roboto; font-weight: bold; font-size: 12px; }"
+                " font-family: Roboto; font-weight: bold; font-size: 13px; }"
             )
         self._refresh_custom_filter_mode_ui()
 
@@ -4728,6 +4785,7 @@ class MainWindow(QtWidgets.QMainWindow):
             return
 
         name = prompt_text(self, "Save Filter", "Filter name:",
+                           panel_fg=self.config.get_color('module_foreground'),
                            **self._help_theme_colors())
         if not name:
             return                      # Cancelled or left empty.
@@ -4778,18 +4836,18 @@ class MainWindow(QtWidgets.QMainWindow):
         entirely empty bar matches everything. All matching is
         case-insensitive substring.
 
-        The Remarks box searches both the statrep's own remarks (comments,
-        row[21]) and its detail-view memo/note (row[24]) - operators use
+        The Remarks box searches both the statrep's own remarks (comments)
+        and its detail-view memo/note - operators use
         either field to record why a report matters, so a search term should
         find it regardless of which one it landed in."""
         if self._map_filter_state != "custom":
             return True
-        memo = (row[24] if len(row) > 24 else "") or ""
-        remarks_hay = f"{row[21] or ''} {memo}"
+        memo = (row[StatRepCol.MEMO] if len(row) > StatRepCol.MEMO else "") or ""
+        remarks_hay = f"{row[StatRepCol.COMMENTS] or ''} {memo}"
         pairs = [
-            (self._cf_inputs["from"].text(),    row[3]),
-            (self._cf_inputs["to"].text(),      row[4]),
-            (self._cf_inputs["grid"].text(),    row[7]),
+            (self._cf_inputs["from"].text(),    row[StatRepCol.FROM_CALLSIGN]),
+            (self._cf_inputs["to"].text(),      row[StatRepCol.TARGET]),
+            (self._cf_inputs["grid"].text(),    row[StatRepCol.GRID]),
             (self._cf_inputs["remarks"].text(), remarks_hay),
         ]
         results = []
@@ -4942,7 +5000,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.alert_message_label.setAlignment(Qt.AlignCenter)
         self.alert_message_label.setWordWrap(True)
         self.alert_message_label.setTextFormat(Qt.RichText)
-        self.alert_message_label.setOpenExternalLinks(True)
+        # Links in an alert come from other users: open them only through the Off-Grid-aware opener.
+        self.alert_message_label.linkActivated.connect(
+            lambda url: self._open_external_link(url, "Alert link")
+        )
         # Message uses Roboto (clean sans-serif for readability)
         message_font = QtGui.QFont("Roboto", 18)
         self.alert_message_label.setFont(message_font)
@@ -5192,9 +5253,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.contacts_widget.hide()
             if hasattr(self, 'message_table'):
                 self.message_table.show()
-            self.config.set_hide_map(False)
             self.config.set_show_alerts(False)
-            self.config.set_show_contacts(False)
             self._load_map()
         elif mode == "images":
             self._stop_slideshow()
@@ -5207,9 +5266,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if hasattr(self, 'message_table'):
                 self.message_table.show()
             self._start_slideshow()
-            self.config.set_hide_map(True)
             self.config.set_show_alerts(False)
-            self.config.set_show_contacts(False)
         elif mode == "videos":
             self._stop_slideshow()
             self._show_bottom_section()
@@ -5219,9 +5276,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.contacts_widget.hide()
             if hasattr(self, 'message_table'):
                 self.message_table.show()
-            self.config.set_hide_map(False)
             self.config.set_show_alerts(False)
-            self.config.set_show_contacts(False)
             self._video_index = 0
             self._play_video_at_index()
         elif mode == "alerts":
@@ -5232,9 +5287,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 self.contacts_widget.hide()
             if hasattr(self, 'message_table'):
                 self.message_table.show()
-            self.config.set_hide_map(True)
             self.config.set_show_alerts(True)
-            self.config.set_show_contacts(False)
             self.alert_index = 0
             self._show_alert_display()
         elif mode == "contacts":
@@ -5246,9 +5299,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 if sizes:
                     self._saved_map_pane_width = sizes[0]
             self.bottom_splitter.hide()
-            self.config.set_hide_map(True)
             self.config.set_show_alerts(False)
-            self.config.set_show_contacts(True)
             if hasattr(self, 'contacts_widget'):
                 self.contacts_widget.show()
                 # Give the contacts view the same height the pane had
@@ -5383,6 +5434,7 @@ class MainWindow(QtWidgets.QMainWindow):
         # Get total alert count and fetch alert at current index
         alert_count = self.db.get_alert_count()
         alert = self.db.get_alert_at_offset(self.alert_index)
+        self._alert_shown_id = alert[6] if alert else None   # delete by this id, never by position
         scale = self._alert_font_scale()
 
         # Update navigation button states
@@ -5390,7 +5442,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.alert_next_btn.setEnabled(self.alert_index > 0)
 
         if alert:
-            title, message, color, date_received, from_callsign, group = alert
+            title, message, color, date_received, from_callsign, group, _alert_id = alert
 
             # Set colors based on alert color - all alerts use red
             color_map = {
@@ -5405,9 +5457,9 @@ class MainWindow(QtWidgets.QMainWindow):
             date_formatted = date_received[:16] if len(date_received) > 16 else date_received
 
             # Build date/callsign line with bold labels (use Roboto font)
-            date_line = f'<span style="font-family: Roboto;"><b>Date Sent:</b> {date_formatted}'
+            date_line = f'<span style="font-family: Roboto;"><b>Date Sent:</b> {html_escape(date_formatted)}'
             if from_callsign:
-                date_line += f"&nbsp;&nbsp;&nbsp;<b>Sent By:</b> {from_callsign}"
+                date_line += f"&nbsp;&nbsp;&nbsp;<b>Sent By:</b> {html_escape(from_callsign)}"
             date_line += "</span>"
 
             # Format alert display:
@@ -5416,13 +5468,13 @@ class MainWindow(QtWidgets.QMainWindow):
             # Bottom: message (normal)
             if group:
                 # Show group + ALERT at top, then title in bold below (strip @ symbol)
-                group_display = group.lstrip('@')
+                group_display = html_escape(group.lstrip('@'))
                 formatted_title = f'<div style="font-family: \'Kode Mono\'; font-size: {round(22 * scale)}px; font-weight: bold; margin-top: {round(-6 * scale)}px;">@{group_display} - ALERT</div>'
                 if title:
-                    formatted_title += f'<div style="font-family: \'Roboto Slab\'; font-size: {round(30 * scale)}px; font-weight: 900; margin-top: {round(18 * scale)}px;">{title}</div>'
+                    formatted_title += f'<div style="font-family: \'Roboto Slab\'; font-size: {round(30 * scale)}px; font-weight: 900; margin-top: {round(18 * scale)}px;">{html_escape(title)}</div>'
             else:
                 # No group, just show title in bold
-                formatted_title = f'<div style="font-family: \'Roboto Slab\'; font-size: {round(26 * scale)}px; font-weight: 900;">{title if title else ""}</div>'
+                formatted_title = f'<div style="font-family: \'Roboto Slab\'; font-size: {round(26 * scale)}px; font-weight: 900;">{html_escape(title) if title else ""}</div>'
 
             self.alert_display.setStyleSheet(f"background-color: {bg_color};")
             self.alert_title_label.setStyleSheet(f"color: {text_color};")
@@ -5440,7 +5492,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # or those links would never get highlighted.
             _parts = re.split(r'(https?://\S+)', message, flags=re.IGNORECASE)
             _msg_html = "".join(
-                f'<a href="{p.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")}"'
+                f'<a href="{p.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace(chr(34),"&quot;")}"'
                 f' style="color:#00FF00;">'
                 f'{p.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")}</a>'
                 if i % 2 else
@@ -5480,7 +5532,9 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _alert_delete(self) -> None:
         """Delete the currently displayed alert and refresh the view."""
-        self.db.delete_alert_at_offset(self.alert_index)
+        if getattr(self, '_alert_shown_id', None) is None:
+            return
+        self.db.delete_alert_by_id(self._alert_shown_id)
         count = self.db.get_alert_count()
         if self.alert_index >= count:
             self.alert_index = max(0, count - 1)
@@ -5507,7 +5561,7 @@ class MainWindow(QtWidgets.QMainWindow):
             msg_id = 0  # Default fallback
             qrz_id = 0  # Default fallback
             try:
-                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                with db_connect() as conn:
                     cursor = conn.cursor()
                     # Select * and map by column name so a stale local schema (e.g. a
                     # DB that hasn't received a migration yet) degrades gracefully per
@@ -5530,7 +5584,12 @@ class MainWindow(QtWidgets.QMainWindow):
             qrz_value = qrz_id if self.tcp_pool.get_connected_rig_names() else 0
 
             # Build heartbeat URL with callsign, data_id, msg_id, qrz_id, db_version, and build_number parameters
-            heartbeat_url = f"{_PING}?cs={callsign}&id={data_id}&msg={msg_id}&qrz={qrz_value}&db={db_version}&build={build_number}&version={VERSION}"
+            # urlencode: a callsign from JS8Call can contain spaces, "&" or non-ASCII
+            # characters, which would otherwise break or rewrite the request.
+            heartbeat_url = _PING + "?" + urllib.parse.urlencode({
+                "cs": callsign, "id": data_id, "msg": msg_id, "qrz": qrz_value,
+                "db": db_version, "build": build_number, "version": VERSION,
+            }, safe="/")
 
             request = urllib.request.Request(heartbeat_url)
             with urllib.request.urlopen(request, timeout=10, context=create_verified_ssl_context()) as response:
@@ -5605,7 +5664,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # Execute SQL statements
             try:
-                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                with db_connect() as conn:
                     cursor = conn.cursor()
                     for sql in sql_statements:
                         cursor.execute(sql)
@@ -5681,7 +5740,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
             # Execute SQL statements
             try:
-                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                with db_connect() as conn:
                     cursor = conn.cursor()
                     for sql in sql_statements:
                         cursor.execute(sql)
@@ -5708,7 +5767,7 @@ class MainWindow(QtWidgets.QMainWindow):
         Expected format:
         program_update
         build: 501
-        url: https://commstat.com/downloads/update.zip
+        url: https://commstat.app/downloads/update.zip
 
         Args:
             content: The program_update response content
@@ -5732,14 +5791,24 @@ class MainWindow(QtWidgets.QMainWindow):
                     except (ValueError, IndexError):
                         print(f"Invalid build number format: {line}")
                         return False
-                elif line.startswith('url:') or line.startswith('URL:'):
+                elif line.lower().startswith('url:'):
+                    # Split on the FIRST colon only: the URL itself contains more
                     download_url = line.split(':', 1)[1].strip()
-                    # Handle URLs that might have multiple colons (https://)
-                    if '://' in line:
-                        download_url = line.split(None, 1)[1].strip()
 
             if new_build is None or not download_url:
                 print("Missing build number or URL in program_update")
+                return False
+
+            # Only ever move forward: ignore an offer that is not newer than this build
+            try:
+                with db_connect() as conn:
+                    row = conn.execute("SELECT build_number FROM controls WHERE id = 1").fetchone()
+                current_build = int(row[0]) if row and row[0] is not None else None
+            except (sqlite3.Error, ValueError, TypeError) as e:
+                print(f"Could not read the current build number ({e}); not checking the offered build")
+                current_build = None
+            if current_build is not None and new_build <= current_build:
+                print(f"Ignoring program_update build {new_build}: already on build {current_build}")
                 return False
 
             # Create updates directory if it doesn't exist
@@ -5759,9 +5828,21 @@ class MainWindow(QtWidgets.QMainWindow):
 
                 print(f"Update downloaded successfully to {update_file}")
 
+                # Only a complete, readable zip counts as an update. If it is damaged, drop it
+                # without touching build_number so the server offers the update again.
+                try:
+                    with zipfile.ZipFile(update_file) as zf:
+                        bad_member = zf.testzip()
+                    if bad_member is not None:
+                        raise zipfile.BadZipFile(f"corrupt member {bad_member}")
+                except zipfile.BadZipFile as e:
+                    print(f"Downloaded update is not a valid zip ({e}); discarded, build number unchanged")
+                    os.remove(update_file)
+                    return False
+
                 # Update build_number in database
                 try:
-                    with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                    with db_connect() as conn:
                         conn.execute("UPDATE controls SET build_number = ? WHERE id = 1", (new_build,))
                         conn.commit()
                     print(f"Build number updated to {new_build} in database")
@@ -5815,17 +5896,24 @@ class MainWindow(QtWidgets.QMainWindow):
             return False
         return True
 
-    def _lookup_grid_for_callsign(self, callsign: str) -> Optional[str]:
-        """Look up grid square for a callsign using QRZ cache/API.
+    def _lookup_grid_for_callsign(self, callsign: str, network: bool = True) -> Optional[str]:
+        """Look up the grid square for a callsign in the QRZ data.
 
         Args:
-            callsign: Callsign to lookup
+            callsign: Callsign to look up
+            network: False = the local qrz table only (any age), never a request to QRZ.com.
+                True = the normal QRZClient.lookup (local table first; QRZ.com only for a
+                missing/expired row on a subscriber account), which can block for seconds.
 
         Returns:
             Grid square or None if not found
         """
         try:
-            from qrz_client import QRZClient, load_qrz_config
+            from qrz_client import QRZClient, load_qrz_config, get_qrz_cached
+
+            if not network:
+                row = get_qrz_cached(callsign, include_stale=True)
+                return (row.get('grid') or None) if row else None
 
             # Local qrz table first, always — lookup() serves a cached row
             # (any age) when QRZ is disabled, unconfigured, or the account
@@ -5845,16 +5933,35 @@ class MainWindow(QtWidgets.QMainWindow):
             print(f"[QRZ] Error looking up {callsign}: {e}")
             return None
 
+    @staticmethod
+    def _better_grid(current: str, qrz_grid: Optional[str]) -> Optional[str]:
+        """The grid to use instead of `current` given what QRZ says, or None to keep `current`.
+        A missing grid takes QRZ's; a 4-character grid is only made more precise, and only when
+        QRZ's grid is inside the same square. A QRZ-upgraded grid is written EM83cv (first four
+        upper case, the rest lower) so it is visibly distinguishable."""
+        if not qrz_grid:
+            return None
+        if not current:
+            return qrz_grid
+        if len(current) == 4 and len(qrz_grid) > 4 and qrz_grid[:4].upper() == current.upper():
+            return qrz_grid[:4].upper() + qrz_grid[4:].lower()
+        return None
+
     def _resolve_grid(
         self,
         rig_name: str,
         grid: str,
         callsign: str,
         fallback_grid: str = "",
-        msg_format: str = ""
+        msg_format: str = "",
+        network: Optional[bool] = None
     ) -> str:
         """
         Resolve grid square with QRZ fallback if needed.
+
+        On the GUI thread (the RF receive path) only the local qrz table is consulted, so a
+        slow QRZ.com can never freeze the window; _defer_grid_upgrade() asks QRZ in the
+        background afterwards. Off the GUI thread (the Internet feed) the full lookup runs here.
 
         Args:
             rig_name: Rig identifier for logging
@@ -5862,37 +5969,111 @@ class MainWindow(QtWidgets.QMainWindow):
             callsign: Callsign to lookup if grid is missing
             fallback_grid: Grid to use if QRZ lookup fails
             msg_format: Message format for logging (e.g., "STATREP", "F!304")
+            network: force (True) or forbid (False) QRZ.com requests; default: allowed only
+                off the GUI thread
 
         Returns:
             Valid grid square or fallback
         """
         prefix = f"[{rig_name}] {msg_format}: " if msg_format else f"[{rig_name}] "
+        if network is None:
+            network = threading.current_thread() is not threading.main_thread()
 
         # Case 1: Already have a precise grid (5+ chars) - use directly
         if grid and len(grid) > 4:
             return grid
 
+        qrz_grid = self._lookup_grid_for_callsign(callsign, network=network)
+
         # Case 2: Have a 4-char grid - try to upgrade via QRZ
         if grid and len(grid) == 4:
-            qrz_grid = self._lookup_grid_for_callsign(callsign)
-            if qrz_grid and len(qrz_grid) > 4 and qrz_grid[:4].upper() == grid.upper():
-                # Format as mixed case: first 4 upper + rest lower (e.g., EM83cv)
-                # This makes QRZ-upgraded grids visually distinguishable
-                qrz_grid = qrz_grid[:4].upper() + qrz_grid[4:].lower()
-                print(f"{prefix}Upgraded grid {grid} -> {qrz_grid} via QRZ for {callsign}")
-                return qrz_grid
+            better = self._better_grid(grid, qrz_grid)
+            if better:
+                print(f"{prefix}Upgraded grid {grid} -> {better} via QRZ for {callsign}")
+                return better
             return grid
 
-        # Try QRZ lookup for missing/invalid grid
-        print(f"{prefix}Missing/invalid grid, attempting QRZ lookup for {callsign}")
-
-        qrz_grid = self._lookup_grid_for_callsign(callsign)
+        # Missing/invalid grid: use QRZ's, else the fallback
         if qrz_grid:
             print(f"{prefix}Found grid {qrz_grid} via QRZ for {callsign}")
             return qrz_grid
 
-        print(f"{prefix}QRZ lookup failed, using fallback grid")
+        print(f"{prefix}No grid for {callsign} in QRZ data, using fallback grid")
         return fallback_grid if fallback_grid else ""
+
+    def _defer_grid_upgrade(self, callsign: str, grid: str, status_digits: Optional[str] = None) -> None:
+        """Just after a record was inserted on the GUI thread with a missing or 4-character
+        grid: if QRZ.com might know better, look it up in the background and update the
+        row. The record is already saved and shown; nothing here blocks the window.
+
+        status_digits: for F!304/F!301 rows, whose map status depends on whether a grid
+        was found (see calculate_f304_status), so the status can be recomputed."""
+        row_id = getattr(self._insert_state, "last_row_id", None)
+        if row_id is None or threading.current_thread() is not threading.main_thread():
+            return
+        if grid and len(grid) > 4:
+            return                       # already as precise as QRZ's would be
+        try:
+            from qrz_client import load_qrz_config, get_qrz_cached, subscription_status
+            active, username, _password = load_qrz_config()
+            # Only a subscriber account (or one not yet known to be a free account) can
+            # get new data from QRZ.com, and only when the local row is missing/expired.
+            if not (active and username) or subscription_status() is False:
+                return
+            if get_qrz_cached(callsign) is not None:
+                return
+        except Exception:
+            return
+        callsign = callsign.strip().upper()
+        with self._grid_lock:
+            self._grid_pending.setdefault(callsign, []).append((row_id, grid, status_digits))
+            if len(self._grid_pending[callsign]) > 1:
+                return                   # this callsign is already queued; its answer covers this row
+            self._grid_queue.put(callsign)
+            if self._grid_thread is None or not self._grid_thread.is_alive():
+                self._grid_thread = threading.Thread(target=self._grid_upgrade_worker, daemon=True)
+                self._grid_thread.start()
+
+    def _grid_upgrade_worker(self) -> None:
+        """Background thread: one QRZ lookup per queued callsign, then update the rows."""
+        import queue
+        while True:
+            try:
+                callsign = self._grid_queue.get(timeout=30)
+            except queue.Empty:
+                return                   # idle: the thread ends and is started again when needed
+            try:
+                qrz_grid = self._lookup_grid_for_callsign(callsign, network=True)
+                with self._grid_lock:
+                    tasks = self._grid_pending.pop(callsign, [])
+                changed = 0
+                for row_id, grid_then, status_digits in tasks:
+                    better = self._better_grid(grid_then, qrz_grid)
+                    if not better:
+                        continue
+                    if status_digits is not None:
+                        new_status = calculate_f304_status(status_digits, True)
+                        sql = "UPDATE statrep SET grid = ?, map = ? WHERE id = ? AND grid = ?"
+                        params = (better, new_status, row_id, grid_then)
+                    else:
+                        sql = "UPDATE statrep SET grid = ? WHERE id = ? AND grid = ?"
+                        params = (better, row_id, grid_then)
+                    with db_connect() as conn:   # only if nobody changed the grid meanwhile
+                        changed += conn.execute(sql, params).rowcount
+                if changed:
+                    print(f"[QRZ] Updated the grid of {changed} record(s) from {callsign} in the background")
+                    QtCore.QMetaObject.invokeMethod(self, "_on_grid_upgraded", QtCore.Qt.QueuedConnection)
+            except Exception:
+                traceback.print_exc()
+                with self._grid_lock:
+                    self._grid_pending.pop(callsign, None)
+
+    @QtCore.pyqtSlot()
+    def _on_grid_upgraded(self) -> None:
+        """A background QRZ lookup improved some StatRep grids: show them (GUI thread)."""
+        self._load_statrep_data()
+        if not self.config.get_show_alerts():
+            self._save_map_position(callback=self._load_map)
 
     def _find_callsign_duplicate(
         self,
@@ -5922,7 +6103,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if not incoming_base:
             return None
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 rows = conn.execute(
                     f"SELECT id, from_callsign FROM {table} WHERE date = ? AND {id_field} = ?",
                     (date_only, id_value)
@@ -5960,7 +6141,7 @@ class MainWindow(QtWidgets.QMainWindow):
         """
         if "/" in (incoming_callsign or "") and "/" not in (stored_callsign or ""):
             try:
-                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                with db_connect() as conn:
                     conn.execute(
                         f"UPDATE {table} SET from_callsign = ? WHERE id = ?",
                         (incoming_callsign, row_id)
@@ -5974,7 +6155,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         if incoming_global_id:
             try:
-                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                with db_connect() as conn:
                     conn.execute(
                         f"UPDATE {table} SET global_id = ? "
                         f"WHERE id = ? AND (global_id IS NULL OR global_id = 0)",
@@ -6009,6 +6190,7 @@ class MainWindow(QtWidgets.QMainWindow):
         Returns:
             msg_type on success, empty string on failure
         """
+        self._insert_state.last_row_id = None   # set below once a row was inserted
         # Suffix-insensitive duplicate check. The UNIQUE indexes key on the literal
         # from_callsign, so a record saved locally as N0DDK/P and returned by the
         # commsrvr as N0DDK does not collide and would be written twice. Compare the
@@ -6033,10 +6215,11 @@ class MainWindow(QtWidgets.QMainWindow):
         placeholders = ", ".join(["?" for _ in data])
         query = f"INSERT INTO {table} ({columns}) VALUES({placeholders})"
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 cur = conn.execute(query, tuple(data.values()))
                 new_row_id = cur.lastrowid
                 conn.commit()
+            self._insert_state.last_row_id = new_row_id
             print(f"{ConsoleColors.SUCCESS}[{rig_name}] Added {msg_type.upper()} {data.get(id_field, '')}{extra_info} from: {from_callsign} (Global ID: {data.get('global_id', 0)}){ConsoleColors.RESET}")
             QtCore.QMetaObject.invokeMethod(
                 self, "_queue_notification_sound",
@@ -6062,12 +6245,15 @@ class MainWindow(QtWidgets.QMainWindow):
                 id_val = data.get(id_field, "unknown")
                 incoming_global_id = data.get('global_id', 0)
                 print(f"[{rig_name}] Skipping duplicate {msg_type.upper()} {data.get(id_field, '')} from {from_callsign} — already received (Global ID: {incoming_global_id})")
-                if incoming_global_id:
+                if incoming_global_id and 'date' in data and 'from_callsign' in data:
+                    # The 3-character id repeats every day and across senders: match the
+                    # whole UNIQUE key (date, id, from_callsign) so only the colliding row is touched.
                     try:
-                        with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                        with db_connect() as conn:
                             conn.execute(
-                                f"UPDATE {table} SET global_id = ? WHERE {id_field} = ? AND (global_id IS NULL OR global_id = 0)",
-                                (incoming_global_id, id_val)
+                                f"UPDATE {table} SET global_id = ? WHERE date = ? AND {id_field} = ? "
+                                f"AND from_callsign = ? AND (global_id IS NULL OR global_id = 0)",
+                                (incoming_global_id, data['date'], id_val, data['from_callsign'])
                             )
                             conn.commit()
                     except sqlite3.Error:
@@ -6075,6 +6261,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 print(f"{ConsoleColors.WARNING}[{rig_name}] WARNING: Database constraint violation: {e}{ConsoleColors.RESET}")
         except sqlite3.Error as e:
+            self._insert_state.failed = True
             print(f"{ConsoleColors.ERROR}[{rig_name}] ERROR: {msg_type.capitalize()} database insert failed for {from_callsign}: {e}{ConsoleColors.RESET}")
         return ""
 
@@ -6124,7 +6311,8 @@ class MainWindow(QtWidgets.QMainWindow):
 
         # F!304/F!301 messages don't contain grid data — resolve via callsign lookup
         # _lookup_grid_for_callsign checks qrz table first, then QRZ API (caches result)
-        fcode_grid = self._lookup_grid_for_callsign(from_callsign) or ""
+        fcode_grid = self._lookup_grid_for_callsign(
+            from_callsign, network=threading.current_thread() is not threading.main_thread()) or ""
         grid_found = bool(fcode_grid and len(fcode_grid) >= 4)
 
         # Build comments
@@ -6171,9 +6359,12 @@ class MainWindow(QtWidgets.QMainWindow):
             'global_id': global_id
         }
 
-        return self._insert_message_data(
+        result = self._insert_message_data(
             rig_name, "statrep", data, "sr_id", "statrep", from_callsign
         )
+        if result:
+            self._defer_grid_upgrade(from_callsign, fcode_grid, status_digits=status_digits)
+        return result
 
     def _handle_commsrvr_data_messages(self, content: str, controls_column: str = "data_id") -> bool:
         """Handle commsrvr server data messages with ID prefixes.
@@ -6204,6 +6395,7 @@ class MainWindow(QtWidgets.QMainWindow):
             lines = content.split('\n')
             processed_count = 0
             last_data_id = 0
+            hold_id = None  # ID of the first record whose insert failed: the cursor stops before it
             data_types_processed = set()  # Track which data types were added
 
             # Process each line that starts with an ID
@@ -6212,18 +6404,17 @@ class MainWindow(QtWidgets.QMainWindow):
                 if not line:
                     continue
 
-                # Catch ::DELIVERED:: / ::EXPIRED:: lines regardless of whether they carry an ID prefix
+                # A ::DELIVERED:: directive STARTS the line (after an optional ID prefix).
+                # Matching it anywhere would swallow an ordinary message whose text
+                # happens to contain the word.
                 _directive_slot = None
-                if "::DELIVERED::" in line:
+                _delivered = re.match(r'^(?:\d+:\s*)?::DELIVERED::(.*)$', line, re.DOTALL)
+                if _delivered:
                     _directive_slot = ("::DELIVERED::", "_show_delivered_popup", "Delivered")
-                elif "::EXPIRED::" in line:
-                    _directive_slot = ("::EXPIRED::", "_show_expired_popup", "Expired")
                 if _directive_slot is not None:
                     _tag, _slot, _label = _directive_slot
                     print(f"[COMMSRVR] {_tag} raw line: {line!r}")
-                    # Strip optional leading ID prefix before the directive
-                    raw_payload = re.sub(r'^\d+:\s*', '', line)
-                    raw_payload = raw_payload[len(_tag):]
+                    raw_payload = _delivered.group(1)
                     if "," in raw_payload:
                         callsign, msg_text = raw_payload.split(",", 1)
                         callsign = callsign.strip()
@@ -6269,48 +6460,29 @@ class MainWindow(QtWidgets.QMainWindow):
                 data_id = int(id_match.group(1))
                 data = id_match.group(2).strip()
 
-                # Track the highest ID we've seen
-                if data_id > last_data_id:
+                # Track the highest ID we've seen, but never move the cursor past a
+                # record whose insert failed: the server resumes after this ID, so
+                # that record would never be sent again.
+                prev_last_id = last_data_id
+                if hold_id is None and data_id > last_data_id:
                     last_data_id = data_id
 
-                # Handle delete directive
-                delete_match = re.match(r'^::STATREP-DELETE::(\d+)$', data)
-                if delete_match:
-                    gid = int(delete_match.group(1))
-                    self.db._execute(
-                        lambda cursor, conn, g=gid: (
-                            cursor.execute("DELETE FROM statrep WHERE global_id = ?", (g,)),
-                            conn.commit()
-                        ),
-                        None
-                    )
-                    try:
-                        with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                            conn.execute(f"UPDATE controls SET {controls_column} = ? WHERE id = 1", (data_id,))
-                            conn.commit()
-                        print(f"Updated {controls_column} to {data_id} in controls table (delete)")
-                    except sqlite3.Error as e:
-                        print(f"Warning: Failed to update {controls_column} in controls table (delete): {e}")
-                    continue
-
-                # Handle message delete directive
-                msg_delete_match = re.match(r'^::MESSAGE-DELETE::(\d+)$', data)
-                if msg_delete_match:
-                    gid = int(msg_delete_match.group(1))
-                    self.db._execute(
-                        lambda cursor, conn, g=gid: (
-                            cursor.execute("DELETE FROM messages WHERE global_id = ?", (g,)),
-                            conn.commit()
-                        ),
-                        None
-                    )
-                    try:
-                        with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                            conn.execute(f"UPDATE controls SET {controls_column} = ? WHERE id = 1", (data_id,))
-                            conn.commit()
-                        print(f"Updated {controls_column} to {data_id} in controls table (delete)")
-                    except sqlite3.Error as e:
-                        print(f"Warning: Failed to update {controls_column} in controls table (delete): {e}")
+                # Handle delete directives. global_id 0 means "no global id" (every
+                # RF-received row has it), so an id of 0 must never delete anything.
+                _delete = re.match(r'^::(STATREP|MESSAGE)-DELETE::(\d+)$', data)
+                if _delete:
+                    gid = int(_delete.group(2))
+                    table = "statrep" if _delete.group(1) == "STATREP" else "messages"
+                    if gid > 0:
+                        self.db._execute(
+                            lambda cursor, conn, g=gid, t=table: (
+                                cursor.execute(f"DELETE FROM {t} WHERE global_id = ?", (g,)),
+                                conn.commit()
+                            ),
+                            None
+                        )
+                    else:
+                        print(f"[COMMSRVR] Ignoring {_delete.group(1)}-DELETE with global id 0 (ID {data_id})")
                     continue
 
                 # Parse the data line: date time freq_hz unused snr callsign: message
@@ -6339,16 +6511,18 @@ class MainWindow(QtWidgets.QMainWindow):
                     from_callsign = callsign_and_msg[0].strip()
                     message_value = message_part  # Keep full message with sender prefix for consistent parsing
 
-                    # Extract target group from message if present
+                    # Extract the target. Only the part before the first comma is the
+                    # addressing ("CALLSIGN: @GROUP MSG ..."); what follows is the
+                    # message body, where an "@mention" must not be taken as the target.
                     target = ""
-                    target_match = re.search(r'(@[A-Z0-9]+)', message_value, re.IGNORECASE)
+                    target_match = re.search(r'(@[A-Z0-9]+)', message_value.split(",", 1)[0], re.IGNORECASE)
                     if target_match:
                         target = target_match.group(1).upper()
                     else:
                         # Direct statrep — the server now only delivers these to the
                         # matching recipient, so the addressee is trusted as our
                         # target without re-checking it against our own callsign.
-                        _direct = re.match(r'^\w+:\s+(\w+)\s+,', message_value, re.IGNORECASE)
+                        _direct = re.match(r'^[^:\s]+:\s+(\w+)\s+,', message_value, re.IGNORECASE)
                         if _direct:
                             target = _direct.group(1).upper()
 
@@ -6356,9 +6530,15 @@ class MainWindow(QtWidgets.QMainWindow):
                     message_value = self._preprocess_message_value(message_value, from_callsign)
 
                     # Parse using unified parser (source=2 for Internet)
+                    self._insert_state.failed = False
                     msg_type, _ = self._parse_commstat_message(
                         "COMMSRVR", from_callsign, message_value, target, "", freq, db, utc, source=2, global_id=data_id
                     )
+                    if getattr(self._insert_state, "failed", False) and hold_id is None:
+                        # A database error (not a duplicate): keep the cursor before this ID
+                        hold_id = data_id
+                        print(f"[COMMSRVR] Insert failed for ID {data_id}; the feed cursor stays before it so it is fetched again")
+                        last_data_id = prev_last_id
 
                     if msg_type:
                         processed_count += 1
@@ -6374,7 +6554,7 @@ class MainWindow(QtWidgets.QMainWindow):
             # reply) if we processed any messages
             if last_data_id > 0:
                 try:
-                    with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                    with db_connect() as conn:
                         conn.execute(f"UPDATE controls SET {controls_column} = ? WHERE id = 1", (last_data_id,))
                         conn.commit()
                     print(f"Updated {controls_column} to {last_data_id} in controls table")
@@ -6407,7 +6587,7 @@ class MainWindow(QtWidgets.QMainWindow):
         refresh — which touches Qt widgets — is safe.
         """
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute(
                     "UPDATE messages SET delivered = 1 "
                     "WHERE target = ? AND date = ? AND msg_id = ?",
@@ -6418,6 +6598,21 @@ class MainWindow(QtWidgets.QMainWindow):
             print(f"[DELIVERED] Failed to mark message delivered: {e}")
 
         self._load_message_data()
+
+    def _last_sent_message_to(self, recipient: str, my_callsign: str) -> str:
+        """Text of the newest message we sent to `recipient` ("" if none is found);
+        shown in the delivery popup, since the RF acknowledgment carries no text."""
+        try:
+            with db_connect() as conn:
+                rows = conn.execute(
+                    "SELECT from_callsign, message FROM messages WHERE target = ? "
+                    "ORDER BY datetime DESC, id DESC LIMIT 10",
+                    (recipient.upper(),)
+                ).fetchall()
+        except sqlite3.Error:
+            return ""
+        mine = base_callsign(my_callsign)
+        return next((text or "" for sender, text in rows if base_callsign(sender or "") == mine), "")
 
     @QtCore.pyqtSlot(str, str)
     def _show_delivered_popup(self, callsign: str, message: str) -> None:
@@ -6437,25 +6632,7 @@ class MainWindow(QtWidgets.QMainWindow):
             parent=self,
         )
         dlg.exec_()
-
-    @QtCore.pyqtSlot(str, str)
-    def _show_expired_popup(self, callsign: str, message: str) -> None:
-        """Show an expiry popup when the commsrvr reports a message expired before retrieval,
-        unless the user has disabled it in User Settings (controls.mssgNotify)."""
-        if not self.db.get_notify_enabled():
-            return
-        print(f"[EXPIRED] Showing popup — callsign={callsign!r}  message={message!r}")
-        from qrz_lookup import MessageExpiredDialog
-        dlg = MessageExpiredDialog(
-            callsign=callsign,
-            message=message,
-            module_background=self.config.get_color('module_background'),
-            module_foreground=self.config.get_color('module_foreground'),
-            program_background=self.config.get_color('program_background'),
-            program_foreground=self.config.get_color('program_foreground'),
-            parent=self,
-        )
-        dlg.exec_()
+        dlg.deleteLater()
 
     @QtCore.pyqtSlot(str, str, str, str, str)
     def _show_new_message_popup(self, callsign: str, msg_id: str, message_text: str, global_id: str, record_id: str) -> None:
@@ -6468,7 +6645,9 @@ class MainWindow(QtWidgets.QMainWindow):
             return
         from qrz_lookup import NewMessagePopupDialog
         dlg = NewMessagePopupDialog(callsign=callsign, parent=self)
-        if dlg.exec_() == NewMessagePopupDialog.Opened:
+        opened = dlg.exec_() == NewMessagePopupDialog.Opened
+        dlg.deleteLater()
+        if opened:
             from qrz_lookup import MessageDetailDialog
             detail = MessageDetailDialog(
                 record_id, callsign, message_text, self._internet_available,
@@ -6482,10 +6661,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 tcp_pool=self.tcp_pool,
                 connector_manager=self.connector_manager,
                 refresh_callback=self._load_message_data,
+                record_id_provider=self._visible_message_ids,
                 parent=self
             )
             detail.record_deleted.connect(self._load_message_data)
-            if detail.exec_() == 1:
+            accepted = detail.exec_() == 1
+            detail.deleteLater()
+            if accepted:
                 self._load_message_data()
 
     @QtCore.pyqtSlot(set)
@@ -6707,18 +6889,16 @@ class MainWindow(QtWidgets.QMainWindow):
 
             if "::DELIVERED::" in content_stripped:
                 print(f"[COMMSRVR] ::DELIVERED:: detected in content: {content_stripped!r}")
-            if "::EXPIRED::" in content_stripped:
-                print(f"[COMMSRVR] ::EXPIRED:: detected in content: {content_stripped!r}")
 
             if (re.search(r'^\d+:\s+\d{4}-\d{2}-\d{2}', content_stripped, re.MULTILINE) or
                     re.search(r'^\d+:\s+::STATREP-DELETE::', content_stripped, re.MULTILINE) or
                     re.search(r'^\d+:\s+::MESSAGE-DELETE::', content_stripped, re.MULTILINE) or
-                    re.search(r'::DELIVERED::', content_stripped) or
-                    re.search(r'::EXPIRED::', content_stripped)):
+                    re.search(r'::DELIVERED::', content_stripped)):
                 self._handle_commsrvr_data_messages(content_stripped)
 
         except Exception:
-            pass
+            print("[COMMSRVR] Error while processing the server reply:")
+            traceback.print_exc()
 
     def _setup_live_feed(self) -> None:
         """Create the live feed text area."""
@@ -6997,7 +7177,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 elif col == _MEMO_COL:
                     item = QTableWidgetItem(str(raw))
                     if raw:
-                        item.setToolTip(str(raw))
+                        item.setToolTip(_plain_tooltip(raw))
                 else:
                     item = QTableWidgetItem(str(raw))
 
@@ -7032,20 +7212,30 @@ class MainWindow(QtWidgets.QMainWindow):
         # honored call _apply_contacts_filter() next, which recounts.
         self._update_contacts_count_label()
 
-    def _apply_contacts_filter(self) -> None:
-        """Show/hide data rows based on the pinned per-column filter inputs."""
-        filters = [edit.text().strip().upper() if edit else "" for edit in self._contacts_filters]
-        for row in range(self.contacts_table.rowCount()):
+    @staticmethod
+    def _filter_table_rows(table: QtWidgets.QTableWidget, filters: Dict[int, str]) -> None:
+        """Hide every row whose cell in any filtered column lacks the filter text.
+
+        *filters* maps column -> text; blanks are ignored and matching is a
+        case-insensitive "contains".
+        """
+        active = {col: text.strip().upper() for col, text in filters.items() if text.strip()}
+        for row in range(table.rowCount()):
             match = True
-            for col, f in enumerate(filters):
-                if not f:
-                    continue
-                item = self.contacts_table.item(row, col)
+            for col, f in active.items():
+                item = table.item(row, col)
                 cell = item.text().upper() if item else ""
                 if f not in cell:
                     match = False
                     break
-            self.contacts_table.setRowHidden(row, not match)
+            table.setRowHidden(row, not match)
+
+    def _apply_contacts_filter(self) -> None:
+        """Show/hide data rows based on the pinned per-column filter inputs."""
+        self._filter_table_rows(
+            self.contacts_table,
+            {col: edit.text() for col, edit in enumerate(self._contacts_filters) if edit},
+        )
         self._update_contacts_count_label()
 
     def _update_contacts_count_label(self) -> None:
@@ -7058,6 +7248,7 @@ class MainWindow(QtWidgets.QMainWindow):
             1, QTableWidgetItem(f"Name   ({count} Records)")
         )
 
+    @_guard_slot
     def _on_contacts_item_clicked(self, item: QTableWidgetItem) -> None:
         """Callsign opens QRZ lookup; image opens URL; all others just select."""
         col = item.column()
@@ -7078,15 +7269,18 @@ class MainWindow(QtWidgets.QMainWindow):
                 dlg._search()
                 dlg.msg_edit.setFocus()
                 dlg.exec_()
+                dlg.deleteLater()
                 self.contacts_table.viewport().setFocus()
         elif col == 10:
             url = item.data(Qt.UserRole)
             if url:
                 self._open_external_link(url, "Contact link")
         elif col == 12:
+            from ui_helpers import confirm
             cs_item = self.contacts_table.item(item.row(), 0)
             callsign = cs_item.text().strip() if cs_item else ""
-            if callsign and self._confirm_delete_contact(callsign):
+            if callsign and confirm(self, "Delete Contact",
+                                    f'Are you sure you want to delete "{callsign}" ?'):
                 self.db.delete_qrz_contact(callsign)
                 self._load_contacts_data()
                 self._apply_contacts_filter()
@@ -7095,46 +7289,12 @@ class MainWindow(QtWidgets.QMainWindow):
             if text and text != "—":
                 QtWidgets.QApplication.clipboard().setText(text)
 
-    def _confirm_delete_contact(self, callsign: str) -> bool:
-        """Yes/No confirmation prompt before deleting a contact. Returns True on Yes."""
-        panel_bg = self.config.get_color('module_background')
-        panel_fg = self.config.get_color('module_foreground')
-        prog_bg = self.config.get_color('program_background')
-        prog_fg = self.config.get_color('program_foreground')
-
-        box = QtWidgets.QMessageBox(self)
-        box.setIcon(QtWidgets.QMessageBox.Question)
-        box.setWindowTitle("Delete Contact")
-        box.setText(f'Are you sure you want to delete "{callsign}" ?')
-        box.setStandardButtons(
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
-        )
-        box.setDefaultButton(QtWidgets.QMessageBox.No)
-        box.setStyleSheet(
-            f"QMessageBox {{ background-color:{panel_bg}; }}"
-            f"QMessageBox QLabel {{ color:{panel_fg}; font-family:'Roboto'; "
-            f"font-size:13px; }}"
-            f"QPushButton {{ background-color:{prog_bg}; color:{prog_fg}; "
-            f"border:none; padding:5px 18px; min-width:60px; "
-            f"font-family:'Roboto'; font-size:13px; }}"
-            f"QPushButton:hover {{ background-color:{prog_fg}; color:{prog_bg}; }}"
-        )
-        return box.exec_() == QtWidgets.QMessageBox.Yes
-
     def _on_contacts_context_menu(self, pos) -> None:
         """Show right-click context menu with Copy option for contacts table."""
         item = self.contacts_table.itemAt(pos)
         if not item or item.text().strip() == "—":
             return
         self._show_table_copy_menu(self.contacts_table, pos)
-
-    def _copy_contacts_current_cell(self) -> None:
-        """Copy the currently selected contacts cell text via Ctrl+C."""
-        item = self.contacts_table.currentItem()
-        if item:
-            text = item.text().strip()
-            if text and text != "—":
-                QtWidgets.QApplication.clipboard().setText(text)
 
     def _handle_copy_shortcut(self) -> None:
         """Single Ctrl+C handler — dispatches to whichever table viewport has focus."""
@@ -7147,7 +7307,7 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, 'contacts_table') and focused in (
             self.contacts_table, self.contacts_table.viewport()
         ):
-            self._copy_contacts_current_cell()
+            self._copy_table_current_cell(self.contacts_table)
         elif focused in (self.statrep_table, self.statrep_table.viewport()):
             self._copy_table_current_cell(self.statrep_table)
         elif focused in (self.message_table, self.message_table.viewport()):
@@ -7176,7 +7336,7 @@ class MainWindow(QtWidgets.QMainWindow):
         item = table.currentItem()
         if item:
             text = item.text().strip()
-            if text:
+            if text and text != "—":
                 QtWidgets.QApplication.clipboard().setText(text)
 
     def _load_message_data(self) -> None:
@@ -7218,17 +7378,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _apply_message_filter(self) -> None:
         """Show/hide message rows based on the filter row's per-column text."""
-        table = self.message_table
-        filters = {col: val.strip().upper() for col, val in self._message_filter_values.items() if val.strip()}
-        for row in range(table.rowCount()):
-            match = True
-            for col, f in filters.items():
-                item = table.item(row, col)
-                cell = item.text().upper() if item else ""
-                if f not in cell:
-                    match = False
-                    break
-            table.setRowHidden(row, not match)
+        self._filter_table_rows(self.message_table, self._message_filter_values)
         self._update_message_count_label()
 
     def _update_message_count_label(self) -> None:
@@ -7271,7 +7421,7 @@ class MainWindow(QtWidgets.QMainWindow):
             if getattr(self, "_earthquake_cache", None) is not None and now - getattr(self, "_earthquake_cache_time", 0) < max(300, refresh_min * 60):
                 return self._earthquake_cache
 
-            request = urllib.request.Request(url, headers={"User-Agent": "CommStat/2.5"})
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(request, timeout=8, context=create_verified_ssl_context()) as response:
                 data = json.loads(response.read().decode("utf-8", errors="replace"))
 
@@ -7384,15 +7534,25 @@ class MainWindow(QtWidgets.QMainWindow):
                 else:
                     t_str = "Unknown"
 
+                # Feed text goes into HTML: escape it. Only an https USGS link becomes a link.
+                _place = html_escape(str(eq.get('place', 'Unknown')))
+                _eq_url = str(eq.get('url', '') or '')
+                _eq_host = urllib.parse.urlparse(_eq_url).hostname or ""
+                if _eq_url.startswith("https://") and (
+                        _eq_host == "earthquake.usgs.gov" or _eq_host.endswith(".earthquake.usgs.gov")):
+                    _eq_link = (f"<div style='margin-top:5px;'><a href='{html_escape(_eq_url, quote=True)}' "
+                                f"target='_blank' style='color:#8fd3ff;'>Open USGS Event</a></div>")
+                else:
+                    _eq_link = ""
                 popup_html = f"""
-                <div style='font-family:Arial,sans-serif;background:rgba(20,20,20,.96);color:#f5f5f5;
+                <div style='font-family:Roboto,sans-serif;background:rgba(20,20,20,.96);color:#f5f5f5;
                             padding:8px 10px;border:1px solid #777;border-radius:6px;min-width:210px;'>
                     <div style='font-weight:bold;font-size:14px;color:{color};'>M{mag:.1f} Earthquake</div>
-                    <div><b>Location:</b> {eq.get('place','Unknown')}</div>
-                    <div><b>Depth:</b> {eq.get('depth','?')} km</div>
+                    <div><b>Location:</b> {_place}</div>
+                    <div><b>Depth:</b> {html_escape(str(eq.get('depth','?')))} km</div>
                     <div><b>UTC:</b> {t_str}</div>
-                    <div><b>USGS ID:</b> {eq.get('id','')}</div>
-                    <div style='margin-top:5px;'><a href='{eq.get('url','')}' target='_blank' style='color:#8fd3ff;'>Open USGS Event</a></div>
+                    <div><b>USGS ID:</b> {html_escape(str(eq.get('id','')))}</div>
+                    {_eq_link}
                 </div>
                 """
                 eq_marker = folium.CircleMarker(
@@ -7405,7 +7565,7 @@ class MainWindow(QtWidgets.QMainWindow):
                     opacity=0.95,
                     weight=2 if mag >= 7.0 else 0,
                     popup=folium.Popup(popup_html, max_width=280),
-                    tooltip=f"M{mag:.1f} {eq.get('place','')}"
+                    tooltip=f"M{mag:.1f} {_place}"
                 )
                 # folium.CircleMarker's path_options() whitelist silently drops
                 # unrecognized kwargs (pane included) — set it directly on the
@@ -7449,7 +7609,7 @@ class MainWindow(QtWidgets.QMainWindow):
             }
             url = base + "?" + urllib.parse.urlencode(params)
 
-            request = urllib.request.Request(url, headers={"User-Agent": "CommStat/2.5"})
+            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(request, timeout=8, context=create_verified_ssl_context()) as response:
                 data = json.loads(response.read().decode("utf-8", errors="replace"))
 
@@ -7562,22 +7722,23 @@ class MainWindow(QtWidgets.QMainWindow):
                 contained = fire.get("contained")
                 contained_str = f"{int(contained)}%" if contained is not None else "Unknown"
 
+                _fire_name = html_escape(str(fire['name']))   # feed text: escape before it goes into HTML
                 popup_html = f"""
-                <div style='font-family:Arial,sans-serif;background:rgba(20,20,20,.96);color:#f5f5f5;
+                <div style='font-family:Roboto,sans-serif;background:rgba(20,20,20,.96);color:#f5f5f5;
                             padding:8px 10px;border:1px solid #777;border-radius:6px;min-width:210px;'>
-                    <div style='font-weight:bold;font-size:14px;color:{color};'>{fire['name']}</div>
+                    <div style='font-weight:bold;font-size:14px;color:{color};'>{_fire_name}</div>
                     <div><b>Size:</b> {acres:,.0f} acres</div>
                     <div><b>Contained:</b> {contained_str}</div>
                     <div><b>Discovered:</b> {t_str}</div>
-                    <div><b>State:</b> {fire.get('state') or 'Unknown'}</div>
-                    <div><b>Complexity:</b> {fire.get('complexity')}</div>
+                    <div><b>State:</b> {html_escape(str(fire.get('state') or 'Unknown'))}</div>
+                    <div><b>Complexity:</b> {html_escape(str(fire.get('complexity')))}</div>
                 </div>
                 """
                 folium.Marker(
                     location=[fire["lat"], fire["lon"]],
                     icon=self._wildfire_icon(color),
                     popup=folium.Popup(popup_html, max_width=280),
-                    tooltip=f"{fire['name']} ({acres:,.0f} ac)"
+                    tooltip=f"{_fire_name} ({acres:,.0f} ac)"
                 ).add_to(fg)
             fg.add_to(m)
             self._wildfire_rendered_cache_time = getattr(self, "_wildfire_cache_time", 0)
@@ -7653,16 +7814,19 @@ class MainWindow(QtWidgets.QMainWindow):
                     marker = folium.Marker(
                         location=[float(lat), float(lon)],
                         icon=self._watchlist_pin_icon(object_color, object_shape),
-                        tooltip=callsign,
+                        tooltip=html_escape(str(callsign)),
                         pane="watchlistPane",
                     )
                     marker.add_to(m)
                     # Clicking the halo opens the QRZ Lookup module, routed
                     # through the commstat:// scheme intercepted in
                     # CustomWebEnginePage.acceptNavigationRequest.
+                    # The callsign is percent-encoded, then written as a JSON string literal,
+                    # so no character of it can end the string or the <script> block.
+                    _pin_url = "commstat://watchlist-pin/" + urllib.parse.quote(str(callsign), safe="")
                     self._watchlist_pin_click_js.append(
                         f"{marker.get_name()}.on('click', function() {{"
-                        f" window.location.href = 'commstat://watchlist-pin/{callsign}'; }});"
+                        f" window.location.href = {json.dumps(_pin_url)}; }});"
                     )
                 except Exception as e:
                     print(f"[WatchlistPins] skipped {callsign}: {e}")
@@ -7771,8 +7935,8 @@ class MainWindow(QtWidgets.QMainWindow):
                     border: 1px solid #3B4B2A;
                     border-radius: 4px;
                     padding: 5px 8px;
-                    font-family: Arial, sans-serif;
-                    font-size: 11px;
+                    font-family: Roboto, sans-serif;
+                    font-size: 13px;
                     font-weight: bold;
                     box-shadow: 0 0 6px rgba(0,0,0,0.6);
                 ">
@@ -7814,14 +7978,13 @@ class MainWindow(QtWidgets.QMainWindow):
                 user_callsign=_map_callsign
             )
 
-            gridlist = []
+            grid_counts: Dict[str, int] = {}   # pins already placed per grid square
             for row in data:
-                callsign = row[3]   # from_callsign
-                srid = row[6]       # sr_id (display only)
-                grid = row[7]       # grid
-                scope = row[8]      # scope (text); drives pin radius
-                status = str(row[9])  # map (status)
-                statrep_id = row[23]  # database primary key (unique)
+                callsign = row[StatRepCol.FROM_CALLSIGN]
+                grid = row[StatRepCol.GRID]
+                scope = row[StatRepCol.SCOPE]  # text; drives pin radius
+                status = str(row[StatRepCol.MAP])
+                statrep_id = row[StatRepCol.ID]  # database primary key (unique)
 
                 # Custom Filtering bar drops non-matching rows before any of
                 # the per-pin work below (and before the duplicate-grid jitter
@@ -7837,71 +8000,14 @@ class MainWindow(QtWidgets.QMainWindow):
                     lat, lon = coords
 
                     # Offset duplicate grids
-                    count = gridlist.count(grid)
+                    count = grid_counts.get(grid, 0)
                     if count > 0:
                         lat += count * 0.01
                         lon += count * 0.01
-                    gridlist.append(grid)
+                    grid_counts[grid] = count + 1
 
-                    # Create tactical quick-info popup HTML.
-                    # Details link still opens the original full StatRep window.
-                    sr_dt = row[1][:16] if row[1] else ""
-                    freq_text = f"{hz_to_mhz(row[2]):.3f} MHz" if row[2] else ""
-                    group_text = str(row[4]).lstrip("@") if row[4] else ""
-                    status_label = {
-                        "1": "Normal",
-                        "2": "Advisory",
-                        "3": "Emergency",
-                        "4": "Unknown",
-                        "6": "Event",
-                        "7": "Attack"
-                    }.get(status, "Unknown")
-                    status_color = {
-                        "1": "#39d12f",
-                        "2": "#ff9f1a",
-                        "3": "#ff3333",
-                        "4": "#c7c7c7",
-                        "6": "#8000ff",
-                        "7": "#ff00ff"
-                    }.get(status, "#c7c7c7")
-                    _light_map = self.config.get_map_theme() == "light"
-                    _bg = ("linear-gradient(145deg,rgba(248,248,245,.97),rgba(235,235,230,.95))"
-                           if _light_map else
-                           "linear-gradient(145deg,rgba(18,18,18,.96),rgba(46,46,46,.94))")
-                    _text = "#1a1a1a" if _light_map else "#f5f5f5"
-                    _label = "#555555" if _light_map else "#d9d9d9"
-                    _border = "rgba(0,0,0,.18)" if _light_map else "rgba(255,255,255,.18)"
-                    _link_color = "#0055cc" if _light_map else "#ffffff"
-                    html = f'''<HTML>
-                        <BODY style="margin:0;background:transparent;font-family:Roboto,Arial,sans-serif;">
-                            <div style="
-                                width:190px;
-                                min-height:130px;
-                                box-sizing:border-box;
-                                background:{_bg};
-                                color:{_text};
-                                border:1px solid {_border};
-                                border-radius:10px;
-                                padding:10px 12px 9px 12px;
-                                box-shadow:0 0 18px rgba(0,0,0,.65);
-                            ">
-                                <div style="font-size:20px;font-weight:900;line-height:22px;margin-bottom:8px;">{callsign}</div>
-                                <table style="width:100%;border-collapse:collapse;font-size:12px;line-height:17px;color:{_text};">
-                                    <tr><td style="color:{_label};width:48px;">Scope:</td><td>{scope}</td></tr>
-                                    <tr><td style="color:{_label};">Freq:</td><td>{freq_text}</td></tr>
-                                    <tr><td style="color:{_label};">Group:</td><td>{group_text}</td></tr>
-                                    <tr><td style="color:{_label};">Date:</td><td>{sr_dt}</td></tr>
-                                </table>
-                                <div style="text-align:center;margin-top:2px;">
-                                    <a href="http://localhost/statrep/{statrep_id}/{callsign}"
-                                       style="font-size:14px;font-weight:800;color:{_link_color};text-decoration:underline;">Details</a>
-                                </div>
-                            </div>
-                        </BODY>
-                    </HTML>'''
-                    iframe = folium.IFrame(html, width=208, height=148)
-                    popup = folium.Popup(iframe, min_width=208, max_width=208)
-
+                    # Hidden pins are skipped before their popup is built (they still
+                    # take a slot in the grid offsets above, as before).
                     # Map Filter "map"/"custom" states bypass these entirely.
                     if self._map_filter_state not in ("map", "custom"):
                         # Skip every pin when Hide All Pins is active
@@ -7913,8 +8019,58 @@ class MainWindow(QtWidgets.QMainWindow):
                             continue
 
                         # Skip internet-sourced statreps when filter is active
-                        if self._hide_internet_statrep and row[22] != 1:
+                        if self._hide_internet_statrep and row[StatRepCol.SOURCE] != 1:
                             continue
+
+                    # Create tactical quick-info popup HTML.
+                    # Details link still opens the original full StatRep window.
+                    sr_dt = row[StatRepCol.DATETIME][:16] if row[StatRepCol.DATETIME] else ""
+                    freq_text = f"{hz_to_mhz(row[StatRepCol.FREQ]):.3f} MHz" if row[StatRepCol.FREQ] else ""
+                    group_text = str(row[StatRepCol.TARGET]).lstrip("@") if row[StatRepCol.TARGET] else ""
+                    _light_map = self.config.get_map_theme() == "light"
+                    _bg = ("linear-gradient(145deg,rgba(248,248,245,.97),rgba(235,235,230,.95))"
+                           if _light_map else
+                           "linear-gradient(145deg,rgba(18,18,18,.96),rgba(46,46,46,.94))")
+                    _text = "#1a1a1a" if _light_map else "#f5f5f5"
+                    _label = "#555555" if _light_map else "#d9d9d9"
+                    _border = "rgba(0,0,0,.18)" if _light_map else "rgba(255,255,255,.18)"
+                    _link_color = "#0055cc" if _light_map else "#ffffff"
+                    _callsign_html = html_escape(str(callsign or ""))
+                    _scope_html = html_escape(str(scope or ""))
+                    _freq_html = html_escape(freq_text)
+                    _group_html = html_escape(group_text)
+                    _date_html = html_escape(sr_dt)
+                    _link = f"http://localhost/statrep/{int(statrep_id)}/{urllib.parse.quote(str(callsign or ''), safe='')}"
+                    html = f'''<HTML>
+                        <HEAD><style>{MAP_FONT_FACE_CSS}</style></HEAD>
+                        <BODY style="margin:0;background:transparent;font-family:Roboto,sans-serif;">
+                            <div style="
+                                width:190px;
+                                min-height:130px;
+                                box-sizing:border-box;
+                                background:{_bg};
+                                color:{_text};
+                                border:1px solid {_border};
+                                border-radius:10px;
+                                padding:10px 12px 9px 12px;
+                                box-shadow:0 0 18px rgba(0,0,0,.65);
+                            ">
+                                <div style="font-size:20px;font-weight:900;line-height:22px;margin-bottom:8px;">{_callsign_html}</div>
+                                <table style="width:100%;border-collapse:collapse;font-size:13px;line-height:17px;color:{_text};">
+                                    <tr><td style="color:{_label};width:48px;">Scope:</td><td>{_scope_html}</td></tr>
+                                    <tr><td style="color:{_label};">Freq:</td><td>{_freq_html}</td></tr>
+                                    <tr><td style="color:{_label};">Group:</td><td>{_group_html}</td></tr>
+                                    <tr><td style="color:{_label};">Date:</td><td>{_date_html}</td></tr>
+                                </table>
+                                <div style="text-align:center;margin-top:2px;">
+                                    <a href="{_link}"
+                                       style="font-size:14px;font-weight:800;color:{_link_color};text-decoration:underline;">Details</a>
+                                </div>
+                            </div>
+                        </BODY>
+                    </HTML>'''
+                    iframe = folium.IFrame(html, width=208, height=148)
+                    popup = folium.Popup(iframe, min_width=208, max_width=208)
 
                     # Count this pin against any region whose bounding box contains it
                     for _region, (_lat_min, _lat_max, _lng_min, _lng_max) in REGION_BBOX.items():
@@ -8060,7 +8216,7 @@ class MainWindow(QtWidgets.QMainWindow):
 }
 </style>
 """
-        map_html = map_html.replace('</head>', bounce_css + '</head>')
+        map_html = map_html.replace('</head>', bounce_css + f'<style>{MAP_FONT_FACE_CSS}</style></head>')
 
         # Map Filter button - top-right overlay, same visual language as the
         # Videos player's Prev/Next/Delete buttons (rgba(0,0,0,0.65) glass).
@@ -8078,7 +8234,7 @@ class MainWindow(QtWidgets.QMainWindow):
   top: 10px;
   right: 10px;
   z-index: 10000;
-  font-family: sans-serif;
+  font-family: Roboto, sans-serif;
   font-size: 13px;
 }
 #commstatMapFilterBtn {
@@ -8147,7 +8303,7 @@ body:hover .leaflet-control-zoom {
   border: none;
   padding: 6px 12px;
   text-align: left;
-  font-family: sans-serif;
+  font-family: Roboto, sans-serif;
   font-size: 13px;
   cursor: pointer;
 }
@@ -8188,7 +8344,7 @@ document.addEventListener('click', function(e) {{
 }});
 </script>
 """
-        map_html = map_html.replace('</body>', filter_btn_html + '\n</body>')
+        map_html = _inject_before_body_end(map_html, filter_btn_html)
 
         # Circle marker popups open on click and stay until user clicks elsewhere.
         hover_js = """<script>
@@ -8201,7 +8357,7 @@ if (window.webkitStorageInfo === undefined && navigator.webkitTemporaryStorage) 
 }
 </script>"""
         map_html = map_html.replace('</head>', webkit_shim + '\n</head>')
-        map_html = map_html.replace('</body>', hover_js + '\n</body>')
+        map_html = _inject_before_body_end(map_html, hover_js)
 
         bounce_js = '<script>\nwindow._commstatPinRegistry=' + json.dumps(pin_registry) + """;
 window.commstatBouncePin = function(srid) {
@@ -8230,7 +8386,7 @@ window.commstatBouncePin = function(srid) {
     });
 };
 </script>"""
-        map_html = map_html.replace('</body>', bounce_js + '\n</body>')
+        map_html = _inject_before_body_end(map_html, bounce_js)
 
         # Watchlist pin click bindings (built in _add_watchlist_pins_to_map).
         # Folium emits the script that DEFINES the marker variables after
@@ -8242,7 +8398,7 @@ window.commstatBouncePin = function(srid) {
                 + '\n'.join(self._watchlist_pin_click_js)
                 + '\n});\n</script>'
             )
-            map_html = map_html.replace('</body>', watchlist_click_js + '\n</body>')
+            map_html = _inject_before_body_end(map_html, watchlist_click_js)
 
         # Always set new HTML content (reload() only refreshes cached content).
         # Exception: while a video is playing, map_widget is showing the video
@@ -8396,10 +8552,13 @@ window.commstatBouncePin = function(srid) {
         if bounds == self._map_bounds:
             return
         self._map_bounds = bounds
-        self._load_statrep_data()
+        self._load_statrep_data(skip_if_unchanged=True)
 
-    def _load_statrep_data(self) -> None:
-        """Load StatRep data from database into the table."""
+    def _load_statrep_data(self, skip_if_unchanged: bool = False) -> None:
+        """Load StatRep data from database into the table.
+
+        skip_if_unchanged: leave the table alone when it already shows exactly these
+        records (panning the map in Map Filter mode usually changes nothing visible)."""
         filters = self.config.filter_settings
         state = self._map_filter_state
         bypass_menu = state in ("map", "custom")
@@ -8429,16 +8588,16 @@ window.commstatBouncePin = function(srid) {
             if self._hide_all_pins:
                 data = []
             if self._hide_internet_statrep:
-                data = [row for row in data if row[22] == 1]
+                data = [row for row in data if row[StatRepCol.SOURCE] == 1]
             if self._hide_green_pins:
-                data = [row for row in data if str(row[9]) != "1"]
+                data = [row for row in data if str(row[StatRepCol.MAP]) != "1"]
         elif state == "map":
             if self._map_bounds:
                 # Only records whose pin currently falls inside the map's
                 # visible viewport - panning/zooming the map live-narrows this.
                 south, west, north, east = self._map_bounds
                 def _pin_in_view(row):
-                    coords = self._grid_to_latlon(row[7])
+                    coords = self._grid_to_latlon(row[StatRepCol.GRID])
                     return coords is not None and south <= coords[0] <= north and west <= coords[1] <= east
                 data = [row for row in data if _pin_in_view(row)]
         elif state == "custom":
@@ -8454,6 +8613,10 @@ window.commstatBouncePin = function(srid) {
             "6": "condition_purple",
             "7": "condition_magenta"
         }
+        if skip_if_unchanged and data == getattr(self, "_statrep_shown_data", None) \
+                and self.statrep_table.rowCount() == len(data):
+            return
+        self._statrep_shown_data = data
         self._populate_table(self.statrep_table, data, status_colors)
 
         if hasattr(self, 'statrep_count_label'):
@@ -8462,6 +8625,45 @@ window.commstatBouncePin = function(srid) {
             self.statrep_count_label.adjustSize()
             self._reposition_statrep_filter_btn()
 
+    def _open_statrep_detail(self, record_id, callsign: str, refresh_callback=None) -> bool:
+        """Open the StatRep detail dialog for a record. Returns True if it was accepted."""
+        table = self.statrep_table
+        _FROM_COL = 3
+
+        def build_record_list():
+            items = []
+            for r in range(table.rowCount()):
+                ci = table.item(r, _FROM_COL)
+                if ci:
+                    rid = ci.data(QtCore.Qt.UserRole)
+                    if rid is not None:
+                        items.append((rid, ci.text().strip()))
+            return items
+
+        from qrz_lookup import StatRepDetailDialog
+        colors = {key: self.config.get_color(key) for key in (
+            'module_background', 'module_foreground', 'title_bar_background', 'title_bar_foreground',
+            'data_background', 'program_background', 'program_foreground', 'condition_green',
+            'condition_yellow', 'condition_red', 'condition_gray', 'condition_purple', 'condition_magenta',
+        )}
+        dlg = StatRepDetailDialog(
+            record_id, callsign, self._internet_available,
+            commsrvr_url=_COMMSRVR,
+            tcp_pool=self.tcp_pool,
+            connector_manager=self.connector_manager,
+            record_list_provider=build_record_list,
+            refresh_callback=refresh_callback,
+            parent=self,
+            **colors
+        )
+        dlg.pin_changed.connect(lambda _: self._save_map_position(callback=self._load_map))
+        dlg.record_deleted.connect(self._load_statrep_data)
+        dlg.record_deleted.connect(lambda: self._save_map_position(callback=self._load_map))
+        accepted = dlg.exec_() == 1
+        dlg.deleteLater()
+        return accepted
+
+    @_guard_slot
     def _on_statrep_click(self, item: QTableWidgetItem) -> None:
         """From callsign (col 3) opens detail view; TID (col 6) bounces map pin; others copy text."""
         _FROM_COL = 3
@@ -8473,47 +8675,7 @@ window.commstatBouncePin = function(srid) {
             if callsign_item:
                 callsign  = callsign_item.text().strip()
                 record_id = callsign_item.data(QtCore.Qt.UserRole)
-                table = self.statrep_table
-                def build_record_list():
-                    items = []
-                    for r in range(table.rowCount()):
-                        ci = table.item(r, _FROM_COL)
-                        if ci:
-                            rid = ci.data(QtCore.Qt.UserRole)
-                            if rid is not None:
-                                items.append((rid, ci.text().strip()))
-                    return items
-                from qrz_lookup import StatRepDetailDialog
-                dlg = StatRepDetailDialog(
-                    record_id, callsign, self._internet_available,
-                    commsrvr_url=_COMMSRVR,
-                    module_background=self.config.get_color('module_background'),
-                    module_foreground=self.config.get_color('module_foreground'),
-                    title_bar_background=self.config.get_color('title_bar_background'),
-                    title_bar_foreground=self.config.get_color('title_bar_foreground'),
-                    data_background=self.config.get_color('data_background'),
-                    program_background=self.config.get_color('program_background'),
-                    program_foreground=self.config.get_color('program_foreground'),
-                    condition_green=self.config.get_color('condition_green'),
-                    condition_yellow=self.config.get_color('condition_yellow'),
-                    condition_red=self.config.get_color('condition_red'),
-                    condition_gray=self.config.get_color('condition_gray'),
-                    condition_purple=self.config.get_color('condition_purple'),
-                    condition_magenta=self.config.get_color('condition_magenta'),
-                    tcp_pool=self.tcp_pool,
-                    connector_manager=self.connector_manager,
-                    record_list_provider=build_record_list,
-                    refresh_callback=self._load_message_data,
-                    parent=self
-                )
-                dlg.pin_changed.connect(
-                    lambda _: self._save_map_position(callback=self._load_map)
-                )
-                dlg.record_deleted.connect(self._load_statrep_data)
-                dlg.record_deleted.connect(
-                    lambda: self._save_map_position(callback=self._load_map)
-                )
-                if dlg.exec_() == 1:
+                if self._open_statrep_detail(record_id, callsign, refresh_callback=self._load_message_data):
                     self._load_statrep_data()
         elif item.column() == _ID_COL:
             record_id = item.data(QtCore.Qt.UserRole)
@@ -8525,6 +8687,17 @@ window.commstatBouncePin = function(srid) {
             if text:
                 QtWidgets.QApplication.clipboard().setText(text)
 
+    def _visible_message_ids(self) -> list:
+        """Database ids of the rows the Message table shows, in table order (newest first)."""
+        ids = []
+        for r in range(self.message_table.rowCount()):
+            ci = self.message_table.item(r, 3)
+            rid = ci.data(QtCore.Qt.UserRole) if ci else None
+            if rid is not None:
+                ids.append(rid)
+        return ids
+
+    @_guard_slot
     def _on_message_click(self, item: QTableWidgetItem) -> None:
         """From callsign (col 3) opens detail view; all other cells copy their text."""
         _FROM_COL = 3
@@ -8552,10 +8725,13 @@ window.commstatBouncePin = function(srid) {
                     tcp_pool=self.tcp_pool,
                     connector_manager=self.connector_manager,
                     refresh_callback=self._load_message_data,
+                    record_id_provider=self._visible_message_ids,
                     parent=self
                 )
                 dlg.record_deleted.connect(self._load_message_data)
-                if dlg.exec_() == 1:
+                accepted = dlg.exec_() == 1
+                dlg.deleteLater()
+                if accepted:
                     self._load_message_data()
         else:
             text = item.text().strip()
@@ -8584,14 +8760,18 @@ window.commstatBouncePin = function(srid) {
         else:
             self._set_map_view_mode("contacts")
 
-    def _export_csv(self, title: str, filename_prefix: str, data_fn) -> None:
-        """Prompt for a save path and write the (columns, rows) from data_fn to CSV."""
-        default_name = f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    def _ask_export_path(self, title: str, filename_prefix: str, extension: str, file_filter: str) -> str:
+        """Ask where to save an export; defaults to Downloads with a timestamped name.
+        Returns the chosen path, or "" if the user cancelled."""
+        default_name = f"{filename_prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{extension}"
         downloads_dir = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DownloadLocation)
         default_path = os.path.join(downloads_dir, default_name) if downloads_dir else default_name
-        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, title, default_path, "CSV Files (*.csv)"
-        )
+        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(self, title, default_path, file_filter)
+        return file_path
+
+    def _export_csv(self, title: str, filename_prefix: str, data_fn) -> None:
+        """Prompt for a save path and write the (columns, rows) from data_fn to CSV."""
+        file_path = self._ask_export_path(title, filename_prefix, "csv", "CSV Files (*.csv)")
         if not file_path:
             return
 
@@ -8600,7 +8780,7 @@ window.commstatBouncePin = function(srid) {
             with open(file_path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f)
                 writer.writerow(columns)
-                writer.writerows(rows)
+                writer.writerows([csv_safe(cell) for cell in row] for row in rows)
         except OSError as e:
             QtWidgets.QMessageBox.critical(self, "Export Failed", f"Could not write CSV file:\n{e}")
             return
@@ -8611,7 +8791,7 @@ window.commstatBouncePin = function(srid) {
 
     def _on_export_contacts(self) -> None:
         """Export all qrz table rows to a CSV file (Tools > Export menu)."""
-        self._export_csv("Export Contacts", "contacts", self.db.get_qrz_export_data)
+        self._export_csv("Export QRZ Contacts", "qrz_contacts", self.db.get_qrz_export_data)
 
     def _on_export_statreps(self) -> None:
         """Export all statrep table rows to a CSV file (Tools > Export menu)."""
@@ -8624,11 +8804,8 @@ window.commstatBouncePin = function(srid) {
     def _on_export_watchlist_callsigns(self) -> None:
         """Export watchlist callsigns to a bulk-import TXT file (Tools > Export
         menu). One line per watchlist: "Name: CALL1, CALL2, CALL3"."""
-        default_name = f"watchlist_callsigns_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-        downloads_dir = QtCore.QStandardPaths.writableLocation(QtCore.QStandardPaths.DownloadLocation)
-        default_path = os.path.join(downloads_dir, default_name) if downloads_dir else default_name
-        file_path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Export Watchlist Callsigns", default_path, "Text Files (*.txt)"
+        file_path = self._ask_export_path(
+            "Export Watchlist Callsigns", "watchlist_callsigns", "txt", "Text Files (*.txt)"
         )
         if not file_path:
             return
@@ -8651,12 +8828,14 @@ window.commstatBouncePin = function(srid) {
         Cls = self._resolve_dialog_class("data_manager", "DataManagerDialog")
         dlg = Cls(self.db, parent=self)
         dlg.exec_()
+        dlg.deleteLater()  # parented to the main window; free it once closed
 
     def _on_video_manager(self) -> None:
         """Open Video Manager dialog (Tools menu)."""
         Cls = self._resolve_dialog_class("video_manager", "VideoManagerDialog")
         dlg = Cls(self.db, parent=self)
         dlg.exec_()
+        dlg.deleteLater()  # parented to the main window; free it once closed
 
     def _on_grid_finder(self) -> None:
         """Open Grid Finder as an in-process modeless window; reuse if already open."""
@@ -8666,7 +8845,13 @@ window.commstatBouncePin = function(srid) {
             existing.activateWindow()
             return
         Cls = self._resolve_dialog_class("gridfinder", "GridFinderApp")
-        win = Cls(parent=self)
+        win = Cls(
+            panel_bg=self.config.get_color('module_background'),
+            panel_fg=self.config.get_color('module_foreground'),
+            data_bg=self.config.get_color('data_background'),
+            data_fg=self.config.get_color('data_foreground'),
+            parent=self,
+        )
         geo = self.geometry()
         ww, wh = win.width(), win.height()
         win.move(geo.x() + (geo.width() - ww) // 2, geo.y() + (geo.height() - wh) // 2)
@@ -8711,8 +8896,11 @@ window.commstatBouncePin = function(srid) {
 
     def _on_help(self) -> None:
         HelpDialogCls = self._resolve_dialog_class("help", "HelpDialog")
-        dlg = HelpDialogCls(self)
+        dlg = HelpDialogCls(
+            self, panel_fg=self.config.get_color('module_foreground'), **self._help_theme_colors()
+        )
         dlg.exec_()
+        dlg.deleteLater()  # parented to the main window; free it once closed
 
     def _on_whats_new(self) -> None:
         """Open the What's New page in the user's browser."""
@@ -8731,7 +8919,17 @@ window.commstatBouncePin = function(srid) {
         self._open_external_link("https://gmcmap.com/", "Live Radiation Map")
 
     def _on_qrz_lookup(self) -> None:
-        """Open standalone QRZ Lookup dialog (Tools menu)."""
+        """Open standalone QRZ Lookup dialog (QRZ menu)."""
+        self._open_qrz_dialog()
+
+    def _on_internet_direct_message(self) -> None:
+        """Open the Internet Direct Message dialog (Transmit > Internet Tools).
+
+        Same dialog as QRZ Lookup; only the window/strip title differs so it
+        matches the menu item that opened it."""
+        self._open_qrz_dialog("Direct Message")
+
+    def _open_qrz_dialog(self, title: str = "QRZ Lookup") -> None:
         QRZLookupDialogCls = self._resolve_dialog_class("qrz_lookup", "QRZLookupDialog")
         dlg = QRZLookupDialogCls(
             module_background=self.config.get_color('module_background'),
@@ -8739,9 +8937,11 @@ window.commstatBouncePin = function(srid) {
             program_background=self.config.get_color('program_background'),
             program_foreground=self.config.get_color('program_foreground'),
             refresh_callback=self._load_message_data,
-            parent=self
+            parent=self,
+            title=title,
         )
         dlg.exec_()
+        dlg.deleteLater()  # parented to the main window; free it once closed
 
     def _setup_timers(self) -> None:
         """Setup timers for clock, data refresh, and news feed animation."""
@@ -8757,7 +8957,8 @@ window.commstatBouncePin = function(srid) {
         # any_connection_changed; if a signal is missed (e.g. socket transitions
         # without `disconnected` firing) the indicators drift out of sync with
         # the JS8 Connectors dialog. A 5s poll keeps them self-correcting
-        # without churning sqlite during degraded states.
+        # (it re-reads the small local connectors table, so rigs added,
+        # removed or disabled in the Connectors dialog show up within 5s).
         self.rig_status_timer = QTimer(self)
         self.rig_status_timer.timeout.connect(self._update_connected_rigs_display)
         self.rig_status_timer.start(5000)
@@ -8820,8 +9021,19 @@ window.commstatBouncePin = function(srid) {
         """Check commsrvr server for content updates (runs in background thread)."""
         if not self._internet_available:
             return
-        thread = threading.Thread(target=self._check_commsrvr_content_async, daemon=True)
-        thread.start()
+        # A slow batch (grid lookups, a large backlog) can outlast the interval; a second
+        # check would fetch the same records again, so skip until the first one is done.
+        if not self._commsrvr_lock.acquire(blocking=False):
+            print("[COMMSRVR] The previous check is still running; skipping this one")
+            return
+
+        def run() -> None:
+            try:
+                self._check_commsrvr_content_async()
+            finally:
+                self._commsrvr_lock.release()
+
+        threading.Thread(target=run, daemon=True).start()
 
     def _update_time(self) -> None:
         """Update the time display with current UTC time."""
@@ -9067,24 +9279,41 @@ window.commstatBouncePin = function(srid) {
         """Show dialog with last 20 news headlines."""
         headlines = self.headlines if self.headlines else ["No headlines available"]
 
+        panel_bg = self.config.get_color('module_background')
+        panel_fg = self.config.get_color('module_foreground')
+        data_bg = self.config.get_color('data_background')
+        data_fg = self.config.get_color('data_foreground')
+        # Every second row is a shade darker than the data background.
+        alt_bg = QtGui.QColor(data_bg).darker(108).name()
+
         dialog = QtWidgets.QDialog(self)
         dialog.setWindowTitle("Last 20 News Headlines")
         dialog.setMinimumSize(600, 400)
+        dialog.resize(760, 520)
+        dialog.setStyleSheet(f"QDialog {{ background-color:{panel_bg}; }}")
 
         layout = QtWidgets.QVBoxLayout(dialog)
 
         # Feed name label
         feed_name = self.feed_combo.currentText()
         feed_label = QtWidgets.QLabel(f"Feed: {feed_name}")
-        feed_label.setFont(QtGui.QFont("Arial", 12, QtGui.QFont.Bold))
+        feed_label.setStyleSheet(
+            f"QLabel {{ color:{panel_fg}; font-family:'Kode Mono'; font-size:13px; font-weight:bold; }}"
+        )
         layout.addWidget(feed_label)
 
-        # Headlines list
+        # Headlines list: Kode Mono, alternating row colors, long headlines wrap
         list_widget = QtWidgets.QListWidget()
-        _list_font = QtGui.QFont("Roboto", -1)
-        _list_font.setPixelSize(13)
-        list_widget.setFont(_list_font)
         list_widget.setAlternatingRowColors(True)
+        list_widget.setWordWrap(True)
+        list_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        list_widget.setStyleSheet(
+            f"QListWidget {{ background-color:{data_bg}; alternate-background-color:{alt_bg};"
+            f" color:{data_fg}; border:1px solid {COLOR_INPUT_BORDER};"
+            f" font-family:'Kode Mono'; font-size:13px; }}"
+            "QListWidget::item { padding:4px 6px; }"
+            "QListWidget::item:selected { background-color:#cce5ff; color:#000000; }"
+        )
         for i, headline in enumerate(headlines[:20], 1):
             list_widget.addItem(f"{i}. {headline}")
         layout.addWidget(list_widget)
@@ -9105,18 +9334,21 @@ window.commstatBouncePin = function(srid) {
         Cls = self._resolve_dialog_class("js8mail", "JS8MailDialog")
         dialog = Cls(self.tcp_pool, self.connector_manager, self)
         dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
     def _on_js8sms(self) -> None:
         """Open JS8 SMS window."""
         Cls = self._resolve_dialog_class("js8sms", "JS8SMSDialog")
         dialog = Cls(self.tcp_pool, self.connector_manager, self)
         dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
     def _on_js8_direct_message(self) -> None:
         """Open JS8 Direct Message window."""
         Cls = self._resolve_dialog_class("js8_direct_message", "JS8DirectMessageDialog")
         dialog = Cls(self.tcp_pool, self.connector_manager, self._load_message_data, parent=self)
         dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
     def _on_statrep(self) -> None:
         """Open StatRep window."""
@@ -9127,18 +9359,21 @@ window.commstatBouncePin = function(srid) {
             data_background=self.config.get_color('data_background')
         )
         dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
     def _on_send_message(self) -> None:
         """Open Send Message window."""
         Cls = self._resolve_dialog_class("group_message", "GroupMessageDialog")
         dialog = Cls(self.tcp_pool, self.connector_manager, self._load_message_data, parent=self)
         dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
     def _on_group_alert(self) -> None:
         """Open Group Alert window."""
         Cls = self._resolve_dialog_class("alert", "AlertDialog")
         dialog = Cls(self.tcp_pool, self.connector_manager, self._trigger_show_alerts, parent=self)
         dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
     def _on_group_incident(self) -> None:
         """Open Group Incident (Event / Attack) window."""
@@ -9149,22 +9384,14 @@ window.commstatBouncePin = function(srid) {
             data_background=self.config.get_color('data_background')
         )
         dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
     def _on_share_video(self) -> None:
         """Open Share Video window."""
         Cls = self._resolve_dialog_class("video", "VideoDialog")
         dialog = Cls(self._update_video_button_indicator, parent=self)
         dialog.exec_()
-
-    def _on_filter(self) -> None:
-        """Open Display Filter window."""
-        Cls = self._resolve_dialog_class("filter", "FilterDialog")
-        dialog = Cls(self.config.filter_settings, self)
-        if dialog.exec_() == QtWidgets.QDialog.Accepted:
-            # Update filter settings directly
-            self.config.filter_settings = dialog.get_filters()
-            # Refresh data with new filters
-            self._refresh_all_data()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
     def _reset_filter_date(self, days_ago: int) -> None:
         """Reset filter start date to specified days ago and apply."""
@@ -9323,12 +9550,45 @@ window.commstatBouncePin = function(srid) {
             self._save_map_position(callback=self._load_map)
 
 
+    def _add_choice_menu(self, parent_menu, title: str, choices, current, on_pick) -> QtWidgets.QMenu:
+        """Add a submenu of mutually exclusive choices to parent_menu.
+
+        choices: [(value, label), ...]. current: the saved value; the matching item starts
+        ticked (numbers compare within 0.01, so 2.5 matches the saved float). on_pick(value)
+        runs when the user picks a different item. A QActionGroup keeps exactly one ticked."""
+        menu = parent_menu.addMenu(title)
+        group = QtWidgets.QActionGroup(menu)
+        group.setExclusive(True)
+        for value, label in choices:
+            action = QtWidgets.QAction(label, self)
+            action.setCheckable(True)
+            if isinstance(value, float) or isinstance(current, float):
+                action.setChecked(abs(float(current) - float(value)) < 0.01)
+            else:
+                action.setChecked(current == value)
+            action.triggered.connect(lambda checked=False, v=value: on_pick(v))
+            group.addAction(action)
+            menu.addAction(action)
+        return menu
+
+    def _layer_choice(self, label: str, apply_fn, cache: str = None, redraw: bool = True) -> None:
+        """Shared body of the Map menu's choice handlers: apply the new setting, drop the
+        layer's cached data (cache="earthquake" or "wildfire"), redraw the map."""
+        try:
+            apply_fn()
+            if cache:
+                setattr(self, f"_{cache}_cache", [])
+                setattr(self, f"_{cache}_cache_time", 0)
+            if redraw:
+                self._save_map_position(callback=self._load_map)
+        except Exception as e:
+            print(f"{label} switch failed: {e}")
+
     def _set_weather_radar_refresh(self, minutes: int) -> None:
-        self.config.set_weather_radar_refresh(minutes)
-        if hasattr(self, "map_radar_refresh_actions"):
-            for value, action in self.map_radar_refresh_actions.items():
-                action.setChecked(value == minutes)
-        self._restart_radar_refresh_timer()
+        def apply():
+            self.config.set_weather_radar_refresh(minutes)
+            self._restart_radar_refresh_timer()
+        self._layer_choice("Radar refresh", apply, redraw=False)
 
 
     def _set_show_radar_timestamp(self, checked: bool) -> None:
@@ -9354,40 +9614,13 @@ window.commstatBouncePin = function(srid) {
             print(f"Earthquake layer switch failed: {e}")
 
     def _set_earthquake_region(self, region: str) -> None:
-        try:
-            self.config.set_earthquake_region(region)
-            if hasattr(self, "map_eq_region_actions"):
-                for value, action in self.map_eq_region_actions.items():
-                    action.setChecked(value == region)
-            self._earthquake_cache = []
-            self._earthquake_cache_time = 0
-            self._save_map_position(callback=self._load_map)
-        except Exception as e:
-            print(f"Earthquake region switch failed: {e}")
+        self._layer_choice("Earthquake region", lambda: self.config.set_earthquake_region(region), "earthquake")
 
     def _set_earthquake_min_mag(self, mag: float) -> None:
-        try:
-            self.config.set_earthquake_min_mag(float(mag))
-            if hasattr(self, "map_eq_mag_actions"):
-                for value, action in self.map_eq_mag_actions.items():
-                    action.setChecked(abs(float(value) - float(mag)) < 0.01)
-            self._earthquake_cache = []
-            self._earthquake_cache_time = 0
-            self._save_map_position(callback=self._load_map)
-        except Exception as e:
-            print(f"Earthquake magnitude switch failed: {e}")
+        self._layer_choice("Earthquake magnitude", lambda: self.config.set_earthquake_min_mag(float(mag)), "earthquake")
 
     def _set_earthquake_refresh(self, minutes: int) -> None:
-        try:
-            self.config.set_earthquake_refresh(int(minutes))
-            if hasattr(self, "map_eq_refresh_actions"):
-                for value, action in self.map_eq_refresh_actions.items():
-                    action.setChecked(value == minutes)
-            self._earthquake_cache = []
-            self._earthquake_cache_time = 0
-            self._save_map_position(callback=self._load_map)
-        except Exception as e:
-            print(f"Earthquake refresh switch failed: {e}")
+        self._layer_choice("Earthquake refresh", lambda: self.config.set_earthquake_refresh(int(minutes)), "earthquake")
 
     def _set_wildfire_layer(self, checked: bool) -> None:
         try:
@@ -9406,28 +9639,10 @@ window.commstatBouncePin = function(srid) {
             print(f"Wildfire layer switch failed: {e}")
 
     def _set_wildfire_min_acres(self, acres: float) -> None:
-        try:
-            self.config.set_wildfire_min_acres(float(acres))
-            if hasattr(self, "map_wildfire_acres_actions"):
-                for value, action in self.map_wildfire_acres_actions.items():
-                    action.setChecked(abs(float(value) - float(acres)) < 0.01)
-            self._wildfire_cache = []
-            self._wildfire_cache_time = 0
-            self._save_map_position(callback=self._load_map)
-        except Exception as e:
-            print(f"Wildfire size switch failed: {e}")
+        self._layer_choice("Wildfire size", lambda: self.config.set_wildfire_min_acres(float(acres)), "wildfire")
 
     def _set_wildfire_refresh(self, minutes: int) -> None:
-        try:
-            self.config.set_wildfire_refresh(int(minutes))
-            if hasattr(self, "map_wildfire_refresh_actions"):
-                for value, action in self.map_wildfire_refresh_actions.items():
-                    action.setChecked(value == minutes)
-            self._wildfire_cache = []
-            self._wildfire_cache_time = 0
-            self._save_map_position(callback=self._load_map)
-        except Exception as e:
-            print(f"Wildfire refresh switch failed: {e}")
+        self._layer_choice("Wildfire refresh", lambda: self.config.set_wildfire_refresh(int(minutes)), "wildfire")
 
     def _on_toggle_hide_green_pins(self, checked: bool) -> None:
         """Hide green (all-clear) statreps from table and map. Session-only — resets on restart."""
@@ -9470,6 +9685,7 @@ window.commstatBouncePin = function(srid) {
         dlg._search()
         dlg.msg_edit.setFocus()
         dlg.exec_()
+        dlg.deleteLater()
 
     def _on_toggle_save_all_alerts(self, checked: bool) -> None:
         """Save all incoming group alerts, not just those for groups in the local table."""
@@ -9558,207 +9774,10 @@ window.commstatBouncePin = function(srid) {
         # visibly freeze the UI while thousands of QTableWidgetItems are laid
         # out one at a time. Same fix already used for contacts_table's load.
         table.setUpdatesEnabled(False)
-
-        # Pre-fetch QRZ callsigns and user callsign for bold highlighting
-        qrz_callsigns = self.db.get_qrz_callsigns()
-        user_callsign, _, __ = self.db.get_user_settings()
-        user_callsign = user_callsign.upper() if user_callsign else ""
-
-        for row_num, row_data in enumerate(data):
-            table.insertRow(row_num)
-            rfi_value = int(row_data[11]) if is_message_table and len(row_data) > 11 and row_data[11] else 0
-            row_is_rfi = rfi_value in (1, 2)
-
-            for col_num, value in enumerate(row_data):
-                display_value = str(value) if value is not None else ""
-
-                # Decode || newline placeholders in statrep remarks and messages
-                raw_message = None
-                if is_statrep_table and col_num == 21 and "||" in display_value:
-                    decoded_remarks = display_value.replace("||", "\n")
-                    display_value = display_value.replace("||", " ")
-                elif is_message_table and col_num == 7:
-                    if "||" in display_value or row_is_rfi:
-                        raw_message = display_value      # preserve real body for detail dialog
-                    display_value = display_value.replace("||", " ")
-                    if rfi_value == 1:
-                        display_value = " REQUEST FOR INFORMATION"
-                    elif rfi_value == 2:
-                        display_value = " REQUEST FOR INFORMATION REPLY"
-                    decoded_remarks = None
-                else:
-                    decoded_remarks = None
-
-                # Handle SNR (db) column (first column)
-                if (is_statrep_table or is_message_table) and col_num == 0:
-                    display_value = ""
-                    item = QTableWidgetItem(display_value)
-                    try:
-                        # Check if source = 2 (Internet source)
-                        source_value = None
-                        if is_statrep_table and len(row_data) > 22:
-                            source_value = int(row_data[22]) if row_data[22] is not None else 0
-                        elif is_message_table and len(row_data) > 8:
-                            source_value = int(row_data[8]) if row_data[8] is not None else 0
-
-                        if source_value == 2:
-                            item.setToolTip("   Internet")
-                            color = QColor("#9400ff")
-                            item.setBackground(color)
-                            table.setItem(row_num, col_num, item)
-                            continue
-
-                        if source_value == 3:
-                            item.setToolTip("   Internet Only")
-                            color = QColor("#FF00FF")
-                            item.setBackground(color)
-                            table.setItem(row_num, col_num, item)
-                            continue
-
-                        # Default SNR-based coloring
-                        db_value = int(value) if value is not None else 0
-                        item.setToolTip(f"   RF SNR {db_value}")
-                        if db_value >= -5:
-                            color = QColor(self.config.get_color('condition_green'))
-                        elif db_value >= -16:
-                            color = QColor(self.config.get_color('condition_yellow'))
-                        else:
-                            color = QColor(self.config.get_color('condition_red'))
-                        item.setBackground(color)
-                    except (ValueError, TypeError):
-                        pass
-                    table.setItem(row_num, col_num, item)
-                    continue
-
-                # Format datetime column as "Mon DD HH:MM" - column 1 for both tables
-                if (is_message_table or is_statrep_table) and col_num == 1:
-                    try:
-                        dt = datetime.strptime(display_value[:19], "%Y-%m-%d %H:%M:%S")
-                        display_value = dt.strftime("%b-%d  %H:%M")
-                    except (ValueError, TypeError):
-                        display_value = display_value[:16]
-
-                # Format frequency column (column 2) - convert Hz to MHz
-                if (is_message_table or is_statrep_table) and col_num == 2:
-                    try:
-                        freq_mhz = hz_to_mhz(float(value) if value else 0)
-                        display_value = f"{freq_mhz:.3f}"  # Show as 7.110
-                    except (ValueError, TypeError):
-                        pass
-
-                # StatRep GID column (col 5) shows only the server-assigned
-                # global_id — blank until commsrvr assigns one (0/None). The
-                # raw sr_id is shown separately in the adjacent TID column;
-                # the map pin/bounce click keys off the row's internal db id
-                # (row_data[23]), set as UserRole data on the TID cell below.
-                if is_statrep_table and col_num == 5:
-                    display_value = display_value if value else ""
-
-                # Message GID column (col 5) shows only the server-assigned
-                # global_id — blank until commsrvr assigns one (0/None). The
-                # raw msg_id is shown separately in the adjacent TID column.
-                if is_message_table and col_num == 5:
-                    display_value = display_value if value else ""
-
-                item = QTableWidgetItem(display_value)
-
-                # Use Kode Mono for remarks/message text columns and StatRep's
-                # Grid column. Freq (both tables) and both tables' From/GID
-                # columns (plus each table's TID) use Roboto.
-                if is_message_table and col_num == 7 and row_is_rfi:
-                    font = QtGui.QFont("Kode Mono", -1)
-                    font.setBold(True)
-                    item.setFont(font)
-                    item.setForeground(QColor("#333333"))
-                    item.setBackground(QColor("#FFD1DC") if rfi_value == 1 else QColor("#D9D9D9"))
-                elif (is_statrep_table and col_num in (7, 21)) or (is_message_table and col_num == 7):
-                    item.setFont(QtGui.QFont("Kode Mono", -1))
-                elif (is_statrep_table and col_num in (2, 3, 5, 6)) or (is_message_table and col_num in (2, 3, 5, 6)):
-                    item.setFont(QtGui.QFont("Roboto", -1))
-
-                # Add tooltip for multi-line remarks
-                if decoded_remarks:
-                    item.setToolTip(decoded_remarks)
-
-                # Store raw message text (with ||) so detail dialog can show newlines
-                if raw_message is not None and is_message_table and col_num == 7:
-                    item.setData(QtCore.Qt.UserRole, raw_message)
-
-                # Bold From callsign (col 3) if callsign is in QRZ cache
-                if col_num == 3:
-                    from_call = base_callsign(display_value)
-                    if from_call in qrz_callsigns:
-                        font = item.font()
-                        font.setBold(True)
-                        item.setFont(font)
-                        item.setToolTip("Exists in QRZ local cache")
-                    # From is clickable in both tables (opens detail view) —
-                    # style it like a hyperlink; bold above still only
-                    # applies when the callsign is in the QRZ cache.
-                    font = item.font()
-                    font.setUnderline(True)
-                    item.setFont(font)
-                    item.setForeground(QColor(_LINK_COLOR))
-                # Bold To callsign (col 4) only when it matches the user's callsign
-                elif col_num == 4:
-                    to_call = base_callsign(display_value)
-                    if is_message_table and user_callsign and to_call == base_callsign(user_callsign):
-                        font = item.font()
-                        font.setBold(True)
-                        item.setFont(font)
-                # Bold the statrep TID (col 6) — clickable for map bounce/pan —
-                # and style it like a hyperlink to match the From column. GID
-                # (col 5) is plain text now that this styling lives on TID.
-                elif is_statrep_table and col_num == 6:
-                    font = item.font()
-                    font.setBold(True)
-                    font.setUnderline(True)
-                    item.setFont(font)
-                    item.setForeground(QColor(_LINK_COLOR))
-
-                # TID column is centered in both tables.
-                if (is_statrep_table or is_message_table) and col_num == 6:
-                    item.setTextAlignment(Qt.AlignCenter)
-                # Bold the message GID (col 5) with a "Delivered" tooltip once the
-                # commsrvr confirms delivery (delivered = 1 in the messages table).
-                elif is_message_table and col_num == 5 and len(row_data) > 9 and row_data[9]:
-                    font = item.font()
-                    font.setBold(True)
-                    item.setFont(font)
-                    item.setToolTip("  Delivery Confirmed")
-
-                if status_colors and value in status_colors:
-                    color = QColor(self.config.get_color(status_colors[value]))
-                    item.setBackground(color)
-                    item.setForeground(color)
-
-                table.setItem(row_num, col_num, item)
-
-            # Store database id on the callsign cell for statrep rows
-            if is_statrep_table and len(row_data) > 23:
-                cs_item = table.item(row_num, 3)
-                if cs_item:
-                    cs_item.setData(QtCore.Qt.UserRole, row_data[23])
-                # sr_id (col 6, displayed) is not unique across records; the map
-                # pin bounce must key off the unique statrep primary key instead.
-                id_item = table.item(row_num, 6)
-                if id_item:
-                    id_item.setData(QtCore.Qt.UserRole, row_data[23])
-
-            # Store database id on the callsign cell for message rows — msg_id
-            # (col 6, displayed) is only a 3-char hour+minute code, recycled
-            # daily and not unique across senders, so the detail dialog must
-            # key off the unique messages primary key instead.
-            if is_message_table and len(row_data) > 10:
-                cs_item = table.item(row_num, 3)
-                if cs_item:
-                    cs_item.setData(QtCore.Qt.UserRole, row_data[10])
-
-        # Alert table (non-statrep, non-message): sort by first column descending
-        if not is_message_table and not is_statrep_table:
-            table.sortItems(0, QtCore.Qt.DescendingOrder)
-
-        table.setUpdatesEnabled(True)
+        try:
+            self._fill_table_rows(table, data, status_colors, is_message_table, is_statrep_table)
+        finally:
+            table.setUpdatesEnabled(True)   # whatever happened above: never leave the table frozen
 
         # One-time content-based fit for the Interactive middle columns (col 0
         # is Fixed, the last column is Stretch — both skipped here). Only runs
@@ -9775,6 +9794,228 @@ window.commstatBouncePin = function(srid) {
             # Fresh rows are all visible; _load_message_data re-applies any
             # active FILTER text afterward, which recounts the visible rows.
             self._update_message_count_label()
+
+    def _fill_table_rows(self, table, data, status_colors, is_message_table, is_statrep_table) -> None:
+        """Insert one table row per record. A record that cannot be shown is reported and
+        skipped (its partial row is removed) so one bad row never costs the whole table."""
+        # Pre-fetch QRZ callsigns and user callsign for bold highlighting
+        qrz_callsigns = self.db.get_qrz_callsigns()
+        user_callsign, _, __ = self.db.get_user_settings()
+        user_callsign = user_callsign.upper() if user_callsign else ""
+
+        for row_data in data:
+            row_num = table.rowCount()
+            table.insertRow(row_num)
+            try:
+                self._fill_table_row(table, row_num, row_data, status_colors,
+                                     is_message_table, is_statrep_table, qrz_callsigns, user_callsign)
+            except Exception as e:
+                print(f"[table] Skipped a row that could not be shown ({type(e).__name__}: {e}): {row_data!r}")
+                table.removeRow(row_num)
+
+        # Alert table (non-statrep, non-message): sort by first column descending
+        if not is_message_table and not is_statrep_table:
+            table.sortItems(0, QtCore.Qt.DescendingOrder)
+
+    def _fill_table_row(self, table, row_num, row_data, status_colors,
+                        is_message_table, is_statrep_table, qrz_callsigns, user_callsign) -> None:
+        """Fill one already-inserted table row from a database record."""
+        try:
+            rfi_value = int(row_data[11]) if is_message_table and len(row_data) > 11 and row_data[11] else 0
+        except (ValueError, TypeError):
+            rfi_value = 0
+        row_is_rfi = rfi_value in (1, 2)
+
+        for col_num, value in enumerate(row_data[:table.columnCount()]):
+            display_value = str(value) if value is not None else ""
+
+            # Decode || newline placeholders in statrep remarks and messages
+            raw_message = None
+            if is_statrep_table and col_num == StatRepCol.COMMENTS and "||" in display_value:
+                decoded_remarks = display_value.replace("||", "\n")
+                display_value = display_value.replace("||", " ")
+            elif is_message_table and col_num == 7:
+                if "||" in display_value or row_is_rfi:
+                    raw_message = display_value      # preserve real body for detail dialog
+                display_value = display_value.replace("||", " ")
+                if rfi_value == 1:
+                    display_value = " REQUEST FOR INFORMATION"
+                elif rfi_value == 2:
+                    display_value = " REQUEST FOR INFORMATION REPLY"
+                decoded_remarks = None
+            else:
+                decoded_remarks = None
+
+            # Handle SNR (db) column (first column)
+            if (is_statrep_table or is_message_table) and col_num == 0:
+                display_value = ""
+                item = QTableWidgetItem(display_value)
+                try:
+                    # Check if source = 2 (Internet source)
+                    source_value = None
+                    if is_statrep_table and len(row_data) > StatRepCol.SOURCE:
+                        source_value = int(row_data[StatRepCol.SOURCE]) if row_data[StatRepCol.SOURCE] is not None else -1
+                    elif is_message_table and len(row_data) > 8:
+                        source_value = int(row_data[8]) if row_data[8] is not None else -1
+
+                    if source_value == 0:
+                        item.setToolTip("   Saved only (not transmitted)")
+                        item.setBackground(QColor("#808080"))
+                        table.setItem(row_num, col_num, item)
+                        continue
+
+                    if source_value == 2:
+                        item.setToolTip("   Internet")
+                        color = QColor("#9400ff")
+                        item.setBackground(color)
+                        table.setItem(row_num, col_num, item)
+                        continue
+
+                    if source_value == 3:
+                        item.setToolTip("   Internet Only")
+                        color = QColor("#FF00FF")
+                        item.setBackground(color)
+                        table.setItem(row_num, col_num, item)
+                        continue
+
+                    # Default SNR-based coloring
+                    db_value = int(value) if value is not None else 0
+                    item.setToolTip(f"   RF SNR {db_value}")
+                    if db_value >= -5:
+                        color = QColor(self.config.get_color('condition_green'))
+                    elif db_value >= -16:
+                        color = QColor(self.config.get_color('condition_yellow'))
+                    else:
+                        color = QColor(self.config.get_color('condition_red'))
+                    item.setBackground(color)
+                except (ValueError, TypeError):
+                    pass
+                table.setItem(row_num, col_num, item)
+                continue
+
+            # Format datetime column as "Mon DD HH:MM" - column 1 for both tables
+            if (is_message_table or is_statrep_table) and col_num == 1:
+                try:
+                    dt = datetime.strptime(display_value[:19], "%Y-%m-%d %H:%M:%S")
+                    display_value = dt.strftime("%b-%d  %H:%M")
+                except (ValueError, TypeError):
+                    display_value = display_value[:16]
+
+            # Format frequency column (column 2) - convert Hz to MHz
+            if (is_message_table or is_statrep_table) and col_num == 2:
+                try:
+                    freq_mhz = hz_to_mhz(float(value) if value else 0)
+                    display_value = f"{freq_mhz:.3f}"  # Show as 7.110
+                except (ValueError, TypeError):
+                    pass
+
+            # StatRep GID column (col 5) shows only the server-assigned
+            # global_id — blank until commsrvr assigns one (0/None). The
+            # raw sr_id is shown separately in the adjacent TID column;
+            # the map pin/bounce click keys off the row's internal db id
+            # (row_data[StatRepCol.ID]), set as UserRole data on the TID cell below.
+            if is_statrep_table and col_num == StatRepCol.GLOBAL_ID:
+                display_value = display_value if value else ""
+
+            # Message GID column (col 5) shows only the server-assigned
+            # global_id — blank until commsrvr assigns one (0/None). The
+            # raw msg_id is shown separately in the adjacent TID column.
+            if is_message_table and col_num == 5:
+                display_value = display_value if value else ""
+
+            item = QTableWidgetItem(display_value)
+
+            # Use Kode Mono for remarks/message text columns and StatRep's
+            # Grid column. Freq (both tables) and both tables' From/GID
+            # columns (plus each table's TID) use Roboto.
+            if is_message_table and col_num == 7 and row_is_rfi:
+                font = QtGui.QFont("Kode Mono", -1)
+                font.setBold(True)
+                item.setFont(font)
+                item.setForeground(QColor("#333333"))
+                item.setBackground(QColor("#FFD1DC") if rfi_value == 1 else QColor("#D9D9D9"))
+            elif (is_statrep_table and col_num in (StatRepCol.GRID, StatRepCol.COMMENTS)) or (is_message_table and col_num == 7):
+                item.setFont(QtGui.QFont("Kode Mono", -1))
+            elif (is_statrep_table and col_num in (StatRepCol.FREQ, StatRepCol.FROM_CALLSIGN, StatRepCol.GLOBAL_ID, StatRepCol.SR_ID)) or (is_message_table and col_num in (2, 3, 5, 6)):
+                item.setFont(QtGui.QFont("Roboto", -1))
+
+            # Add tooltip for multi-line remarks
+            if decoded_remarks:
+                item.setToolTip(_plain_tooltip(decoded_remarks))
+
+            # Store raw message text (with ||) so detail dialog can show newlines
+            if raw_message is not None and is_message_table and col_num == 7:
+                item.setData(QtCore.Qt.UserRole, raw_message)
+
+            # Bold From callsign (col 3) if callsign is in QRZ cache
+            if col_num == 3:
+                from_call = base_callsign(display_value)
+                if from_call in qrz_callsigns:
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+                    item.setToolTip("Exists in QRZ local cache")
+                # From is clickable in both tables (opens detail view) —
+                # style it like a hyperlink; bold above still only
+                # applies when the callsign is in the QRZ cache.
+                font = item.font()
+                font.setUnderline(True)
+                item.setFont(font)
+                item.setForeground(QColor(_LINK_COLOR))
+            # Bold To callsign (col 4) only when it matches the user's callsign
+            elif col_num == 4:
+                to_call = base_callsign(display_value)
+                if is_message_table and user_callsign and to_call == base_callsign(user_callsign):
+                    font = item.font()
+                    font.setBold(True)
+                    item.setFont(font)
+            # Bold the statrep TID (col 6) — clickable for map bounce/pan —
+            # and style it like a hyperlink to match the From column. GID
+            # (col 5) is plain text now that this styling lives on TID.
+            elif is_statrep_table and col_num == StatRepCol.SR_ID:
+                font = item.font()
+                font.setBold(True)
+                font.setUnderline(True)
+                item.setFont(font)
+                item.setForeground(QColor(_LINK_COLOR))
+
+            # TID column is centered in both tables.
+            if (is_statrep_table or is_message_table) and col_num == 6:
+                item.setTextAlignment(Qt.AlignCenter)
+            # Bold the message GID (col 5) with a "Delivered" tooltip once the
+            # commsrvr confirms delivery (delivered = 1 in the messages table).
+            elif is_message_table and col_num == 5 and len(row_data) > 9 and row_data[9]:
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+                item.setToolTip("  Delivery Confirmed")
+
+            if status_colors and value in status_colors:
+                color = QColor(self.config.get_color(status_colors[value]))
+                item.setBackground(color)
+                item.setForeground(color)
+
+            table.setItem(row_num, col_num, item)
+
+        # Store database id on the callsign cell for statrep rows
+        if is_statrep_table and len(row_data) > StatRepCol.ID:
+            cs_item = table.item(row_num, StatRepCol.FROM_CALLSIGN)
+            if cs_item:
+                cs_item.setData(QtCore.Qt.UserRole, row_data[StatRepCol.ID])
+            # sr_id (col 6, displayed) is not unique across records; the map
+            # pin bounce must key off the unique statrep primary key instead.
+            id_item = table.item(row_num, StatRepCol.SR_ID)
+            if id_item:
+                id_item.setData(QtCore.Qt.UserRole, row_data[StatRepCol.ID])
+
+        # Store database id on the callsign cell for message rows — msg_id
+        # (col 6, displayed) is only a 3-char hour+minute code, recycled
+        # daily and not unique across senders, so the detail dialog must
+        # key off the unique messages primary key instead.
+        if is_message_table and len(row_data) > 10:
+            cs_item = table.item(row_num, 3)
+            if cs_item:
+                cs_item.setData(QtCore.Qt.UserRole, row_data[10])
 
     def _get_normalization_settings(self) -> Tuple[bool, Optional[Dict[str, str]]]:
         """Get text normalization flag and abbreviations dict.
@@ -9798,7 +10039,7 @@ window.commstatBouncePin = function(srid) {
         self._save_map_position(callback=self._load_map)
 
     def _on_toggle_show_every_group(self, checked: bool) -> None:
-        """Toggle showing all groups data (no group filtering)."""
+        """Toggle 'Show Other Groups': also show data for groups that are not in the group list."""
         self.config.set_show_every_group(checked)
         self._refresh_all_data()
 
@@ -9847,9 +10088,10 @@ window.commstatBouncePin = function(srid) {
         Cls = self._resolve_dialog_class("maintenance", "MaintenanceDialog")
         dialog = Cls(self)
         dialog.exec_()
+        dialog.release()  # frees the dialog, but only after its worker thread has finished
 
     def _populate_filter_groups_menu(self) -> None:
-        """Populate filter menu with per-group checkboxes above 'Show All Groups'."""
+        """Populate filter menu with per-group checkboxes above 'Show Other Groups'."""
         for action in self.filter_group_actions.values():
             self.filter_menu.removeAction(action)
         self.filter_group_actions.clear()
@@ -10005,21 +10247,23 @@ window.commstatBouncePin = function(srid) {
             freq_hz:   JS8Call frequency in Hz (dial + offset).
             offset_hz: Audio offset in Hz.
         """
-        relay_cs = _strip_cs_suffix(from_call)
+        relay_cs = base_callsign(from_call)
         if not _CONTACTS_BASE_CS_PATTERN.match(relay_cs):
             return
         freq_mhz = round(hz_to_mhz(freq_hz, offset_hz), 3)
         value = re.sub(rf'^(?:{re.escape(relay_cs)}\s*:\s*)+', '', value, flags=re.IGNORECASE)
         parsed = parse_contacts_observation(value)
+        # The writes themselves go to the background writer (see __init__).
         if parsed is not None:
             target_cs, target_snr = parsed
-            self.db.upsert_contacts_pair(relay_cs, int(local_snr), target_cs, target_snr, freq_mhz)
+            self._contacts_writer.submit(
+                self.db.upsert_contacts_pair, relay_cs, int(local_snr), target_cs, target_snr, freq_mhz)
             return
         heard = parse_hearing_observation(value)
         if heard is not None:
-            self.db.upsert_contacts_hearing(relay_cs, heard, freq_mhz)
+            self._contacts_writer.submit(self.db.upsert_contacts_hearing, relay_cs, heard, freq_mhz)
             return
-        self.db.upsert_contact_self(relay_cs, int(local_snr), freq_mhz)
+        self._contacts_writer.submit(self.db.upsert_contact_self, relay_cs, int(local_snr), freq_mhz)
 
     def _purge_old_contacts(self) -> None:
         """Drop contacts rows older than CONTACTS_RETENTION_HOURS. Runs hourly."""
@@ -10028,6 +10272,16 @@ window.commstatBouncePin = function(srid) {
             print(f"[contacts] purged {removed} row(s) older than {CONTACTS_RETENTION_HOURS}h")
 
     def _handle_tcp_message(self, rig_name: str, message: dict) -> None:
+        """Slot for every frame from JS8Call. An exception escaping a Qt slot aborts
+        the whole program, so a frame that cannot be processed (for example a null
+        SNR or UTC) is logged and skipped instead."""
+        try:
+            self._process_tcp_message(rig_name, message)
+        except Exception:
+            print(f"{ConsoleColors.ERROR}[{rig_name}] Could not process message: {message!r}{ConsoleColors.RESET}")
+            traceback.print_exc()
+
+    def _process_tcp_message(self, rig_name: str, message: dict) -> None:
         """
         Handle incoming TCP message from JS8Call.
 
@@ -10098,10 +10352,13 @@ window.commstatBouncePin = function(srid) {
                 )
                 if _ack and _ack.group(1).upper() == _user_call.upper():
                     _recipient = _ack.group(2).upper()
-                    QtWidgets.QMessageBox.information(
-                        self,
-                        "Message Delivered",
-                        f"Your message to {_recipient} was delivered successfully."
+                    # The styled popup (honours the notification setting) is queued, so
+                    # no dialog opens inside this handler while more frames arrive.
+                    QtCore.QMetaObject.invokeMethod(
+                        self, "_show_delivered_popup",
+                        QtCore.Qt.QueuedConnection,
+                        QtCore.Q_ARG(str, _recipient),
+                        QtCore.Q_ARG(str, self._last_sent_message_to(_recipient, _user_call)),
                     )
                     return  # fully handled
 
@@ -10292,7 +10549,7 @@ window.commstatBouncePin = function(srid) {
             return False
 
         addressee = match.group(1)
-        target_callsign = _strip_cs_suffix(match.group(2).strip().upper())
+        target_callsign = base_callsign(match.group(2).strip().upper())
         sr_id = match.group(3).strip().upper()
 
         if not addressee.startswith("@"):
@@ -10312,7 +10569,7 @@ window.commstatBouncePin = function(srid) {
 
         row_id = None
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "SELECT id, from_callsign FROM statrep WHERE date = ? AND sr_id = ?",
@@ -10461,6 +10718,7 @@ window.commstatBouncePin = function(srid) {
             rig_name, "statrep", data, "sr_id", "statrep", from_callsign, fwd_marker
         )
         if result:
+            self._defer_grid_upgrade(from_callsign, statrep_grid)
             # Auto-ack: only for genuinely new inserts (not duplicates) received
             # live over the JS8 TCP feed (source=1). Fires for both group-
             # addressed and direct-to-user STATREPs (target is populated in
@@ -10473,6 +10731,8 @@ window.commstatBouncePin = function(srid) {
             return (result, None)
 
         return ("", None)
+
+    _ACK_REPLY_TIMEOUT_MS = 5000
 
     def _send_statrep_ack(self, rig_name: str, group: str, from_callsign: str, sr_id: str, date_only: str) -> None:
         """
@@ -10489,6 +10749,11 @@ window.commstatBouncePin = function(srid) {
         interactive send path in this app already performs, since JS8Call
         splices a selected call into the next TX.SEND_MESSAGE, corrupting
         the ack.
+
+        Acks are queued per rig and sent when JS8Call answers (see
+        _on_ack_call_selected): one question covers every ack queued behind it,
+        and acks still unanswered after _ACK_REPLY_TIMEOUT_MS are dropped rather
+        than sent late.
 
         On successful transmit, also appends a note to the just-saved
         statrep row's own comments/remarks recording that the ack went out.
@@ -10507,58 +10772,95 @@ window.commstatBouncePin = function(srid) {
         if not client or not client.is_connected():
             return
 
+        # One reply slot per client (a rebuilt client needs connecting again)
+        if self._ack_clients.get(rig_name) is not client:
+            client.call_selected_received.connect(self._on_ack_call_selected)
+            self._ack_clients[rig_name] = client
+
+        queue = self._ack_pending.setdefault(rig_name, [])
+        queue.append((group, from_callsign, sr_id, date_only))
+        if len(queue) > 1:
+            return   # a question is already out for this rig; its answer covers this ack too
+
+        timer = self._ack_timers.get(rig_name)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.timeout.connect(lambda rig=rig_name: self._on_ack_timeout(rig))
+            self._ack_timers[rig_name] = timer
+        timer.start(self._ACK_REPLY_TIMEOUT_MS)
+        client.get_call_selected()
+
+    def _on_ack_timeout(self, rig_name: str) -> None:
+        """JS8Call never answered: drop the queued acks instead of sending them late."""
+        dropped = self._ack_pending.pop(rig_name, [])
+        if dropped:
+            print(f"[{rig_name}] Dropped {len(dropped)} STATREP ack(s) — JS8Call did not answer in time")
+
+    def _on_ack_call_selected(self, rig_name: str, selected_call: str) -> None:
+        """JS8Call's answer for the queued STATREP acks of rig_name."""
+        queue = self._ack_pending.pop(rig_name, [])
+        timer = self._ack_timers.get(rig_name)
+        if timer is not None:
+            timer.stop()
+        if not queue:
+            return   # an answer to someone else's question (e.g. a Transmit dialog)
+        try:
+            if selected_call:
+                print(f"[{rig_name}] Skipped {len(queue)} STATREP ack(s) — JS8Call has {selected_call} selected")
+                return
+            for group, from_callsign, sr_id, date_only in queue:
+                self._transmit_statrep_ack(rig_name, group, from_callsign, sr_id, date_only)
+        except Exception:
+            traceback.print_exc()   # never let an exception escape a Qt slot
+
+    def _transmit_statrep_ack(self, rig_name: str, group: str, from_callsign: str, sr_id: str, date_only: str) -> None:
+        """Send one RRSR ack now (JS8Call has no call selected) and note it on the row."""
+        client = self.tcp_pool.get_client(rig_name)
+        if not client or not client.is_connected():
+            return
+        my_callsign = self.get_callsign_for_rig(rig_name)
+        if not my_callsign:
+            my_callsign, _, __ = self.db.get_user_settings()
+        if not my_callsign:
+            return
         my_callsign = my_callsign.upper()
 
-        def _on_selected(emitted_rig: str, selected_call: str) -> None:
-            if emitted_rig != rig_name:
-                return
-            try:
-                client.call_selected_received.disconnect(_on_selected)
-            except TypeError:
-                pass
+        ack_message = f"{my_callsign}: {group} RRSR {from_callsign.upper()},{sr_id}"
 
-            if selected_call:
-                print(f"[{rig_name}] Skipped STATREP ack — JS8Call has {selected_call} selected")
-                return
+        # Only transmit if the constructed ack matches the single-addressee
+        # RRSR shape _process_rr_ack expects on receipt (mirrors that regex).
+        # `group` is echoed verbatim from the incoming STATREP's TO field, so
+        # a malformed/compound addressee (e.g. a STATREP directed to
+        # "@MR05 @MR06") would otherwise produce a reply no station's RRSR
+        # parser recognizes.
+        if not re.match(
+            r'^\w+:\s+@?\w+\s+RRSR\s+[A-Z0-9/]{3,12},\w{3}\.?\s*$',
+            ack_message, re.IGNORECASE
+        ):
+            print(f"[{rig_name}] Skipped STATREP ack — malformed addressee: {ack_message!r}")
+            return
 
-            ack_message = f"{my_callsign}: {group} RRSR {from_callsign.upper()},{sr_id}"
+        client.send_tx_message(ack_message)
+        print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
 
-            # Only transmit if the constructed ack matches the single-addressee
-            # RRSR shape _process_rr_ack expects on receipt (mirrors that regex).
-            # `group` is echoed verbatim from the incoming STATREP's TO field, so
-            # a malformed/compound addressee (e.g. a STATREP directed to
-            # "@MR05 @MR06") would otherwise produce a reply no station's RRSR
-            # parser recognizes.
-            if not re.match(
-                r'^\w+:\s+@?\w+\s+RRSR\s+[A-Z0-9/]{3,12},\w{3}\.?\s*$',
-                ack_message, re.IGNORECASE
-            ):
-                print(f"[{rig_name}] Skipped STATREP ack — malformed addressee: {ack_message!r}")
-                return
+        ack_note = f"||||ACK sent to {group} by {my_callsign}"
+        row_id = None
+        try:
+            with db_connect() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM statrep WHERE date = ? AND sr_id = ? AND from_callsign = ?",
+                    (date_only, sr_id, from_callsign)
+                )
+                row = cursor.fetchone()
+                if row:
+                    row_id = row[0]
+        except sqlite3.Error as e:
+            print(f"[{rig_name}] DB error appending ack note to statrep {from_callsign}/{sr_id} on {date_only}: {e}")
 
-            client.send_tx_message(ack_message)
-            print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
-
-            ack_note = f"||||ACK sent to {group} by {my_callsign}"
-            row_id = None
-            try:
-                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT id FROM statrep WHERE date = ? AND sr_id = ? AND from_callsign = ?",
-                        (date_only, sr_id, from_callsign)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        row_id = row[0]
-            except sqlite3.Error as e:
-                print(f"[{rig_name}] DB error appending ack note to statrep {from_callsign}/{sr_id} on {date_only}: {e}")
-
-            if row_id is not None:
-                _append_statrep_comment(row_id, ack_note)
-
-        client.call_selected_received.connect(_on_selected)
-        client.get_call_selected()
+        if row_id is not None:
+            _append_statrep_comment(row_id, ack_note)
 
     def _parse_group_incident(
         self,
@@ -10670,6 +10972,7 @@ window.commstatBouncePin = function(srid) {
             rig_name, "statrep", data, "sr_id", "statrep", from_callsign, fwd_marker
         )
         if result:
+            self._defer_grid_upgrade(from_callsign, event_grid)
             return (result, None)
 
         return ("", None)
@@ -10708,13 +11011,14 @@ window.commstatBouncePin = function(srid) {
         import re
 
         # Try standard @GROUP pattern first
-        match = re.search(r'(@\w+)\s*,(.+?)\{\%\%\}', message_value)
+        # ",?" before the terminator keeps the comma that precedes "{%%}" out of the last field
+        match = re.search(r'(@\w+)\s*,(.+?),?\{\%\%\}', message_value)
         if match:
             alert_target = match.group(1).strip()
             fields_str = match.group(2).strip()
         else:
             # Try LRT pattern (legacy commsrvr format)
-            match = re.search(r'LRT\s*,(.+?)\{\%\%\}', message_value)
+            match = re.search(r'LRT\s*,(.+?),?\{\%\%\}', message_value)
             if match:
                 alert_target = target if target else "@ALL"
                 fields_str = match.group(1).strip()
@@ -10724,31 +11028,25 @@ window.commstatBouncePin = function(srid) {
         # Split fields (max 3 splits to preserve commas in message)
         fields = fields_str.split(",", 3)
 
-        # Determine if we have the new format (with alert_id) or old format
-        if len(fields) >= 4:
+        # Which format? The new one starts with an alert ID (a letter plus the minute,
+        # never all digits) followed by the colour digit; the old one starts with the
+        # colour digit itself, and its message may contain commas.
+        first = fields[0].strip()
+        if len(fields) >= 4 and not first.isdigit() and fields[1].strip().isdigit():
             # New format: ALERT_ID, COLOR, TITLE, MESSAGE
-            alert_id = fields[0].strip()
-            try:
-                alert_color = int(fields[1].strip())
-            except ValueError:
-                print(f"{ConsoleColors.WARNING}[{rig_name}] WARNING: Invalid alert color in message from {from_callsign}{ConsoleColors.RESET}")
-                return ("", None)
+            alert_id = first
+            alert_color = int(fields[1].strip())
             alert_title = sanitize_ascii(fields[2].strip())
             alert_message = sanitize_ascii(fields[3].strip())
-            # Extract date for new format
             date_only, _ = parse_message_datetime(utc)
-        elif len(fields) >= 3:
+        elif len(fields) >= 3 and first.isdigit():
             # Old format: COLOR, TITLE, MESSAGE (no alert_id, generate one)
-            try:
-                alert_color = int(fields[0].strip())
-            except ValueError:
-                print(f"{ConsoleColors.WARNING}[{rig_name}] WARNING: Invalid alert color in message from {from_callsign}{ConsoleColors.RESET}")
-                return ("", None)
+            alert_color = int(first)
             alert_title = sanitize_ascii(fields[1].strip())
-            alert_message = sanitize_ascii(fields[2].strip())
-            # Generate time-based alert ID for old format
+            alert_message = sanitize_ascii(",".join(fields[2:]).strip())
             date_only, alert_id = parse_message_datetime(utc)
         else:
+            print(f"{ConsoleColors.WARNING}[{rig_name}] WARNING: Invalid alert color in message from {from_callsign}{ConsoleColors.RESET}")
             return ("", None)
 
         # Filter alerts by target
@@ -10764,7 +11062,7 @@ window.commstatBouncePin = function(srid) {
             if base_callsign(alert_target) not in user_callsigns:
                 return ("", None)
         else:
-            # @GROUP — only save if we're a member of that group (active or not),
+            # @GROUP — only save if we're a member of that group,
             # unless "Save all Alerts" is enabled, which imports every group alert,
             # or the target is the always-accepted network-wide group.
             group_name = alert_target[1:].upper()
@@ -11158,8 +11456,6 @@ window.commstatBouncePin = function(srid) {
         Returns:
             "message" on successful insert, "" otherwise.
         """
-        from id_utils import parse_message_datetime
-
         # Keep the callsign as transmitted, suffix included (see _parse_commstat_message)
         actual_sender = actual_sender.strip().upper()
         content = content.strip()
@@ -11236,8 +11532,11 @@ window.commstatBouncePin = function(srid) {
         from_callsign = from_callsign.strip().upper()
 
         # Detect Internet-Only markers and normalize
+        # The marker is only believed when the record came from the Internet feed (source 2);
+        # on RF anyone can type it, so there it is stripped and the record stays Radio (1).
         if "{&%3}" in message_value or "{%%3}" in message_value or "{^%3}" in message_value or "{#3}" in message_value:
-            source = 3
+            if source == 2:
+                source = 3
             message_value = (message_value
                 .replace("{&%3}", "{&%}")
                 .replace("{%%3}", "{%%}")
@@ -11363,7 +11662,7 @@ window.commstatBouncePin = function(srid) {
 
         # For direct-callsign messages, store the recipient callsign as target
         if is_to_user and not target:
-            target = to_call.split("/")[0].upper()
+            target = base_callsign(to_call)
 
         # Parse using unified parser (source=1 for Radio)
         msg_type, _ = self._parse_commstat_message(
@@ -11424,34 +11723,32 @@ window.commstatBouncePin = function(srid) {
             loading_text: Text to show while loading.
             error_prefix: Prefix for error message (e.g., "Failed to load band conditions").
         """
+        from ui_helpers import (
+            apply_standard_dialog_chrome, make_button, make_title_strip, show_offgrid_notice,
+        )
+
         if not netguard.guard(f'"{title}"'):
-            QtWidgets.QMessageBox.information(
-                self, "Off-Grid Mode",
-                f"\"{title}\" needs an internet connection and is disabled while Off-Grid Mode is on.\n\n"
-                "Switch back to ONLINE in the header to use it."
-            )
+            show_offgrid_notice(self, title, "needs an internet connection", **self._help_theme_colors())
             return
 
-        panel_bg = DEFAULT_COLORS.get("module_background", "#DDDDDD")
-        panel_fg = DEFAULT_COLORS.get("module_foreground", "#000000")
+        panel_bg = self.config.get_color('module_background')
+        panel_fg = self.config.get_color('module_foreground')
 
         dialog = QtWidgets.QDialog(self)
-        dialog.setWindowTitle(title)
+        apply_standard_dialog_chrome(dialog, title)
         dialog.setMinimumSize(480, 200)
-        dialog.setWindowFlags(
-            Qt.Window |
-            Qt.CustomizeWindowHint |
-            Qt.WindowTitleHint |
-            Qt.WindowCloseButtonHint
-        )
         dialog.setStyleSheet(
-            f"QDialog {{ background-color:{panel_bg}; color:{panel_fg}; }}"
-            f"QLabel {{ font-size:13px; color:{panel_fg}; }}"
+            f"QDialog {{ background-color:{panel_bg}; }}"
+            f"QLabel {{ font-family:Roboto; font-size:13px; color:{panel_fg}; }}"
         )
 
         layout = QtWidgets.QVBoxLayout(dialog)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
+
+        layout.addWidget(make_title_strip(
+            title, self.config.get_color('program_background'), self.config.get_color('program_foreground')
+        ))
 
         # Image label (shows loading text, then image or error)
         image_label = QtWidgets.QLabel(loading_text)
@@ -11460,37 +11757,40 @@ window.commstatBouncePin = function(srid) {
 
         # Attribution/link label
         link_label = QtWidgets.QLabel(link_html)
-        link_label.setOpenExternalLinks(True)
+        link_label.linkActivated.connect(lambda url: self._open_external_link(url, title))
         link_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(link_label)
 
         # Close button row (bottom right)
-        from ui_helpers import make_button
         btn_row = QtWidgets.QHBoxLayout()
         btn_row.setSpacing(8)
         btn_row.addStretch()
-        close_btn = make_button("Close", "#555555", 80)
-        close_btn.clicked.connect(dialog.close)
+        close_btn = make_button("Close", COLOR_BTN_CLOSE, 80)
+        close_btn.clicked.connect(dialog.accept)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
         # Storage for fetched data (shared between threads)
         fetch_result = {'data': None, 'error': None}
+        closed = {'flag': False}
+        dialog.finished.connect(lambda _r: closed.update(flag=True))
 
         def fetch_image():
             """Background thread: fetch image from URL."""
             try:
                 request = urllib.request.Request(
                     image_url,
-                    headers={'User-Agent': 'CommStat/2.5'}
+                    headers={'User-Agent': USER_AGENT}
                 )
-                with urllib.request.urlopen(request, timeout=15, context=create_insecure_ssl_context()) as response:
+                with urllib.request.urlopen(request, timeout=15, context=create_verified_ssl_context()) as response:
                     fetch_result['data'] = response.read()
             except Exception as e:
                 fetch_result['error'] = str(e)
 
         def update_ui():
             """Poll for fetch completion and update dialog."""
+            if closed['flag']:
+                return          # dialog was closed before the download finished
             if fetch_result['data']:
                 pixmap = QtGui.QPixmap()
                 pixmap.loadFromData(fetch_result['data'])
@@ -11510,6 +11810,7 @@ window.commstatBouncePin = function(srid) {
         QTimer.singleShot(100, update_ui)
 
         dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
 
 
 # =============================================================================

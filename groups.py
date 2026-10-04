@@ -19,18 +19,15 @@ from PyQt5.QtWidgets import (
 )
 
 from constants import DEFAULT_COLORS
-from ui_helpers import make_button, make_input, confirm, apply_standard_dialog_chrome
+from ui_helpers import (
+    make_button, make_input, confirm, apply_standard_dialog_chrome,
+    make_title_strip, wrap_fixed, DIALOG_TABLE_QSS,
+)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-_PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
-_TITLE_BG = DEFAULT_COLORS.get("title_bar_background", "#F07800")
-_TITLE_FG = DEFAULT_COLORS.get("title_bar_foreground", "#FFFFFF")
-_DATA_BG  = DEFAULT_COLORS.get("data_background",      "#F8F6F4")
-_DATA_FG  = DEFAULT_COLORS.get("data_foreground",      "#000000")
 
 _COL_ADD    = "#28a745"
 _COL_EDIT   = "#007bff"
@@ -79,15 +76,7 @@ class GroupsDialog(QDialog):
         body.setSpacing(10)
 
         # ── Title ─────────────────────────────────────────────────────────────
-        title_lbl = QLabel("Groups")
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
+        title_lbl = make_title_strip("Groups")
         body.addWidget(title_lbl)
 
         # ── Table ─────────────────────────────────────────────────────────────
@@ -105,16 +94,7 @@ class GroupsDialog(QDialog):
         hh.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(1, QHeaderView.Stretch)
 
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background-color:{_DATA_BG}; alternate-background-color:{_DATA_BG};"
-            f" gridline-color:#cccccc; color:{_DATA_FG};"
-            f" font-family:'Kode Mono'; font-size:13px; }}"
-            f"QTableWidget::item {{ padding:4px 6px; }}"
-            f"QHeaderView::section {{ background-color:{_TITLE_BG}; color:{_TITLE_FG};"
-            f" padding:5px 6px; border:none; font-family:Roboto; font-size:13px;"
-            f" font-weight:bold; }}"
-            f"QTableWidget::item:selected {{ background-color:#cce5ff; color:#000000; }}"
-        )
+        self.table.setStyleSheet(DIALOG_TABLE_QSS)
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self.table.doubleClicked.connect(self._on_edit)
         body.addWidget(self.table)
@@ -225,20 +205,6 @@ class GroupsDialog(QDialog):
             max_len=80,
         )
 
-        # Qt force-stretches a QLineEdit installed via setCellWidget. Wrap the
-        # fixed-width name input in a QWidget + HBoxLayout so the container
-        # fills the cell while the input keeps its size. Comment stays
-        # unwrapped — the Stretch column gives it the full remaining width.
-        def _wrap_fixed(input_widget: QLineEdit, width_px: int) -> QWidget:
-            input_widget.setFixedWidth(width_px)
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(0)
-            layout.addWidget(input_widget)
-            layout.addStretch()
-            return container
-
         _name_w = 136
 
         # Col 0 is ResizeToContents and would clamp back to data width, clipping
@@ -248,7 +214,7 @@ class GroupsDialog(QDialog):
         _hh.setSectionResizeMode(0, QHeaderView.Interactive)
         self.table.setColumnWidth(0, _name_w + 16)
 
-        self.table.setCellWidget(row, 0, _wrap_fixed(self._iw_name, _name_w))
+        self.table.setCellWidget(row, 0, wrap_fixed(self._iw_name, _name_w))
         self.table.setCellWidget(row, 1, self._iw_comment)
         self.table.setRowHeight(row, 42)
         self.table.setSelectionMode(QAbstractItemView.NoSelection)

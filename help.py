@@ -13,15 +13,18 @@ ui_helpers.show_help_dialog; everything below is content.
 """
 
 from PyQt5 import QtWidgets
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QUrl
 
-from constants import DEFAULT_COLORS, COLOR_BTN_CLOSE
-from ui_helpers import make_button, apply_standard_dialog_chrome, show_help_dialog
+from constants import DEFAULT_COLORS, COLOR_BTN_CLOSE, TELEGRAM_INVITE_URL
+from ui_helpers import (
+    make_button, make_title_strip, apply_standard_dialog_chrome, show_help_dialog, open_external_url,
+)
 
 
 _PROG_BG  = DEFAULT_COLORS.get("program_background", "#000000")
 _PROG_FG  = DEFAULT_COLORS.get("program_foreground", "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",  "#FFFFFF")
+_PANEL_FG = DEFAULT_COLORS.get("module_foreground",  "#000000")
 
 
 # ── Menu bar ▸ Help ────────────────────────────────────────────────────────────
@@ -29,10 +32,17 @@ _PANEL_BG = DEFAULT_COLORS.get("module_background",  "#FFFFFF")
 # a help document, and a scrolling body frame would look wrong at 370x170.
 
 class HelpDialog(QtWidgets.QDialog):
+    """Menu-bar Help: a small card with the Telegram community link.
 
-    def __init__(self, parent=None):
+    The colors default to DEFAULT_COLORS; the main window passes the live theme."""
+
+    def __init__(self, parent=None, panel_bg=None, panel_fg=None, prog_bg=None, prog_fg=None):
         super().__init__(parent)
         apply_standard_dialog_chrome(self, "Help", 370, 170)
+        self._panel_bg = panel_bg or _PANEL_BG
+        self._panel_fg = panel_fg or _PANEL_FG
+        self._prog_bg = prog_bg or _PROG_BG
+        self._prog_fg = prog_fg or _PROG_FG
         self._build_ui()
 
     def _build_ui(self):
@@ -40,19 +50,13 @@ class HelpDialog(QtWidgets.QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
 
-        self.setStyleSheet(f"background-color: {_PANEL_BG};")
+        self.setStyleSheet(f"QDialog {{ background-color: {self._panel_bg}; }}")
 
-        title = QtWidgets.QLabel("Join The Telegram Community")
-        title.setStyleSheet(
-            f"font-family: 'Roboto Slab'; font-size: 16px; font-weight: 900;"
-            f"background-color: {_PROG_BG}; color: {_PROG_FG}; padding: 9px 0px;"
-        )
-        title.setAlignment(Qt.AlignCenter)
-        layout.addWidget(title)
+        layout.addWidget(make_title_strip("Help", self._prog_bg, self._prog_fg))
 
         body_style = (
             "font-family: Roboto; font-size: 13px; font-weight: normal;"
-            "color: #333333; background: transparent;"
+            f"color: {self._panel_fg}; background: transparent;"
         )
 
         msg = QtWidgets.QLabel("Click this link to join the Telegram community.")
@@ -64,11 +68,15 @@ class HelpDialog(QtWidgets.QDialog):
         layout.addSpacing(2)
 
         link = QtWidgets.QLabel(
-            '<a href="https://t.me/+3k3n7O8a1yI1N2E5">'
-            'https://t.me/+3k3n7O8a1yI1N2E5</a>'
+            f'<a href="{TELEGRAM_INVITE_URL}">{TELEGRAM_INVITE_URL}</a>'
         )
-        link.setOpenExternalLinks(True)
         link.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        link.linkActivated.connect(
+            lambda url: open_external_url(
+                self, QUrl(url),
+                panel_bg=self._panel_bg, prog_bg=self._prog_bg, prog_fg=self._prog_fg,
+            )
+        )
         link.setStyleSheet(body_style)
         link.setAlignment(Qt.AlignCenter)
         link.setWordWrap(True)
@@ -80,18 +88,18 @@ class HelpDialog(QtWidgets.QDialog):
         btn_row.setSpacing(8)
         btn_row.addStretch()
         close_btn = make_button("Close", COLOR_BTN_CLOSE, 80)
-        close_btn.clicked.connect(self.close)
+        close_btn.clicked.connect(self.reject)
         btn_row.addWidget(close_btn)
         layout.addLayout(btn_row)
 
 
-# ── Settings menu ▸ Alerts, Messages & StatReps ▸ Help ─────────────────────────
+# ── Settings menu ▸ Alerts, Msgs & Videos ▸ Help ───────────────────────────────
 
 _ALERTS_MESSAGES_HTML = """
-<div style="font-family: Roboto; font-size: 13px; color: #333333;">
+<div style="font-family: Roboto; font-size: 13px;">
 <p>By default, CommStat saves <b>alerts</b>, <b>messages</b>, and <b>videos</b>
-addressed to your callsign, as well as those addressed to any group listed in
-your <b>Groups</b> menu.</p>
+addressed to your callsign, as well as those addressed to any group listed under
+<b>Settings &rarr; Manage Groups</b>.</p>
 
 <p>Checking <b>Save all Alerts</b>, <b>Save all Messages</b>, or
 <b>Save all Videos</b> tells CommStat to <i>also</i> save that type of traffic
@@ -101,7 +109,7 @@ when sent to <b>any</b> group.</p>
 messages, or videos that are addressed to other callsigns.</p>
 
 <p><b>Status Reports are different:</b> CommStat always saves a StatRep sent
-to <b>any</b> group, whether or not it's in your Groups menu — there is no
+to <b>any</b> group, whether or not it's in your list under <b>Settings &rarr; Manage Groups</b> — there is no
 "Save all" toggle for them, because that's simply how they're captured.</p>
 
 <p>What you <i>see</i> in the StatRep table is controlled separately, from the
@@ -115,14 +123,14 @@ to reveal (or hide) StatReps sent to groups you haven't added.</p>
 def show_alerts_messages_help(parent=None, **colors) -> None:
     """Explain the Save all Alerts / Messages / Videos checkboxes and how
     Status Reports are saved and filtered."""
-    show_help_dialog(parent, "Alerts, Messages & StatReps",
+    show_help_dialog(parent, "Alerts, Messages & Videos",
                      _ALERTS_MESSAGES_HTML, width=470, height=430, **colors)
 
 
 # ── Map ▸ Filter dropdown ▸ Help ───────────────────────────────────────────────
 
 _MAP_FILTER_HTML = """
-<div style="font-family: Roboto; font-size: 13px; color: #333333;">
+<div style="font-family: Roboto; font-size: 13px;">
 
 <p>The <b>Map Filter</b> button in the top-right corner of the map offers two
 ways to filter: <b>Map</b> and <b>Custom</b>. Each one changes what the map and
@@ -175,7 +183,7 @@ together</b>, and it also ignores your Filter menu choices.</p>
 </ul>
 
 <p><b style="color:#6f42c1;">Examples</b></p>
-<table cellspacing="0" cellpadding="7" width="100%" style="font-size:12px;">
+<table cellspacing="0" cellpadding="7" width="100%" style="font-size:13px;">
 <tr bgcolor="#E6E6E6">
   <td width="46%"><b>What you enter</b></td>
   <td><b>What you get</b></td>
@@ -261,14 +269,14 @@ def show_map_filter_help(parent=None, **colors) -> None:
                      _MAP_FILTER_HTML, width=720, **colors)
 
 
-# ── Map menu ▸ Watchlist Overlay ▸ Help ────────────────────────────────────────
+# ── Manage Watchlists dialog ▸ Help (the Map menu's Watchlist Overlay) ──────────
 
 _WATCHLIST_PINS_HTML = """
-<div style="font-family: Roboto; font-size: 13px; color: #333333;">
+<div style="font-family: Roboto; font-size: 13px;">
 
 <p>A <b>Watchlist</b> is a named list of callsigns or simple names that puts an
 <span style="color:#e83e8c;"><b>object</b></span> on the map for every
-entry. It is made for anybody that wants to view callsigns or locations of 
+entry. It is made for anybody that wants to view callsigns or locations of
 interest. Group and net leaders can see on the map <i>where their people are</i>,
 not just who has reported in.</p>
 
@@ -278,7 +286,7 @@ overlay and never affects which messages you receive.</p>
 
 <p>Each watchlist has its own <b>Object Color</b> (Yellow, Orange, Pink, Purple or Blue) and
 <b>Object Shape</b> (Circle, Square, or Triangle), set in
-<b>Config &rarr; Manage Watchlists</b>. With five colors and three shapes you
+<b>Settings &rarr; Manage Watchlists</b>. With five colors and three shapes you
 can give up to fifteen watchlists a distinct look on the same map.</p>
 
 <p style="background-color:#FFF6DA; padding:8px;">
@@ -319,13 +327,13 @@ watchlist or uncheck the watchlist checkbox in the map menu.</p>
 
 <h3 style="color:#e83e8c;">Adding members to a watchlist</h3>
 <ol>
-<li>Open <b>Config &rarr; Manage Watchlists</b>, click a watchlist, then click
+<li>Open <b>Settings &rarr; Manage Watchlists</b>, click a watchlist, then click
     <b>Members</b>. The Members column shows how many each watchlist has.</li>
 <li>Click <b>Add</b>, type a callsign, and click <b>Search</b> &mdash; or click
     <b>Bulk Add</b> and paste a whole comma-separated list at once.</li>
 <li>CommStat checks your <b>local contact database</b> first. If the callsign
     is not there and your QRZ.com subscription is set up
-    (Config &rarr; QRZ Settings), it looks the callsign up on
+    (Settings &rarr; QRZ Settings), it looks the callsign up on
     <b>QRZ.com</b> and saves the result.</li>
 <li>If the callsign is found, the details fill in automatically. If not, you
     can type the name, city, state, and grid yourself.</li>
@@ -343,7 +351,7 @@ taco stands, or doughnut shops &mdash; anything you want to see on the map.</p>
 
 <p style="text-align:center;">
 <img src="watchlist-example.png" width="520" height="281" style="border:1px solid #ccc;"><br>
-<span style="font-size:12px; color:#666666;">This is an example of 35 of the
+<span style="font-size:13px; color:#888888;">This is an example of 35 of the
 57 nuclear power plants in the United States.</span>
 </p>
 
@@ -367,6 +375,6 @@ has checked in and who has not.</p>
 
 
 def show_watchlist_pins_help(parent=None, **colors) -> None:
-    """Explain the Map menu's Watchlist Overlay section."""
+    """Explain watchlists and the Map menu's Watchlist Overlay (opened from Manage Watchlists)."""
     show_help_dialog(parent, "Watchlist Overlay",
                      _WATCHLIST_PINS_HTML, width=560, **colors)

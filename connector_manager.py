@@ -10,13 +10,15 @@ Supports unlimited connectors with one designated as default.
 
 import logging
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
+
+from constants import DATABASE_FILE
+from db_utils import db_connect
 
 logger = logging.getLogger(__name__)
 
 # Constants
-DATABASE_FILE = "traffic.db3"
 DEFAULT_TCP_PORT = 2442
 DEFAULT_SERVER = "127.0.0.1"
 
@@ -24,6 +26,10 @@ _CONNECTOR_COLS = (
     "id, rig_name, tcp_port, server, state, comment, "
     "date_added, is_default, enabled, auto_connect, rf_ack"
 )
+
+# Matches a row's server to a normalised (stripped, lowercase) server value.
+# Bind order: default server (for NULL/blank rows), then the value to match.
+_SERVER_MATCH = "LOWER(TRIM(COALESCE(NULLIF(TRIM(server), ''), ?))) = ?"
 
 # Why: under fd exhaustion (EMFILE) every DB call here fails identically, and
 # without throttling the log can hit thousands of lines/sec — CPU-burning noise
@@ -60,27 +66,9 @@ class ConnectorManager:
         """
         self.db_path = db_path
 
-    def init_connectors_table(self) -> None:
-        """Create js8_connectors table if it doesn't exist."""
-        try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS js8_connectors (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        rig_name TEXT UNIQUE NOT NULL,
-                        tcp_port INTEGER NOT NULL DEFAULT 2442,
-                        state TEXT,
-                        comment TEXT,
-                        date_added TEXT NOT NULL,
-                        is_default INTEGER DEFAULT 0,
-                        enabled INTEGER DEFAULT 1,
-                        rf_ack INTEGER DEFAULT 1
-                    )
-                """)
-                conn.commit()
-        except sqlite3.Error as e:
-            _log_error_throttled("Error initializing js8_connectors table", e)
+    def _db(self):
+        """Open the database for one operation (commit/rollback, always closed)."""
+        return db_connect(self.db_path)
 
     def get_all_connectors(self, enabled_only: bool = False) -> List[Dict]:
         """
@@ -94,7 +82,7 @@ class ConnectorManager:
             id, rig_name, tcp_port, server, state, comment, date_added, is_default, enabled
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 if enabled_only:
@@ -124,7 +112,7 @@ class ConnectorManager:
             Connector dictionary or None if not found.
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute(
@@ -148,7 +136,7 @@ class ConnectorManager:
             Connector dictionary or None if not found.
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute(
@@ -169,7 +157,7 @@ class ConnectorManager:
             Default connector dictionary or None if no default set.
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.cursor()
                 cursor.execute(
@@ -216,17 +204,18 @@ class ConnectorManager:
             logger.warning("Cannot add connector: rig name is required")
             return False
 
-        # Clean state (uppercase, max 2 chars)
+        # Clean state (uppercase, max 2 chars) and server (blank = this computer)
         state = state.strip().upper()[:2] if state else ""
+        server = (server or "").strip() or DEFAULT_SERVER
 
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 cursor = conn.cursor()
 
                 # Enforce unique server + port combination
                 cursor.execute(
-                    "SELECT COUNT(*) FROM js8_connectors WHERE server = ? AND tcp_port = ?",
-                    (server, tcp_port)
+                    f"SELECT COUNT(*) FROM js8_connectors WHERE {_SERVER_MATCH} AND tcp_port = ?",
+                    (DEFAULT_SERVER, server.lower(), tcp_port)
                 )
                 if cursor.fetchone()[0] > 0:
                     logger.warning("Cannot add connector: %s:%s already in use", server, tcp_port)
@@ -241,9 +230,7 @@ class ConnectorManager:
                 count = cursor.fetchone()[0]
                 is_default = 1 if (set_as_default or count == 0) else 0
 
-                date_added = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-
-                server = server.strip() if server else DEFAULT_SERVER
+                date_added = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
                 cursor.execute("""
                     INSERT INTO js8_connectors
@@ -299,16 +286,16 @@ class ConnectorManager:
 
         # Clean state (uppercase, max 2 chars)
         state = state.strip().upper()[:2] if state else ""
-        server = server.strip() if server else DEFAULT_SERVER
+        server = (server or "").strip() or DEFAULT_SERVER
 
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 cursor = conn.cursor()
 
                 # Enforce unique server + port combination (excluding this connector)
                 cursor.execute(
-                    "SELECT COUNT(*) FROM js8_connectors WHERE server = ? AND tcp_port = ? AND id != ?",
-                    (server, tcp_port, connector_id)
+                    f"SELECT COUNT(*) FROM js8_connectors WHERE {_SERVER_MATCH} AND tcp_port = ? AND id != ?",
+                    (DEFAULT_SERVER, server.lower(), tcp_port, connector_id)
                 )
                 if cursor.fetchone()[0] > 0:
                     logger.warning("Cannot update connector: %s:%s already in use", server, tcp_port)
@@ -358,7 +345,7 @@ class ConnectorManager:
             True if successful, False otherwise.
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 cursor = conn.cursor()
 
                 # Check if this is the default connector
@@ -407,25 +394,23 @@ class ConnectorManager:
             True if successful, False otherwise.
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 cursor = conn.cursor()
 
-                # Clear existing default
-                cursor.execute("UPDATE js8_connectors SET is_default = 0")
+                # Check the id first: clearing the old default for an id that
+                # doesn't exist would leave no default at all.
+                cursor.execute("SELECT 1 FROM js8_connectors WHERE id = ?", (connector_id,))
+                if cursor.fetchone() is None:
+                    logger.warning("Connector ID %s not found", connector_id)
+                    return False
 
-                # Set new default
+                cursor.execute("UPDATE js8_connectors SET is_default = 0")
                 cursor.execute(
                     "UPDATE js8_connectors SET is_default = 1 WHERE id = ?",
                     (connector_id,)
                 )
-                conn.commit()
-
-                if cursor.rowcount > 0:
-                    logger.info("Set connector ID %s as default", connector_id)
-                    return True
-                else:
-                    logger.warning("Connector ID %s not found", connector_id)
-                    return False
+                logger.info("Set connector ID %s as default", connector_id)
+                return True
 
         except sqlite3.Error as e:
             _log_error_throttled("Error setting default connector", e)
@@ -439,7 +424,7 @@ class ConnectorManager:
             Number of connectors.
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT COUNT(*) FROM js8_connectors")
                 return cursor.fetchone()[0]
@@ -468,7 +453,7 @@ class ConnectorManager:
             True if successful, False otherwise.
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "UPDATE js8_connectors SET enabled = ? WHERE id = ?",
@@ -516,7 +501,7 @@ class ConnectorManager:
             True if successful, False otherwise.
         """
         try:
-            with sqlite3.connect(self.db_path, timeout=10) as conn:
+            with self._db() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
                     "UPDATE js8_connectors SET auto_connect = ? WHERE id = ?",

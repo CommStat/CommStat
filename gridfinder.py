@@ -1,22 +1,34 @@
+# Copyright (c) 2025, 2026 Manuel Ochoa
+# This file is part of CommStat.
+# Licensed under the GNU General Public License v3.0.
+# AI Assistance: Claude (Anthropic), ChatGPT (OpenAI)
+
+"""
+Grid Finder for CommStat
+Look up a Maidenhead grid square by city, state/country, or grid using
+gridsearchdata.csv. Opened from Tools > Grid Finder, and from the StatRep and
+Incident dialogs to fill in a grid.
+"""
+
 import sys
 import os
 import pandas as pd
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QTableWidget, QTableWidgetItem,
-    QStatusBar, QCompleter, QMessageBox, QHeaderView,
+    QLabel, QTableWidget, QTableWidgetItem,
+    QMessageBox, QHeaderView, QAbstractButton,
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
-from PyQt5.QtGui import QFont, QFontDatabase, QIcon
+from PyQt5.QtGui import QFontDatabase, QIcon
 
 from constants import (
-    DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
+    DEFAULT_COLORS, COLOR_INPUT_BORDER,
     COLOR_BTN_RED, COLOR_BTN_CYAN,
 )
-from ui_helpers import make_button, apply_standard_dialog_chrome
+from ui_helpers import (
+    make_button, make_input, make_title_strip, apply_standard_dialog_chrome, dialog_table_qss,
+)
 
-_PROG_BG  = DEFAULT_COLORS.get("program_background",   "#000000")
-_PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
 _TITLE_BG = DEFAULT_COLORS.get("title_bar_background", "#F07800")
@@ -94,36 +106,20 @@ class GridFinderApp(QMainWindow):
         layout.setContentsMargins(15, 15, 15, 10)
 
         # Title
-        title = QLabel("Grid Finder")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QFont("Roboto Slab", -1, QFont.Black))
-        title.setFixedHeight(36)
-        title.setStyleSheet(
-            f"QLabel {{ background-color: {_PROG_BG}; color: {_PROG_FG}; "
-            f"font-size: 16px; padding-top: 9px; padding-bottom: 9px; }}"
-        )
-        layout.addWidget(title)
+        layout.addWidget(make_title_strip("Grid Finder"))
 
         # City field
-        self.city_input = QLineEdit()
-        self.city_input.setPlaceholderText("City")
-        if not self.data.empty:
-            completer = QCompleter(self.data['City'].unique())
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            self.city_input.setCompleter(completer)
+        self.city_input = make_input(placeholder="City")
         layout.addWidget(self.city_input)
 
         # State + Grid row
         row2 = QHBoxLayout()
         row2.setSpacing(8)
 
-        self.state_input = QLineEdit()
-        self.state_input.setPlaceholderText("State (US) or Country")
+        self.state_input = make_input(placeholder="State (US) or Country")
         row2.addWidget(self.state_input, stretch=2)
 
-        self.grid_input = QLineEdit()
-        self.grid_input.setPlaceholderText("Grid")
-        self.grid_input.setMaxLength(6)
+        self.grid_input = make_input(placeholder="Grid", max_len=6)
         row2.addWidget(self.grid_input, stretch=1)
 
         layout.addLayout(row2)
@@ -164,10 +160,6 @@ class GridFinderApp(QMainWindow):
 
         layout.addLayout(btn_row)
 
-        # Status bar
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-
         # Signals
         self.city_input.textChanged.connect(self._on_text_changed)
         self.state_input.textChanged.connect(self._on_text_changed)
@@ -181,36 +173,51 @@ class GridFinderApp(QMainWindow):
 
     def _apply_stylesheet(self):
         self.setStyleSheet(f"""
-            QMainWindow {{ background-color: {_PANEL_BG}; }}
-            QWidget {{ background-color: {_PANEL_BG}; color: {_PANEL_FG}; }}
-            QLabel {{ background-color: transparent; color: {_PANEL_FG}; font-size: 13px; }}
-            QLineEdit {{
-                background-color: white; color: {COLOR_INPUT_TEXT};
-                border: 1px solid {COLOR_INPUT_BORDER}; border-radius: 4px;
-                padding: 4px; font-family: 'Kode Mono'; font-size: 13px;
-            }}
-            QTableWidget {{
-                background-color: {_DATA_BG}; color: {_DATA_FG};
-                border: 1px solid {COLOR_INPUT_BORDER};
-                font-family: 'Kode Mono'; font-size: 13px;
-                gridline-color: #cccccc;
-            }}
-            QTableWidget::item {{
-                background-color: {_DATA_BG}; color: {_DATA_FG}; padding: 2px;
-            }}
-            QTableWidget::item:selected {{
-                background-color: #cce5ff; color: #000000;
-            }}
+            QMainWindow {{ background-color: {self.panel_bg}; }}
+            QWidget {{ background-color: {self.panel_bg}; color: {self.panel_fg}; }}
+            QLabel {{ background-color: transparent; color: {self.panel_fg};
+                      font-family: Roboto; font-size: 13px; }}
+        """)
+        self.table.setStyleSheet(dialog_table_qss(self.data_bg, self.data_fg))
+        # Set on the header widget itself: when Grid Finder has a parent that carries its
+        # own stylesheet (e.g. StatRep), a section rule in the window sheet is overridden
+        # and the header falls back to the native (dark on macOS) look.
+        self.table.horizontalHeader().setStyleSheet(f"""
             QHeaderView::section {{
                 background-color: {_TITLE_BG}; color: {_TITLE_FG};
                 border: 1px solid {COLOR_INPUT_BORDER};
                 padding: 4px; font-family: Roboto; font-size: 13px; font-weight: bold;
             }}
-            QStatusBar {{
-                background-color: {_PANEL_BG}; color: {_PANEL_FG};
-                font-family: Roboto; font-size: 13px;
+        """)
+        # Row-number header: same orange as the column headers, with "Row" on the
+        # corner button above it. Set on the widgets themselves for the same reason.
+        vh = self.table.verticalHeader()
+        vh.setFixedWidth(48)
+        vh.setDefaultAlignment(Qt.AlignCenter)
+        vh.setStyleSheet(f"""
+            QHeaderView {{ background-color: {self.data_bg}; }}
+            QHeaderView::section {{
+                background-color: {_TITLE_BG}; color: {_TITLE_FG};
+                border: 1px solid {COLOR_INPUT_BORDER};
+                padding: 2px; font-family: Roboto; font-size: 13px; font-weight: bold;
             }}
         """)
+        corner = self.table.findChild(QAbstractButton)
+        if corner is not None:
+            corner.setStyleSheet(
+                f"QAbstractButton {{ background-color: {_TITLE_BG}; "
+                f"border: 1px solid {COLOR_INPUT_BORDER}; }}"
+            )
+            lbl = QLabel("Row", corner)
+            lbl.setAlignment(Qt.AlignCenter)
+            lbl.setStyleSheet(
+                f"QLabel {{ background-color: {_TITLE_BG}; color: {_TITLE_FG}; "
+                f"font-family: Roboto; font-size: 13px; font-weight: bold; }}"
+            )
+            lay = QHBoxLayout(corner)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.addWidget(lbl)
+            corner.setAutoFillBackground(True)
 
     # ── Layout helpers ────────────────────────────────────────────────────────
 
@@ -237,7 +244,6 @@ class GridFinderApp(QMainWindow):
 
         if not any([city_q, state_q, grid_q]):
             self._populate_table(pd.DataFrame())
-            self.status_bar.showMessage("Enter city, state/country, or grid to search.")
             return
 
         filtered = self.data
@@ -248,7 +254,29 @@ class GridFinderApp(QMainWindow):
         if grid_q:
             filtered = filtered[filtered['MGrid_lower'].str.contains(grid_q, na=False)]
 
-        self._populate_table(filtered)
+        self._populate_table(self._rank_results(filtered, city_q, state_q))
+
+    @staticmethod
+    def _rank_results(df: pd.DataFrame, city_q: str, state_q: str) -> pd.DataFrame:
+        """Order matches by relevance: exact city, then city starting with the query,
+        then city containing it; exact state before partial; then city, state, grid."""
+        if df.empty:
+            return df
+        df = df.copy()
+        if city_q:
+            city = df['City_lower']
+            df['_city_rank'] = 2
+            df.loc[city.str.startswith(city_q), '_city_rank'] = 1
+            df.loc[city == city_q, '_city_rank'] = 0
+        else:
+            df['_city_rank'] = 0
+        if state_q:
+            df['_state_rank'] = (df['State_lower'] != state_q).astype(int)
+        else:
+            df['_state_rank'] = 0
+        return df.sort_values(
+            ['_state_rank', '_city_rank', 'State_lower', 'City_lower', 'MGrid_lower'],
+            kind='stable')
 
     def _populate_table(self, df: pd.DataFrame):
         self.table.setSortingEnabled(False)
@@ -256,8 +284,6 @@ class GridFinderApp(QMainWindow):
         self.table.setRowCount(0)
 
         if df.empty:
-            if any([self.city_input.text(), self.state_input.text(), self.grid_input.text()]):
-                self.status_bar.showMessage("No results found.", 5000)
             return
 
         self.table.setRowCount(len(df))
@@ -266,9 +292,10 @@ class GridFinderApp(QMainWindow):
             self.table.setItem(i, 1, QTableWidgetItem(row['State']))
             self.table.setItem(i, 2, QTableWidgetItem(format_grid(row['MGrid'])))
 
+        # No column sort indicator: keep the relevance order until a header is clicked.
+        self.table.horizontalHeader().setSortIndicator(-1, Qt.AscendingOrder)
         self.table.setSortingEnabled(True)
         self._update_column_widths()
-        self.status_bar.showMessage(f"{len(df)} result(s) found.", 5000)
 
     def _on_row_clicked(self, index):
         row = index.row()
@@ -279,9 +306,6 @@ class GridFinderApp(QMainWindow):
         self.grid_input.blockSignals(True)
         self.grid_input.setText(formatted)
         self.grid_input.blockSignals(False)
-        self.status_bar.showMessage(
-            f"Grid: {formatted}  — press Copy to copy to clipboard.", 8000
-        )
 
     def _on_clear(self):
         self.city_input.clear()
@@ -289,7 +313,6 @@ class GridFinderApp(QMainWindow):
         self.grid_input.clear()
         self.table.clearContents()
         self.table.setRowCount(0)
-        self.status_bar.showMessage("Cleared.", 3000)
         self.city_input.setFocus()
 
     def _on_copy(self):
@@ -297,19 +320,11 @@ class GridFinderApp(QMainWindow):
         if grid:
             QApplication.clipboard().setText(grid)
             self.grid_selected.emit(grid)
-            self.status_bar.showMessage(f"Copied: {grid}", 5000)
-        else:
-            self.status_bar.showMessage("No grid to copy.", 5000)
 
 
 if __name__ == '__main__':
     QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
     QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
-
-    panel_bg = sys.argv[1] if len(sys.argv) > 1 else "#F8F6F4"
-    panel_fg = sys.argv[2] if len(sys.argv) > 2 else "#333333"
-    data_bg  = sys.argv[3] if len(sys.argv) > 3 else "#F8F6F4"
-    data_fg  = sys.argv[4] if len(sys.argv) > 4 else "#333333"
 
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
@@ -325,15 +340,9 @@ if __name__ == '__main__':
     if os.path.exists("radiation-32.png"):
         app.setWindowIcon(QIcon("radiation-32.png"))
 
-    window = GridFinderApp(panel_bg, panel_fg, data_bg, data_fg)
+    window = GridFinderApp(
+        DEFAULT_COLORS.get("module_background", "#DDDDDD"), DEFAULT_COLORS.get("module_foreground", "#000000"),
+        DEFAULT_COLORS.get("data_background", "#F8F6F4"), DEFAULT_COLORS.get("data_foreground", "#000000"),
+    )
     window.show()
-
-    if len(sys.argv) >= 9:
-        try:
-            px, py, pw, ph = int(sys.argv[5]), int(sys.argv[6]), int(sys.argv[7]), int(sys.argv[8])
-            ww, wh = window.width(), window.height()
-            window.move(px + (pw - ww) // 2, py + (ph - wh) // 2)
-        except ValueError:
-            pass
-
     sys.exit(app.exec_())

@@ -7,7 +7,6 @@ video.py - Share Video Dialog
 Allows sharing a YouTube video link via the commstat.app server (internet only).
 """
 
-import base64
 import json
 import re
 import sqlite3
@@ -17,17 +16,21 @@ import urllib.parse
 import urllib.request
 from typing import Optional
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import QDateTime
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QComboBox,
-    QMessageBox,
+    QLabel, QLineEdit,
 )
 
-from constants import DEFAULT_COLORS, COLOR_BTN_BLUE, COLOR_BTN_CYAN
-from little_gucci import create_verified_ssl_context
-from ui_helpers import make_button, label_font, apply_standard_dialog_chrome, connect_single
+from constants import DEFAULT_COLORS, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COMMSRVR_URL
+from db_utils import db_connect
+from commsrvr_client import submit_to_commsrvr
+from ssl_utils import create_verified_ssl_context
+from ui_helpers import (
+    make_button, make_input, make_combobox, make_title_strip, show_error, label_font,
+    get_internet_user_settings, UpperCaseLineEdit, apply_standard_dialog_chrome, connect_single,
+)
 
 
 # =============================================================================
@@ -37,13 +40,9 @@ from ui_helpers import make_button, label_font, apply_standard_dialog_chrome, co
 MAX_TITLE_LENGTH = 100
 _TITLE_PLACEHOLDER = "Fills in from the URL — or type your own"
 MAX_URL_LENGTH   = 200
-DATABASE_FILE    = "traffic.db3"
 
-_COMMSRVR = base64.b64decode("aHR0cHM6Ly9jb21tc3RhdC5hcHA=").decode()
-_DATAFEED = _COMMSRVR + "/datafeed-808585.php"
+_COMMSRVR = COMMSRVR_URL
 
-_PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
 
@@ -110,16 +109,6 @@ def fetch_youtube_title(video_id: str, timeout: int = 6) -> str:
 # Helpers
 # =============================================================================
 
-def make_uppercase(field: QLineEdit) -> None:
-    def to_upper(text):
-        if text != text.upper():
-            pos = field.cursorPosition()
-            field.setText(text.upper())
-            field.setCursorPosition(pos)
-    field.textEdited.connect(to_upper)
-
-
-
 class _SanitizedLineEdit(QLineEdit):
     """QLineEdit that strips non-printable-ASCII chars (and leading/trailing
     whitespace) from pasted text before it's inserted."""
@@ -137,7 +126,6 @@ class _SanitizedLineEdit(QLineEdit):
 class VideoDialog(QDialog):
     """Share YouTube Video dialog — post a YouTube link via the commstat.app server."""
 
-    _commsrvr_result = QtCore.pyqtSignal(str)
     # (video_id, title) — video_id lets a stale reply be discarded if the URL
     # changed while the lookup was in flight.
     _title_fetched = QtCore.pyqtSignal(str, str)
@@ -150,11 +138,9 @@ class VideoDialog(QDialog):
         super().__init__(parent)
         self.on_video_saved     = on_video_saved
         self.callsign: str      = ""
-        self.selected_group: str = ""
         self._pending_save_data = None
         self._internet_available = bool(parent and getattr(parent, '_internet_available', True))
 
-        self._commsrvr_result.connect(self._on_commsrvr_result)
         self._title_fetched.connect(self._on_title_fetched)
 
         # Auto-title state: which id we last looked up, and whether the
@@ -165,11 +151,10 @@ class VideoDialog(QDialog):
         apply_standard_dialog_chrome(self, "Share YouTube Video", _WIN_W, _WIN_H)
 
         self._setup_ui()
-        self._load_config()
+        self._populate_groups()
 
         self.group_combo.currentTextChanged.connect(self._on_group_changed)
         self.target_call_field.textChanged.connect(self._on_target_callsign_changed)
-        make_uppercase(self.target_call_field)
 
         # Look the title up a beat after typing/pasting settles, so a pasted
         # URL doesn't fire a request per character.
@@ -190,15 +175,6 @@ class VideoDialog(QDialog):
         self.setStyleSheet(
             f"QDialog {{ background-color:{_PANEL_BG}; }}"
             f"QLabel {{ font-family:Roboto; font-size:13px; color:{_PANEL_FG}; }}"
-            f"QLineEdit {{ background-color:white; color:#333333; border:1px solid #cccccc;"
-            f" border-radius:4px; padding:2px 6px; font-family:'Kode Mono'; font-size:13px; }}"
-            f"QLineEdit:focus {{ border:1px solid #007bff; }}"
-            f"QComboBox {{ background-color:white; color:#333333; border:1px solid #cccccc;"
-            f" border-radius:4px; padding:2px 4px; font-family:'Kode Mono'; font-size:13px;"
-            f" combobox-popup:0; }}"
-            f"QComboBox QAbstractItemView {{ background-color:white; color:#333333;"
-            f" selection-background-color:#cce5ff; selection-color:#000000; }}"
-            f"QComboBox QAbstractItemView::item {{ min-height:22px; padding:0 6px; }}"
         )
 
         body = QVBoxLayout(self)
@@ -206,16 +182,7 @@ class VideoDialog(QDialog):
         body.setSpacing(10)
 
         # ── Title ─────────────────────────────────────────────────────────────
-        title_lbl = QLabel("Share YouTube Video")
-        title_lbl.setAlignment(QtCore.Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
-        body.addWidget(title_lbl)
+        body.addWidget(make_title_strip("Share YouTube Video"))
 
         # ── Target ────────────────────────────────────────────────────────────
         target_lbl = QLabel("Target:")
@@ -225,19 +192,17 @@ class VideoDialog(QDialog):
         target_row = QHBoxLayout()
         target_row.setSpacing(8)
 
-        self.group_combo = QComboBox()
+        self.group_combo = make_combobox([], list_popup=True)
         self.group_combo.setMinimumWidth(150)
-        self.group_combo.setMaxVisibleItems(30)
-        self.group_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.group_combo))
         target_row.addWidget(self.group_combo)
 
         or_lbl = QLabel("OR Callsign")
         or_lbl.setFont(label_font())
         target_row.addWidget(or_lbl)
 
-        self.target_call_field = QLineEdit()
-        self.target_call_field.setMaxLength(12)
-        self.target_call_field.setPlaceholderText("e.g. N0CALL")
+        self.target_call_field = make_input(
+            placeholder="e.g. N0CALL", max_len=12, widget=UpperCaseLineEdit(),
+        )
         self.target_call_field.setFixedWidth(150)
         target_row.addWidget(self.target_call_field)
         target_row.addStretch()
@@ -250,9 +215,9 @@ class VideoDialog(QDialog):
         url_input_lbl.setFont(label_font())
         body.addWidget(url_input_lbl)
 
-        self.url_field = QLineEdit()
-        self.url_field.setMaxLength(MAX_URL_LENGTH)
-        self.url_field.setPlaceholderText(f"{MAX_URL_LENGTH} characters max")
+        self.url_field = make_input(
+            placeholder=f"{MAX_URL_LENGTH} characters max", max_len=MAX_URL_LENGTH,
+        )
         body.addWidget(self.url_field)
 
         # ── Title field ───────────────────────────────────────────────────────
@@ -260,9 +225,9 @@ class VideoDialog(QDialog):
         title_input_lbl.setFont(label_font())
         body.addWidget(title_input_lbl)
 
-        self.title_field = _SanitizedLineEdit()
-        self.title_field.setMaxLength(MAX_TITLE_LENGTH)
-        self.title_field.setPlaceholderText(_TITLE_PLACEHOLDER)
+        self.title_field = make_input(
+            placeholder=_TITLE_PLACEHOLDER, max_len=MAX_TITLE_LENGTH, widget=_SanitizedLineEdit(),
+        )
         body.addWidget(self.title_field)
 
         body.addStretch()
@@ -275,86 +240,50 @@ class VideoDialog(QDialog):
 
         # ── Buttons ───────────────────────────────────────────────────────────
         self.cancel_button = make_button("Cancel", _COL_CANCEL, min_w=100)
-        self.cancel_button.clicked.connect(self.close)
+        self.cancel_button.clicked.connect(self.reject)
 
+        if not self._internet_available:
+            no_inet = QLabel("No Internet Connection  ·  Video Sharing Unavailable")
+            no_inet.setAlignment(QtCore.Qt.AlignCenter)
+            no_inet.setStyleSheet(
+                f"QLabel {{ color:{_PANEL_FG}; background-color:transparent;"
+                f" font-family:Roboto; font-size:13px; font-weight:bold; }}"
+            )
+            body.addWidget(no_inet)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addStretch()
         if self._internet_available:
             self.save_button = make_button("Save Only", COLOR_BTN_CYAN, min_w=100)
             self.save_button.clicked.connect(self._save_only)
+            btn_row.addWidget(self.save_button)
 
             self.transmit_button = make_button("Transmit", COLOR_BTN_BLUE, min_w=100)
             connect_single(self.transmit_button, self._transmit)
-
-            btn_row = QHBoxLayout()
-            btn_row.setSpacing(8)
-            btn_row.addStretch()
-            btn_row.addWidget(self.save_button)
             btn_row.addWidget(self.transmit_button)
-            btn_row.addWidget(self.cancel_button)
-            body.addLayout(btn_row)
-        else:
-            no_inet = QLabel("No Internet Connection  ·  Video Sharing Unavailable")
-            no_inet.setAlignment(QtCore.Qt.AlignCenter)
-            no_inet.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-            no_inet.setFixedHeight(36)
-            no_inet.setStyleSheet(
-                f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-                " font-size:16px; padding-top:9px; padding-bottom:9px; }"
-            )
-            no_inet_row = QHBoxLayout()
-            no_inet_row.setSpacing(8)
-            no_inet_row.addWidget(no_inet, 1)
-            no_inet_row.addWidget(self.cancel_button)
-            body.addLayout(no_inet_row)
+        btn_row.addWidget(self.cancel_button)
+        body.addLayout(btn_row)
 
     # =========================================================================
     # Config / DB
     # =========================================================================
 
-    def _load_config(self) -> None:
-        self.selected_group = self._get_active_group_from_db()
+    def _populate_groups(self) -> None:
         all_groups = self._get_all_groups_from_db()
         self.group_combo.addItem("")
         for group in all_groups:
             self.group_combo.addItem(group)
 
-    def _get_active_group_from_db(self) -> str:
-        try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT name FROM groups ORDER BY name LIMIT 1")
-                result = cursor.fetchone()
-                if result:
-                    return result[0]
-        except sqlite3.Error as e:
-            print(f"Error reading active group from database: {e}")
-        return ""
-
     def _get_all_groups_from_db(self) -> list:
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM groups ORDER BY name")
                 return [row[0] for row in cursor.fetchall()]
         except sqlite3.Error as e:
             print(f"Error reading groups from database: {e}")
         return []
-
-    def _get_internet_user_settings(self) -> tuple:
-        """Return (callsign, gridsquare, state) from User Settings."""
-        try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT callsign, gridsquare, state FROM controls WHERE id = 1")
-                row = cursor.fetchone()
-                if row:
-                    return (
-                        (row[0] or "").strip().upper(),
-                        (row[1] or "").strip(),
-                        (row[2] or "").strip().upper(),
-                    )
-        except sqlite3.Error:
-            pass
-        return ("", "", "")
 
     def _on_group_changed(self, group: str) -> None:
         if group:
@@ -376,26 +305,6 @@ class VideoDialog(QDialog):
         if group:
             return "@" + group
         return ""
-
-    def _show_error(self, message: str) -> None:
-        msg = QMessageBox(self)
-        msg.setWindowTitle("CommStat Error")
-        msg.setText(message)
-        msg.setIcon(QMessageBox.Critical)
-        msg.setWindowFlag(QtCore.Qt.WindowStaysOnTopHint)
-        msg.exec_()
-
-    def _on_commsrvr_result(self, result: str) -> None:
-        if result.startswith("ERR::"):
-            from qrz_lookup import InternetDeliveryFailureDialog
-            parent = self if self.isVisible() else (self.parent() or self)
-            InternetDeliveryFailureDialog(result[5:], parent=parent).exec_()
-        elif result.isdigit():
-            global_id = int(result)
-            self._save_to_database(global_id)
-            self.close()
-            if self.on_video_saved:
-                self.on_video_saved()
 
     # =========================================================================
     # Auto title lookup
@@ -446,7 +355,7 @@ class VideoDialog(QDialog):
 
     def _validate_input(self) -> Optional[tuple]:
         if not self._get_target():
-            self._show_error("Please select a Group or enter a Target Callsign")
+            show_error(self, "Please select a Group or enter a Target Callsign")
             self.group_combo.setFocus()
             return None
 
@@ -454,27 +363,27 @@ class VideoDialog(QDialog):
         # the title is derived from it.
         url = re.sub(r"[^ -~]+", " ", self.url_field.text()).strip()
         if len(url) < 1:
-            self._show_error("URL is required")
+            show_error(self, "URL is required")
             self.url_field.setFocus()
             return None
 
         if not _extract_youtube_id(url):
-            self._show_error("URL must be a valid YouTube video link")
+            show_error(self, "URL must be a valid YouTube video link")
             self.url_field.setFocus()
             return None
 
         title = re.sub(r"[^ -~]+", " ", self.title_field.text()).strip()
         if len(title) < 1:
-            self._show_error("Title is required")
+            show_error(self, "Title is required")
             self.title_field.setFocus()
             return None
 
-        callsign, grid, state = self._get_internet_user_settings()
+        callsign, grid, state = get_internet_user_settings()
         if not callsign or not grid or not state:
-            self._show_error(
+            show_error(self, 
                 "Cannot transmit — User Settings are not fully configured.\n\n"
                 "Please set your callsign, grid square, and state at:\n"
-                "Menu → Config → User Settings"
+                "Settings → User Settings"
             )
             return None
 
@@ -501,7 +410,7 @@ class VideoDialog(QDialog):
 
     def _save_to_database(self, global_id: int = 0) -> None:
         d = self._pending_save_data
-        with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+        with db_connect() as conn:
             conn.execute(
                 "INSERT INTO videos "
                 "(global_id, datetime, date, from_callsign, target, title, url, played) "
@@ -514,40 +423,25 @@ class VideoDialog(QDialog):
     # Commsrvr submission
     # =========================================================================
 
-    def _submit_to_commsrvr_async(self) -> None:
+    def _submit_to_commsrvr(self) -> None:
         d = self._pending_save_data
-        callsign = d['callsign']
         message = self._build_message(d['callsign'], d['title'], d['url'])
-        now = d['datetime']
 
-        def submit_thread():
-            try:
-                # freq/0/db are unused placeholders — kept only so the incoming
-                # heartbeat feed's shared 6-field envelope parser (little_gucci.py
-                # _handle_commsrvr_data_messages) can split this line the same way
-                # it splits alert/statrep/message lines.
-                data_string = f"{now}\t0\t0\t0\t{message}"
-                post_data = urllib.parse.urlencode({
-                    'cs': callsign, 'data': data_string
-                }).encode('utf-8')
-                req = urllib.request.Request(_DATAFEED, data=post_data, method='POST')
-                with urllib.request.urlopen(req, timeout=5, context=create_verified_ssl_context()) as response:
-                    result = response.read().decode('utf-8').strip()
-                if result.isdigit():
-                    print(f"[Commsrvr] Video submitted successfully (global_id={result})")
-                else:
-                    print(f"[Commsrvr] Video submission failed — server returned: {result}")
-                self._commsrvr_result.emit(result)
-            except Exception as e:
-                reason = getattr(e, 'reason', e)
-                if isinstance(reason, TimeoutError):
-                    err = "ERR::Server timeout — the server did not respond in time."
-                else:
-                    err = f"ERR::Connection error — {e}"
-                print(f"[Commsrvr] Video submission failed — {err[5:]}")
-                self._commsrvr_result.emit(err)
+        def on_complete(global_id: int) -> None:
+            # Save only when the server accepted it (numeric global_id)
+            if not global_id:
+                return
+            self._save_to_database(global_id)
+            self.accept()
+            if self.on_video_saved:
+                self.on_video_saved()
 
-        threading.Thread(target=submit_thread, daemon=True).start()
+        # freq and snr are unused placeholders (0): they are kept only so the
+        # heartbeat feed's shared envelope parser (little_gucci.py
+        # _handle_commsrvr_data_messages) can split this line the same way it
+        # splits alert/statrep/message lines.
+        submit_to_commsrvr(self, 0, d['callsign'], message, d['datetime'], snr=0,
+                           on_complete=on_complete)
 
     # =========================================================================
     # Button handlers
@@ -560,7 +454,7 @@ class VideoDialog(QDialog):
         callsign, title, url = result
         self._pending_save_data = self._capture_save_data(callsign, title, url)
         self._save_to_database(0)
-        self.close()
+        self.accept()
         if self.on_video_saved:
             self.on_video_saved()
 
@@ -568,9 +462,16 @@ class VideoDialog(QDialog):
         result = self._validate_input()
         if result is None:
             return
+        import netguard
+        if not netguard.is_network_enabled():
+            show_error(self, 
+                "Cannot transmit — Off-Grid Mode is enabled.\n\n"
+                "Switch to Online mode to transmit via the Internet."
+            )
+            return
         callsign, title, url = result
         self._pending_save_data = self._capture_save_data(callsign, title, url)
-        self._submit_to_commsrvr_async()
+        self._submit_to_commsrvr()
 
 
 if __name__ == "__main__":

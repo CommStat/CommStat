@@ -24,29 +24,25 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPlainTextEdit, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QAbstractItemView, QWidget, QCheckBox,
+    QHeaderView, QMessageBox, QAbstractItemView, QWidget,
 )
 
 from constants import (
     DEFAULT_COLORS,
     COLOR_BTN_GREEN, COLOR_BTN_BLUE, COLOR_BTN_CLOSE,
-    COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
     COLOR_INPUT_TEXT, COLOR_INPUT_BORDER, FONT_MONO_STACK,
 )
-from ui_helpers import make_button, make_input, confirm, apply_standard_dialog_chrome
+from ui_helpers import (
+    make_button, make_input, confirm, apply_standard_dialog_chrome,
+    make_title_strip, make_checkbox_cell, DIALOG_TABLE_QSS, UpperCaseLineEdit,
+)
 from qrz_client import QRZClient, get_qrz_cached, load_qrz_config
 from gridfinder import format_grid
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-_PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
-_TITLE_BG = DEFAULT_COLORS.get("title_bar_background", "#F07800")
-_TITLE_FG = DEFAULT_COLORS.get("title_bar_foreground", "#FFFFFF")
-_DATA_BG  = DEFAULT_COLORS.get("data_background",      "#F8F6F4")
-_DATA_FG  = DEFAULT_COLORS.get("data_foreground",      "#000000")
 
 _COL_ADD    = "#28a745"
 _COL_REMOVE = "#dc3545"
@@ -60,16 +56,6 @@ _LIST_COLS = ["Active"] + _TABLE_COLS
 # QThreads started for a lookup are parked here so closing the dialog
 # mid-lookup never destroys a still-running QThread.
 _live_threads = set()
-
-
-def _field_style(read_only: bool) -> str:
-    bg = COLOR_DISABLED_BG if read_only else "white"
-    fg = COLOR_DISABLED_TEXT if read_only else COLOR_INPUT_TEXT
-    return (
-        f"QLineEdit {{ background-color:{bg}; color:{fg}; border:1px solid {COLOR_INPUT_BORDER};"
-        f" border-radius:4px; padding:2px 6px; font-family:{FONT_MONO_STACK}; font-size:13px; }}"
-        f"QLineEdit:focus {{ border:1px solid {COLOR_BTN_BLUE}; }}"
-    )
 
 
 # ── Bulk lookup worker ─────────────────────────────────────────────────────────
@@ -121,22 +107,14 @@ class _BulkFailedDialog(QDialog):
         apply_standard_dialog_chrome(self, "Bulk Add", 520, 280)
         self.setStyleSheet(
             f"QDialog {{ background-color:{_PANEL_BG}; color:{_PANEL_FG}; }}"
-            f"QLabel {{ font-size:13px; color:{_PANEL_FG}; }}"
+            f"QLabel {{ font-family:Roboto; font-size:13px; color:{_PANEL_FG}; }}"
         )
 
         body = QVBoxLayout(self)
         body.setContentsMargins(15, 15, 15, 15)
         body.setSpacing(10)
 
-        title_lbl = QLabel("Bulk Add Results")
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
+        title_lbl = make_title_strip("Bulk Add Results")
         body.addWidget(title_lbl)
 
         msg = QLabel(
@@ -203,7 +181,7 @@ class WatchlistMembersDialog(QDialog):
     def _setup_ui(self) -> None:
         self.setStyleSheet(
             f"QDialog {{ background-color:{_PANEL_BG}; color:{_PANEL_FG}; }}"
-            f"QLabel {{ font-size:13px; color:{_PANEL_FG}; }}"
+            f"QLabel {{ font-family:Roboto; font-size:13px; color:{_PANEL_FG}; }}"
         )
 
         body = QVBoxLayout(self)
@@ -211,15 +189,7 @@ class WatchlistMembersDialog(QDialog):
         body.setSpacing(10)
 
         # ── Title ─────────────────────────────────────────────────────────────
-        title_lbl = QLabel(f"{self.watchlist_name} Watchlist Members")
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
+        title_lbl = make_title_strip(f"{self.watchlist_name} Watchlist Members")
         body.addWidget(title_lbl)
 
         # ── Add panel (hidden until Add is clicked) ───────────────────────────
@@ -233,15 +203,8 @@ class WatchlistMembersDialog(QDialog):
         search_row.setSpacing(8)
         search_row.addWidget(QLabel("Callsign:"))
 
-        # Deferred import: this dialog is only constructed from watchlists.py
-        # at runtime, once little_gucci is fully loaded in sys.modules.
-        from little_gucci import UpperCaseLineEdit
-        self.cs_edit = UpperCaseLineEdit()
-        self.cs_edit.setPlaceholderText("Callsign")
-        self.cs_edit.setMaxLength(15)
-        self.cs_edit.setMinimumHeight(30)
+        self.cs_edit = make_input("Callsign", max_len=15, widget=UpperCaseLineEdit())
         self.cs_edit.setFixedWidth(140)
-        self.cs_edit.setStyleSheet(_field_style(read_only=False))
         self.cs_edit.returnPressed.connect(self._on_search)
         search_row.addWidget(self.cs_edit)
 
@@ -250,7 +213,7 @@ class WatchlistMembersDialog(QDialog):
         search_row.addWidget(self.btn_search)
 
         self.lbl_status = QLabel("")
-        self.lbl_status.setStyleSheet("QLabel { font-family:Roboto; font-size:12px; }")
+        self.lbl_status.setStyleSheet("QLabel { font-family:Roboto; font-size:13px; }")
         search_row.addWidget(self.lbl_status)
         search_row.addStretch()
         panel_layout.addLayout(search_row)
@@ -301,10 +264,7 @@ class WatchlistMembersDialog(QDialog):
         bulk_row.setSpacing(8)
         bulk_row.addWidget(QLabel("Callsigns:"))
 
-        self.bulk_edit = UpperCaseLineEdit()
-        self.bulk_edit.setPlaceholderText("Paste comma-separated callsigns…")
-        self.bulk_edit.setMinimumHeight(30)
-        self.bulk_edit.setStyleSheet(_field_style(read_only=False))
+        self.bulk_edit = make_input("Paste comma-separated callsigns…", widget=UpperCaseLineEdit())
         self.bulk_edit.returnPressed.connect(self._on_bulk_submit)
         bulk_row.addWidget(self.bulk_edit, 1)
 
@@ -314,7 +274,7 @@ class WatchlistMembersDialog(QDialog):
         bulk_layout.addLayout(bulk_row)
 
         self.lbl_bulk_status = QLabel("")
-        self.lbl_bulk_status.setStyleSheet("QLabel { font-family:Roboto; font-size:12px; }")
+        self.lbl_bulk_status.setStyleSheet("QLabel { font-family:Roboto; font-size:13px; }")
         bulk_layout.addWidget(self.lbl_bulk_status)
 
         self.bulk_panel.setVisible(False)
@@ -339,16 +299,7 @@ class WatchlistMembersDialog(QDialog):
         hh.setSectionResizeMode(4, QHeaderView.ResizeToContents)   # State
         hh.setSectionResizeMode(5, QHeaderView.ResizeToContents)   # Grid
 
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background-color:{_DATA_BG}; alternate-background-color:{_DATA_BG};"
-            f" gridline-color:#cccccc; color:{_DATA_FG};"
-            f" font-family:'Kode Mono'; font-size:13px; }}"
-            f"QTableWidget::item {{ padding:4px 6px; }}"
-            f"QHeaderView::section {{ background-color:{_TITLE_BG}; color:{_TITLE_FG};"
-            f" padding:5px 6px; border:none; font-family:Roboto; font-size:13px;"
-            f" font-weight:bold; }}"
-            f"QTableWidget::item:selected {{ background-color:#cce5ff; color:#000000; }}"
-        )
+        self.table.setStyleSheet(DIALOG_TABLE_QSS)
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         body.addWidget(self.table)
 
@@ -386,17 +337,10 @@ class WatchlistMembersDialog(QDialog):
             row = self.table.rowCount()
             self.table.insertRow(row)
 
-            active_cb = QCheckBox()
-            active_cb.setChecked(m["active"])
+            active_cell, active_cb = make_checkbox_cell(m["active"])
             active_cb.toggled.connect(
                 lambda checked, member_id=m["id"]: self._on_active_toggled(member_id, checked)
             )
-            active_cell = QWidget()
-            active_cell.setStyleSheet("background-color: transparent;")
-            active_layout = QHBoxLayout(active_cell)
-            active_layout.setContentsMargins(0, 0, 0, 0)
-            active_layout.addWidget(active_cb)
-            active_layout.setAlignment(Qt.AlignCenter)
             self.table.setCellWidget(row, 0, active_cell)
 
             values = [m["callsign"], m["name"], m["city"], m["state"], m["grid"]]
@@ -502,9 +446,7 @@ class WatchlistMembersDialog(QDialog):
         ]
         for field, val in zip(self._fields, values):
             field.setText(val)
-            editable = field is self.f_grid
-            field.setReadOnly(not editable)
-            field.setStyleSheet(_field_style(read_only=not editable))
+            make_input(widget=field, read_only=field is not self.f_grid)
         self.detail_row.setVisible(True)
 
     def _enter_manual_mode(self, cs: str) -> None:
@@ -514,11 +456,8 @@ class WatchlistMembersDialog(QDialog):
         self._found_override = ""
         for field in self._fields:
             field.clear()
-            field.setReadOnly(False)
-            field.setStyleSheet(_field_style(read_only=False))
+            make_input(widget=field, read_only=field is self.f_callsign)
         self.f_callsign.setText(cs)
-        self.f_callsign.setReadOnly(True)
-        self.f_callsign.setStyleSheet(_field_style(read_only=True))
         self.detail_row.setVisible(True)
         self.f_name.setFocus()
 
@@ -624,7 +563,9 @@ class WatchlistMembersDialog(QDialog):
         self.bulk_edit.clear()
 
         if failed:
-            _BulkFailedDialog(self.watchlist_name, failed, self).exec_()
+            report = _BulkFailedDialog(self.watchlist_name, failed, self)
+            report.exec_()
+            report.deleteLater()
 
     # ── Remove ─────────────────────────────────────────────────────────────────
 

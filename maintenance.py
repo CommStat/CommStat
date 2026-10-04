@@ -23,26 +23,28 @@ import sqlite3
 import urllib.parse
 import urllib.request
 
-from PyQt5 import QtGui, QtWidgets
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from PyQt5 import QtGui
+from PyQt5.QtCore import Qt, QThread, QUrl, pyqtSignal
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QWidget
 
 from constants import (
-    DEFAULT_COLORS, COLOR_BTN_GREEN, COLOR_BTN_CLOSE, DATABASE_FILE,
-    COLOR_BTN_BLUE, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER, FONT_MONO_STACK,
+    DEFAULT_COLORS, COLOR_BTN_GREEN, COLOR_BTN_CLOSE, COMMSRVR_URL,
+    COLOR_BTN_BLUE,
 )
-from ui_helpers import apply_standard_dialog_chrome, make_button, connect_single, show_help_dialog
-from little_gucci import _COMMSRVR, create_verified_ssl_context, UpperCaseLineEdit
+from db_utils import db_connect
+from ui_helpers import (
+    apply_standard_dialog_chrome, make_button, make_input, make_title_strip, connect_single,
+    show_help_dialog, open_external_url, UpperCaseLineEdit,
+)
+from ssl_utils import create_verified_ssl_context
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-_PROG_BG = DEFAULT_COLORS.get("program_background", "#A52A2A")
-_PROG_FG = DEFAULT_COLORS.get("program_foreground", "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background", "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground", "#000000")
 _BOX_BG = QtGui.QColor(_PANEL_BG).lighter(110).name()
 
-_MAINTENANCE_URL = _COMMSRVR + "/maintenance-808585.php"
+_MAINTENANCE_URL = COMMSRVR_URL + "/maintenance-808585.php"
 
 _WIN_W = 720
 _WIN_H = 400
@@ -126,7 +128,7 @@ class _MaintenanceWorker(QThread):
             return
 
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 cursor = conn.cursor()
                 for sql in statements:
                     cursor.execute(sql)
@@ -152,33 +154,18 @@ class MaintenanceDialog(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(12)
 
-        title = QLabel("Maintenance")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title.setFixedHeight(36)
-        title.setStyleSheet(
-            f"QLabel {{ background-color: {_PROG_BG}; color: {_PROG_FG}; "
-            "font-size: 16px; padding-top: 9px; padding-bottom: 9px; }"
-        )
-        layout.addWidget(title)
+        layout.addWidget(make_title_strip("Maintenance"))
 
         input_row = QHBoxLayout()
         input_row.setSpacing(8)
         lbl_code = QLabel("Code:")
         lbl_code.setStyleSheet(
-            f"QLabel {{ font-family:Roboto; font-size:12px; font-weight:bold; color:{_PANEL_FG}; }}"
+            f"QLabel {{ font-family:Roboto; font-size:13px; font-weight:bold; color:{_PANEL_FG}; }}"
         )
         input_row.addWidget(lbl_code)
 
-        self.code_edit = UpperCaseLineEdit()
-        self.code_edit.setMaxLength(6)
-        self.code_edit.setMinimumHeight(30)
+        self.code_edit = make_input(max_len=6, widget=UpperCaseLineEdit())
         self.code_edit.setFixedWidth(100)
-        self.code_edit.setStyleSheet(
-            f"QLineEdit {{ background-color:white; color:{COLOR_INPUT_TEXT}; border:1px solid {COLOR_INPUT_BORDER};"
-            f" border-radius:4px; padding:2px 6px; font-family:{FONT_MONO_STACK}; font-size:13px; }}"
-            f"QLineEdit:focus {{ border:1px solid {COLOR_BTN_BLUE}; }}"
-        )
         self.code_edit.returnPressed.connect(self._on_run)
         input_row.addWidget(self.code_edit)
 
@@ -242,10 +229,12 @@ class MaintenanceDialog(QDialog):
 
         lbl_description = QLabel(description)
         lbl_description.setWordWrap(True)
-        lbl_description.setOpenExternalLinks(True)
+        lbl_description.linkActivated.connect(
+            lambda url: open_external_url(self, QUrl(url), panel_bg=_PANEL_BG)
+        )
         lbl_description.setTextInteractionFlags(Qt.TextBrowserInteraction)
         lbl_description.setStyleSheet(
-            "QLabel { font-family:Roboto; font-size:13px; color:#333333; border:none; }"
+            f"QLabel {{ font-family:Roboto; font-size:13px; color:{_PANEL_FG}; border:none; }}"
             f"QLabel a {{ color:{COLOR_BTN_BLUE}; }}"
         )
         row.addWidget(lbl_description)
@@ -266,6 +255,19 @@ class MaintenanceDialog(QDialog):
         self._worker.result_ready.connect(self._on_worker_result)
         self._worker.start()
 
+    def release(self) -> None:
+        """Free this dialog after exec_() returns (call instead of deleteLater()).
+
+        The worker thread belongs to the dialog, and destroying a QThread that is
+        still running aborts the program. If a request is still in flight, the
+        dialog stays alive (hidden) until the worker finishes, so the result can
+        still be applied."""
+        worker = self._worker
+        if worker is not None and worker.isRunning():
+            worker.finished.connect(self.deleteLater)
+        else:
+            self.deleteLater()
+
     def _on_worker_result(self, status: str, message: str, config_updates: dict) -> None:
         self.code_edit.setEnabled(True)
         self.btn_run.setEnabled(True)
@@ -278,4 +280,5 @@ class MaintenanceDialog(QDialog):
                 if setter:
                     setter(value)
 
-        show_help_dialog(self, "Maintenance", message, width=360, height=220)
+        if self.isVisible():
+            show_help_dialog(self, "Maintenance", message, width=360, height=220)

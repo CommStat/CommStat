@@ -21,16 +21,15 @@ from PyQt5.QtWidgets import (
 
 from connector_manager import ConnectorManager, DEFAULT_SERVER, DEFAULT_TCP_PORT
 from constants import DEFAULT_COLORS
-from ui_helpers import make_button, make_input, mono_font, confirm, apply_standard_dialog_chrome
+from ui_helpers import (
+    make_button, make_input, mono_font, confirm, apply_standard_dialog_chrome,
+    make_title_strip, wrap_fixed, DIALOG_TABLE_QSS,
+)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-_PROG_BG   = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG   = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG  = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG  = DEFAULT_COLORS.get("module_foreground",    "#000000")
-_TITLE_BG  = DEFAULT_COLORS.get("title_bar_background", "#F07800")
-_TITLE_FG  = DEFAULT_COLORS.get("title_bar_foreground", "#FFFFFF")
 _DATA_BG   = DEFAULT_COLORS.get("data_background",      "#F8F6F4")
 _DATA_FG   = DEFAULT_COLORS.get("data_foreground",      "#000000")
 
@@ -91,8 +90,8 @@ class JS8ConnectorsDialog(QDialog):
 
     def _setup_ui(self) -> None:
         self.setStyleSheet(
-            f"QDialog {{ background-color:{_PANEL_BG}; }}"
-            f"QLabel {{ font-size:13px; }}"
+            f"QDialog {{ background-color:{_PANEL_BG}; color:{_PANEL_FG}; }}"
+            f"QLabel {{ font-size:13px; color:{_PANEL_FG}; }}"
         )
 
         body = QVBoxLayout(self)
@@ -100,15 +99,7 @@ class JS8ConnectorsDialog(QDialog):
         body.setSpacing(10)
 
         # ── Title ─────────────────────────────────────────────────────────────
-        title_lbl = QLabel("JS8 Connectors")
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
+        title_lbl = make_title_strip("JS8 Connectors")
         body.addWidget(title_lbl)
 
         # ── Table ─────────────────────────────────────────────────────────────
@@ -133,16 +124,7 @@ class JS8ConnectorsDialog(QDialog):
         hh.setSectionResizeMode(6, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(7, QHeaderView.Stretch)
 
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background-color:{_DATA_BG}; alternate-background-color:{_DATA_BG};"
-            f" gridline-color:#cccccc; color:{_DATA_FG};"
-            f" font-family:'Kode Mono'; font-size:13px; }}"
-            f"QTableWidget::item {{ padding:4px 6px; }}"
-            f"QHeaderView::section {{ background-color:{_TITLE_BG}; color:{_TITLE_FG};"
-            f" padding:5px 6px; border:none; font-family:Roboto; font-size:13px;"
-            f" font-weight:bold; }}"
-            f"QTableWidget::item:selected {{ background-color:#cce5ff; color:#000000; }}"
-        )
+        self.table.setStyleSheet(DIALOG_TABLE_QSS)
         self.table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self.table.doubleClicked.connect(self._on_edit)
         body.addWidget(self.table)
@@ -199,6 +181,9 @@ class JS8ConnectorsDialog(QDialog):
             f" <span style='color:{_PANEL_FG}'>Uncheck to stop auto-transmitting an RF acknowledgment for STATREPs received on this connector</span>"
         )
         tip_lbl.setWordWrap(True)
+        tip_lbl.setStyleSheet(
+            f"QLabel {{ font-family:Roboto; font-size:13px; color:{_PANEL_FG}; }}"
+        )
         body.addWidget(tip_lbl)
 
     # ── Data loading ───────────────────────────────────────────────────────────
@@ -312,20 +297,6 @@ class JS8ConnectorsDialog(QDialog):
         self._iw_rig.textChanged.connect(lambda _: self._on_inline_changed())
         self._iw_port.textChanged.connect(lambda _: self._on_inline_changed())
 
-        # Qt ignores setMaximumWidth on a QLineEdit installed directly via
-        # setCellWidget — the embedded widget gets stretched to fill the cell.
-        # Wrap each constrained input in a QWidget+HBoxLayout so the container
-        # fills the cell while the input itself keeps its fixed width.
-        def _wrap_fixed(input_widget: QLineEdit, width_px: int) -> QWidget:
-            input_widget.setFixedWidth(width_px)
-            container = QWidget()
-            layout = QHBoxLayout(container)
-            layout.setContentsMargins(0, 0, 0, 0)
-            layout.setSpacing(0)
-            layout.addWidget(input_widget)
-            layout.addStretch()
-            return container
-
         _rig_w, _server_w, _port_w, _state_w = 112, 121, 60, 40
 
         # Cols 0–3 are ResizeToContents and would clamp back to data width,
@@ -338,10 +309,10 @@ class JS8ConnectorsDialog(QDialog):
             self.table.setColumnWidth(_c, _w + 16)
 
         # Install on all columns except the live Status column
-        self.table.setCellWidget(row, 0, _wrap_fixed(self._iw_rig,    _rig_w))
-        self.table.setCellWidget(row, 1, _wrap_fixed(self._iw_server, _server_w))
-        self.table.setCellWidget(row, 2, _wrap_fixed(self._iw_port,   _port_w))
-        self.table.setCellWidget(row, 3, _wrap_fixed(self._iw_state,  _state_w))
+        self.table.setCellWidget(row, 0, wrap_fixed(self._iw_rig,    _rig_w))
+        self.table.setCellWidget(row, 1, wrap_fixed(self._iw_server, _server_w))
+        self.table.setCellWidget(row, 2, wrap_fixed(self._iw_port,   _port_w))
+        self.table.setCellWidget(row, 3, wrap_fixed(self._iw_state,  _state_w))
         # col 4 (_STATUS_COL) intentionally skipped
         self.table.setCellWidget(row, _AUTO_COL, self._iw_auto)
         self.table.setCellWidget(row, _RF_ACK_COL, self._iw_rf_ack)
@@ -372,7 +343,8 @@ class JS8ConnectorsDialog(QDialog):
         """Centered checkbox cell widget for a flag column (Auto, RF Ack) during inline edit."""
         cb = QCheckBox()
         cb.setStyleSheet(
-            f"QCheckBox {{ background-color:{_DATA_BG}; padding-left:14px; }}"
+            f"QCheckBox {{ background-color:{_DATA_BG}; color:{_DATA_FG};"
+            f" font-family:Roboto; font-size:13px; padding-left:14px; }}"
         )
         return cb
 

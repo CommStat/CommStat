@@ -14,23 +14,20 @@ from PyQt5.QtCore import Qt, QUrl
 from PyQt5.QtGui import QDesktopServices
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QTableWidget, QTableWidgetItem,
-    QHeaderView, QMessageBox, QAbstractItemView, QWidget,
+    QTableWidget, QTableWidgetItem,
+    QHeaderView, QAbstractItemView,
 )
 
 from constants import DEFAULT_COLORS, COLOR_BTN_CYAN, COLOR_BTN_RED, COLOR_BTN_CLOSE
-from ui_helpers import make_button, confirm, apply_standard_dialog_chrome
+from ui_helpers import (
+    make_button, make_button_cell, make_title_strip, confirm, show_offgrid_notice,
+    apply_standard_dialog_chrome, DIALOG_TABLE_QSS,
+)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-_PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
-_TITLE_BG = DEFAULT_COLORS.get("title_bar_background", "#F07800")
-_TITLE_FG = DEFAULT_COLORS.get("title_bar_foreground", "#FFFFFF")
-_DATA_BG  = DEFAULT_COLORS.get("data_background",      "#F8F6F4")
-_DATA_FG  = DEFAULT_COLORS.get("data_foreground",      "#000000")
 
 _COL_PLAY  = COLOR_BTN_CYAN
 _COL_DELETE = COLOR_BTN_RED
@@ -67,7 +64,7 @@ class VideoManagerDialog(QDialog):
     def _setup_ui(self) -> None:
         self.setStyleSheet(
             f"QDialog {{ background-color:{_PANEL_BG}; color:{_PANEL_FG}; }}"
-            f"QLabel {{ font-size:13px; color:{_PANEL_FG}; }}"
+            f"QLabel {{ font-family:Roboto; font-size:13px; color:{_PANEL_FG}; }}"
         )
 
         body = QVBoxLayout(self)
@@ -75,16 +72,7 @@ class VideoManagerDialog(QDialog):
         body.setSpacing(10)
 
         # ── Title ─────────────────────────────────────────────────────────────
-        title_lbl = QLabel("Video Manager")
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
-        body.addWidget(title_lbl)
+        body.addWidget(make_title_strip("Video Manager"))
 
         # ── Table ─────────────────────────────────────────────────────────────
         self.table = QTableWidget(0, len(_TABLE_COLS))
@@ -105,15 +93,7 @@ class VideoManagerDialog(QDialog):
         hh.setSectionResizeMode(4, QHeaderView.ResizeToContents)
         hh.setSectionResizeMode(5, QHeaderView.ResizeToContents)
 
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background-color:{_DATA_BG}; alternate-background-color:{_DATA_BG};"
-            f" gridline-color:#cccccc; color:{_DATA_FG};"
-            f" font-family:'Kode Mono'; font-size:13px; }}"
-            f"QTableWidget::item {{ padding:4px 6px; }}"
-            f"QHeaderView::section {{ background-color:{_TITLE_BG}; color:{_TITLE_FG};"
-            f" padding:5px 6px; border:none; font-family:Roboto; font-size:13px;"
-            f" font-weight:bold; }}"
-        )
+        self.table.setStyleSheet(DIALOG_TABLE_QSS)
         body.addWidget(self.table)
 
         # ── Buttons: Close only ──────────────────────────────────────────────
@@ -134,12 +114,7 @@ class VideoManagerDialog(QDialog):
         for row_idx, (video_id, title, from_callsign, target, date, url) in enumerate(rows):
             play_btn = make_button("▶", _COL_PLAY, 40)
             play_btn.clicked.connect(lambda _checked, u=url: self._on_play(u))
-            play_cell = QWidget()
-            play_cell.setStyleSheet("background-color: transparent;")
-            play_layout = QHBoxLayout(play_cell)
-            play_layout.setContentsMargins(6, 4, 10, 4)
-            play_layout.addWidget(play_btn)
-            self.table.setCellWidget(row_idx, 0, play_cell)
+            self.table.setCellWidget(row_idx, 0, make_button_cell(play_btn))
 
             for col, val in ((1, title), (2, from_callsign), (3, target), (4, date)):
                 item = QTableWidgetItem(val)
@@ -149,12 +124,7 @@ class VideoManagerDialog(QDialog):
 
             delete_btn = make_button("Delete", _COL_DELETE, 70)
             delete_btn.clicked.connect(lambda _checked, vid=video_id, t=title: self._on_delete(vid, t))
-            delete_cell = QWidget()
-            delete_cell.setStyleSheet("background-color: transparent;")
-            delete_layout = QHBoxLayout(delete_cell)
-            delete_layout.setContentsMargins(6, 4, 10, 4)
-            delete_layout.addWidget(delete_btn)
-            self.table.setCellWidget(row_idx, 5, delete_cell)
+            self.table.setCellWidget(row_idx, 5, make_button_cell(delete_btn))
 
     # ── Actions ────────────────────────────────────────────────────────────────
 
@@ -162,11 +132,7 @@ class VideoManagerDialog(QDialog):
         """Open the video's URL in the OS browser, unless Off-Grid Mode is on."""
         import netguard
         if not netguard.guard('"Play Video" link'):
-            QMessageBox.information(
-                self, "Off-Grid Mode",
-                "\"Play Video\" opens an external website and is disabled while"
-                " Off-Grid Mode is on.\n\nSwitch back to ONLINE in the header to use it."
-            )
+            show_offgrid_notice(self, "Play Video")
             return
         QDesktopServices.openUrl(QUrl(url))
 

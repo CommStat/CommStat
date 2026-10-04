@@ -1,11 +1,10 @@
 # Brevity 2.0 PyQt — CommStat-compatible window
 # 8-character code: List, Event, Phase, Severity, Impact, Official Response, Source, Station
-# Keeps CommStat hooks: code_selected, argv colors/prefill/return_file, Paste Code to StatRep, Cancel
+# CommStat hooks: code_selected (Copy inserts the code into the StatRep remarks), prefill_code, Cancel
 
 import sys
 import re
 import json
-import traceback
 import os
 import glob
 import logging
@@ -14,33 +13,24 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s: %(m
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QComboBox, QTextEdit,
-    QFrame, QCheckBox, QStatusBar, QListView, QGridLayout, QStyledItemDelegate,
+    QLabel, QTextEdit,
+    QListView, QGridLayout,
 )
 from PyQt5.QtCore import Qt, QRegExp, pyqtSignal
 from PyQt5.QtGui import QFont, QRegExpValidator, QIcon, QColor
 
-try:
-    from constants import (
-        DEFAULT_COLORS, COLOR_BTN_GREEN, COLOR_BTN_RED, COLOR_BTN_CYAN,
-        COLOR_BTN_BLUE, COLOR_BTN_CLOSE, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
-    )
-    _PROG_BG = DEFAULT_COLORS.get("program_background", "#A52A2A")
-    _PROG_FG = DEFAULT_COLORS.get("program_foreground", "#FFFFFF")
-except Exception:
-    DEFAULT_COLORS = {}
-    COLOR_BTN_GREEN = "#28a745"
-    COLOR_BTN_RED = "#c0392b"
-    COLOR_BTN_CYAN = "#17a2b8"
-    COLOR_BTN_BLUE = "#2471a3"
-    COLOR_BTN_CLOSE = "#555555"
-    COLOR_INPUT_TEXT = "#333333"
-    COLOR_INPUT_BORDER = "#cccccc"
-    _PROG_BG = "#A52A2A"
-    _PROG_FG = "#FFFFFF"
+from constants import (
+    COLOR_BTN_GREEN, COLOR_BTN_RED, COLOR_BTN_CLOSE, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
+)
+from ui_helpers import (
+    make_button, make_input, make_combobox, make_title_strip, apply_standard_dialog_chrome,
+)
 
-from ui_helpers import make_button, apply_standard_dialog_chrome
-
+# Working state of the window that is currently handling an event. The module
+# functions below read and write these names directly, so each BrevityApp keeps
+# its own copy in self._state and swaps it in (BrevityApp._activate_state)
+# before running any of this code. Without that, a second window (Tools >
+# Brevity plus the StatRep Brevity button) would take over the first one's widgets.
 positions = {}
 updating_menus = False
 suppress_event_cascade = False
@@ -48,6 +38,21 @@ last_event_code = None
 emergency_list_mapping = {}
 current_file = None
 gui_widgets = {}
+main_window = None
+
+_STATE_KEYS = (
+    "positions", "updating_menus", "suppress_event_cascade", "last_event_code",
+    "emergency_list_mapping", "current_file", "gui_widgets", "main_window",
+)
+_active_window = None
+
+
+def _fresh_state() -> dict:
+    return {
+        "positions": {}, "updating_menus": False, "suppress_event_cascade": False,
+        "last_event_code": None, "emergency_list_mapping": {}, "current_file": None,
+        "gui_widgets": {}, "main_window": None,
+    }
 
 TITLES_DEFAULT = {
     "select_list": "1. Select List:",
@@ -59,14 +64,6 @@ TITLES_DEFAULT = {
     "source": "7. Trust / Source:",
     "station": "8. Station Status:",
 }
-
-
-def show_status_message(message, timeout=5000):
-    try:
-        if "status_bar" in globals():
-            globals()["status_bar"].showMessage(message, timeout)
-    except Exception as e:
-        logging.debug(f"status: {e}")
 
 
 def script_dir():
@@ -628,13 +625,10 @@ def current_codes():
 
 
 def style_combo_for_selection(combo):
-    """Standard combo styling, matching the StatRep dropdowns (Kode Mono 13px)."""
+    """Keep the dropdowns wide enough for the code descriptions (look comes from make_combobox)."""
     if combo is None:
         return
-    combo.setStyleSheet(
-        f"QComboBox {{ background-color: #ffffff; color: {COLOR_INPUT_TEXT}; border: 1px solid {COLOR_INPUT_BORDER};"
-        f" border-radius: 4px; padding: 2px 4px; font-family: 'Kode Mono'; font-size: 13px; min-width: 210px; }}"
-    )
+    combo.setMinimumWidth(210)
 
 
 def restyle_all_combos():
@@ -797,7 +791,6 @@ def load_selected_file(list_id, reset_fields=True):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not validate_json_structure(data):
-            show_status_message(f"Invalid JSON: {filename}", 8000)
             return
         positions = data
         current_file = filename
@@ -823,10 +816,8 @@ def load_selected_file(list_id, reset_fields=True):
             if gui_widgets.get("narrative_text"):
                 gui_widgets["narrative_text"].clear()
         refresh_all_menus()
-        show_status_message(f"Loaded {filename}", 4000)
     except Exception as e:
         logging.error(f"Load error: {e}")
-        show_status_message(f"Error loading {filename}", 8000)
 
 
 def on_event_changed():
@@ -844,7 +835,6 @@ def on_event_changed():
     )
     if changed and new_code:
         apply_event_defaults(new_code)
-        show_status_message("Defaults applied from Event — change any field if needed", 5000)
     on_field_change()
 
 
@@ -859,7 +849,6 @@ def on_field_change(*_args):
     report = f"Brevity Code: {code}                    File: {emergency_list_mapping.get(current_list_id(), '')}\n\n{summary}"
     if gui_widgets.get("output_text"):
         gui_widgets["output_text"].setPlainText(report)
-    show_status_message(f"Code {code}", 4000)
 
 
 def decode_code(event=None):
@@ -870,10 +859,8 @@ def decode_code(event=None):
         list_id = raw[0]
         event_c, phase_c, sev_c, prim_c, sec_c, src_c, stat_c = raw[1:]
     else:
-        show_status_message("Invalid code: use 8 characters (#AAAAAAA)", 8000)
         return
     if list_id not in emergency_list_mapping:
-        show_status_message(f"Unknown list ID {list_id}", 8000)
         return
     suppress_event_cascade = True
     try:
@@ -911,7 +898,6 @@ def clear_fields():
         gui_widgets["output_text"].clear()
     if gui_widgets.get("narrative_text"):
         gui_widgets["narrative_text"].clear()
-    show_status_message("Fields cleared (list unchanged)", 4000)
 
 
 def handle_menu_select(key, text):
@@ -942,10 +928,8 @@ def copy_sitrep():
     if not text and gui_widgets.get("output_text"):
         text = gui_widgets["output_text"].toPlainText().strip()
     if not text:
-        show_status_message("No report to copy", 6000)
         return
     QApplication.clipboard().setText(text)
-    show_status_message("Report copied", 4000)
 
 
 def copy_all():
@@ -953,10 +937,8 @@ def copy_all():
     summary = gui_widgets.get("narrative_text").toPlainText().strip() if gui_widgets.get("narrative_text") else ""
     blob = "\n".join(p for p in (code, summary) if p)
     if not blob:
-        show_status_message("Nothing to copy", 6000)
         return
     QApplication.clipboard().setText(blob)
-    show_status_message("Code and report copied", 4000)
 
 
 def toggle_narrative():
@@ -977,18 +959,6 @@ def paste_into_decode():
         decode_code()
 
 
-def _copy_code_and_return(return_file: str, code: str = None) -> None:
-    if not code:
-        code = extract_code_from_report()
-    if not code or not return_file:
-        return
-    try:
-        with open(return_file, "w", encoding="utf-8") as f:
-            f.write(code)
-    except Exception as e:
-        logging.error(f"return file: {e}")
-
-
 class BrevityApp(QMainWindow):
     code_selected = pyqtSignal(str)
 
@@ -997,9 +967,39 @@ class BrevityApp(QMainWindow):
         super().__init__(parent)
         self.panel_bg = panel_bg
         self.panel_fg = panel_fg
-        apply_standard_dialog_chrome(self, "Brevity 2.0", 930, 580)
+        apply_standard_dialog_chrome(self, "Brevity", 930, 580)
+        self._state = _fresh_state()
+        self._activate_state()
         self._setup_ui()
         self._load_data(prefill_code)
+
+    def _activate_state(self) -> None:
+        """Make this window's working state the one the module functions use."""
+        global _active_window
+        g = globals()
+        if _active_window is self:
+            return
+        prev = _active_window
+        if prev is not None:
+            try:
+                prev._state = {k: g[k] for k in _STATE_KEYS}
+            except Exception:
+                pass            # previous window is gone; nothing to save
+        g.update(self._state)
+        _active_window = self
+
+    def _scoped(self, fn):
+        """Slot wrapper: activate this window's state, then call fn()."""
+        def slot(*_args):
+            self._activate_state()
+            fn()
+        return slot
+
+    def _on_combo(self, key: str, text: str) -> None:
+        self._activate_state()
+        if key == "list" and text == "Select Emergency List":
+            return
+        handle_menu_select(key, text)
 
     def _combo_block(self, label_attr, combo_attr, caption):
         box = QWidget()
@@ -1007,12 +1007,11 @@ class BrevityApp(QMainWindow):
         lay.setContentsMargins(0, 0, 0, 0)
         lab = QLabel(caption)
         lab.setAlignment(Qt.AlignCenter)
-        combo = QComboBox()
+        combo = make_combobox([("Select Code", None)], list_popup=True)
         combo.setView(QListView())
-        combo.setItemDelegate(QStyledItemDelegate(combo))
         combo.setMaxVisibleItems(20)
         combo.view().setMinimumWidth(280)
-        combo.addItem("Select Code")
+        combo.setMinimumWidth(210)
         lay.addWidget(lab)
         lay.addWidget(combo)
         setattr(self, label_attr, lab)
@@ -1026,11 +1025,7 @@ class BrevityApp(QMainWindow):
         self.setStyleSheet(f"""
             QMainWindow {{ background-color: {self.panel_bg}; color: {self.panel_fg}; }}
             QLabel {{ color: {self.panel_fg}; font-family: Roboto; font-weight: bold; font-size: 13px; }}
-            QLineEdit {{ background-color: #ffffff; color: #333333; border: 1px solid #cccccc; padding: 4px; font-size: 11pt; }}
-            QComboBox {{ background-color: #ffffff; color: {COLOR_INPUT_TEXT}; border: 1px solid {COLOR_INPUT_BORDER}; border-radius: 4px; padding: 2px 4px; font-family: 'Kode Mono'; font-size: 13px; min-width: 210px; }}
-            QComboBox QAbstractItemView {{ background-color: #ffffff; color: {COLOR_INPUT_TEXT}; selection-background-color: #cce5ff; selection-color: #000000; font-family: 'Kode Mono'; font-size: 13px; }}
-            QTextEdit {{ background-color: #ffffff; color: #333333; border: 1px solid #cccccc; font-family: 'Kode Mono'; font-size: 12pt; }}
-            QCheckBox {{ color: {self.panel_fg}; font-weight: normal; font-size: 11pt; }}
+            QTextEdit {{ background-color: #ffffff; color: {COLOR_INPUT_TEXT}; border: 1px solid {COLOR_INPUT_BORDER}; font-family: 'Kode Mono'; font-size: 12pt; }}
         """)
         central = QWidget()
         self.setCentralWidget(central)
@@ -1038,19 +1033,11 @@ class BrevityApp(QMainWindow):
         main.setContentsMargins(15, 15, 15, 2)
         main.setSpacing(10)
 
-        title = QLabel("Brevity 2.0 Encoder/Decoder")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFixedHeight(36)
-        title.setStyleSheet(
-            f"QLabel {{ background-color: {_PROG_BG}; color: {_PROG_FG};"
-            f" font-family: 'Roboto Slab'; font-size: 16px; font-weight: 900; padding: 9px; }}"
-        )
-        main.addWidget(title)
+        main.addWidget(make_title_strip("Brevity"))
 
         decode_row = QHBoxLayout()
         decode_row.addStretch()
-        self.decode_entry = QLineEdit()
-        self.decode_entry.setMaxLength(8)
+        self.decode_entry = make_input(max_len=8)
         self.decode_entry.setFixedWidth(160)
         self.decode_entry.setValidator(QRegExpValidator(QRegExp("[0-9]?[A-Za-z]{0,7}")))
         decode_row.addWidget(self.decode_entry)
@@ -1065,11 +1052,10 @@ class BrevityApp(QMainWindow):
         list_lay.setContentsMargins(0, 0, 0, 0)
         self.label_select = QLabel("1. Select List:")
         self.label_select.setAlignment(Qt.AlignCenter)
-        self.list_combo = QComboBox()
+        self.list_combo = make_combobox([("Select Emergency List", None)], list_popup=True)
         self.list_combo.setView(QListView())
-        self.list_combo.setItemDelegate(QStyledItemDelegate(self.list_combo))
         self.list_combo.setMaxVisibleItems(20)
-        self.list_combo.addItem("Select Emergency List")
+        self.list_combo.setMinimumWidth(210)
         list_lay.addWidget(self.label_select)
         list_lay.addWidget(self.list_combo)
         self.list_box = list_box
@@ -1110,9 +1096,6 @@ class BrevityApp(QMainWindow):
         btn_row.addWidget(cancel_button)
         main.addLayout(btn_row)
 
-        status = QStatusBar()
-        self.setStatusBar(status)
-
         globals()["gui_widgets"] = {
             "decode_entry": self.decode_entry,
             "list_combo": self.list_combo,
@@ -1134,24 +1117,21 @@ class BrevityApp(QMainWindow):
             "label_source": self.label_source,
             "label_station": self.label_station,
         }
-        globals()["status_bar"] = status
         globals()["main_window"] = self
 
-        decode_button.clicked.connect(decode_code)
-        self.decode_entry.returnPressed.connect(decode_code)
-        clear_button.clicked.connect(clear_fields)
+        decode_button.clicked.connect(self._scoped(decode_code))
+        self.decode_entry.returnPressed.connect(self._scoped(decode_code))
+        clear_button.clicked.connect(self._scoped(clear_fields))
         copy_code_button.clicked.connect(self._on_copy_code)
         cancel_button.clicked.connect(self.close)
-        self.list_combo.currentTextChanged.connect(
-            lambda text: handle_menu_select("list", text) if text != "Select Emergency List" else None
-        )
-        self.emergency_combo.currentTextChanged.connect(lambda text: handle_menu_select("emergency", text))
-        self.status_combo.currentTextChanged.connect(lambda text: handle_menu_select("status", text))
-        self.primary_combo.currentTextChanged.connect(lambda text: handle_menu_select("primary", text))
-        self.secondary_combo.currentTextChanged.connect(lambda text: handle_menu_select("secondary", text))
-        self.severity_combo.currentTextChanged.connect(lambda text: handle_menu_select("severity", text))
-        self.source_combo.currentTextChanged.connect(lambda text: handle_menu_select("source", text))
-        self.station_combo.currentTextChanged.connect(lambda text: handle_menu_select("station", text))
+        self.list_combo.currentTextChanged.connect(lambda text: self._on_combo("list", text))
+        self.emergency_combo.currentTextChanged.connect(lambda text: self._on_combo("emergency", text))
+        self.status_combo.currentTextChanged.connect(lambda text: self._on_combo("status", text))
+        self.primary_combo.currentTextChanged.connect(lambda text: self._on_combo("primary", text))
+        self.secondary_combo.currentTextChanged.connect(lambda text: self._on_combo("secondary", text))
+        self.severity_combo.currentTextChanged.connect(lambda text: self._on_combo("severity", text))
+        self.source_combo.currentTextChanged.connect(lambda text: self._on_combo("source", text))
+        self.station_combo.currentTextChanged.connect(lambda text: self._on_combo("station", text))
 
     def apply_menu_layout(self, social=False):
         """Emergency lists keep Event-Phase-Severity. List 9 is Focus-Task-Status."""
@@ -1189,12 +1169,11 @@ class BrevityApp(QMainWindow):
                 grid.addWidget(box, r, c)
 
     def _on_copy_code(self):
+        self._activate_state()
         code = extract_code_from_report()
         if not code:
-            show_status_message("No brevity code available to copy", 8000)
             return
         QApplication.clipboard().setText(code)
-        show_status_message("Code copied to clipboard", 4000)
         self.code_selected.emit(code)
 
     def _load_data(self, prefill_code: str):
@@ -1206,36 +1185,15 @@ class BrevityApp(QMainWindow):
         if mapping:
             first = sorted(mapping.keys())[0]
             load_selected_file(first, reset_fields=True)
-        else:
-            show_status_message("No valid JSON files found", 10000)
         if prefill_code:
             self.decode_entry.setText(prefill_code[:8])
             decode_code()
 
 
 if __name__ == "__main__":
-    try:
-        panel_bg = sys.argv[1] if len(sys.argv) > 1 else "#d8d8d8"
-        panel_fg = sys.argv[2] if len(sys.argv) > 2 else "#333333"
-        prefill_code = sys.argv[3] if len(sys.argv) > 3 else ""
-        return_file = sys.argv[4] if len(sys.argv) > 4 else ""
-        parent_rect = None
-        if len(sys.argv) > 8:
-            try:
-                parent_rect = tuple(int(sys.argv[i]) for i in range(5, 9))
-            except (ValueError, TypeError):
-                parent_rect = None
-        app = QApplication(sys.argv)
-        if os.path.exists("radiation-32.png"):
-            app.setWindowIcon(QIcon("radiation-32.png"))
-        window = BrevityApp(panel_bg, panel_fg, prefill_code)
-        if return_file:
-            window.code_selected.connect(lambda code: _copy_code_and_return(return_file, code))
-        if parent_rect is not None:
-            px, py, pw, ph = parent_rect
-            window.move(px + (pw - window.width()) // 2, py + (ph - window.height()) // 2)
-        window.show()
-        sys.exit(app.exec_())
-    except Exception as e:
-        logging.error(f"Exception in main: {e}")
-        traceback.print_exc()
+    app = QApplication(sys.argv)
+    if os.path.exists("radiation-32.png"):
+        app.setWindowIcon(QIcon("radiation-32.png"))
+    window = BrevityApp()
+    window.show()
+    sys.exit(app.exec_())

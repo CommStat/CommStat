@@ -16,13 +16,16 @@ import urllib.error
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from typing import Dict, Optional, Tuple
-from pathlib import Path
+
+from constants import USER_AGENT
+from db_utils import db_connect
+from ssl_utils import create_verified_ssl_context
+from text_utils import base_callsign, title_case
 
 
 # Constants
 QRZ_API_URL = "https://xmldata.qrz.com/xml/current/"
 CACHE_DAYS = 30  # How long to cache callsign data
-DB_PATH = Path(__file__).parent / "traffic.db3"
 
 def qrz_log(msg: str) -> None:
     """Always print a QRZ console log line."""
@@ -58,7 +61,7 @@ def load_qrz_config() -> Tuple[bool, Optional[str], Optional[str]]:
         Tuple of (active, username, password)
     """
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        with db_connect() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT username, password, is_active FROM qrz_settings WHERE id = 1")
             result = cursor.fetchone()
@@ -83,7 +86,7 @@ def set_qrz_active(active: bool) -> bool:
         True if successful
     """
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        with db_connect() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 "UPDATE qrz_settings SET is_active = ? WHERE id = 1",
@@ -98,34 +101,49 @@ def set_qrz_active(active: bool) -> bool:
 def get_qrz_cached(callsign: str, include_stale: bool = False) -> Optional[Dict]:
     """Return cached QRZ data for *callsign* without creating a full client.
 
-    Returns a dict (same shape as QRZClient._get_cached) or None on miss.
-    When include_stale=True, returns the record even if older than CACHE_DAYS
-    (used to display existing data when subscription is inactive).
+    Returns the qrz table row as a dict, or None on a miss. A record older
+    than CACHE_DAYS is returned only when include_stale=True (used to display
+    existing data when the subscription is inactive).
     """
+    row, fresh = read_qrz_cache(callsign)
+    if row is None or (not fresh and not include_stale):
+        return None
+    return row
+
+
+def read_qrz_cache(callsign: str) -> Tuple[Optional[Dict], bool]:
+    """The one reader of the local qrz table (QRZClient and get_qrz_cached use it).
+
+    Returns (row_dict, is_fresh). row_dict is None when there is no row (or the
+    table cannot be read); is_fresh is True when the row is younger than
+    CACHE_DAYS. A "W1AW/P" style callsign is looked up as "W1AW".
+    """
+    cs = base_callsign(callsign)
     try:
-        with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        with db_connect() as conn:
             conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            cs = max(callsign.upper().split('/'), key=len) if '/' in callsign else callsign.upper()
             # COLLATE NOCASE: preset facility rows (nuclear plants, dams) aren't
             # stored uppercase like real callsigns are, so a case-sensitive
             # match would silently miss them.
-            cursor.execute("SELECT * FROM qrz WHERE callsign = ? COLLATE NOCASE", (cs,))
-            row = cursor.fetchone()
-            if row:
-                cached_date = datetime.fromisoformat(row["insert_date"])
-                if cached_date.tzinfo is None:
-                    cached_date = cached_date.replace(tzinfo=timezone.utc)
-                age_days = (datetime.now(timezone.utc) - cached_date).days
-                if age_days < CACHE_DAYS:
-                    qrz_log(f"Cache hit for {cs} (age: {age_days} days)")
-                    return dict(row)
-                if include_stale:
-                    qrz_log(f"Returning stale cache for {cs} (age: {age_days} days)")
-                    return dict(row)
-    except Exception:
-        pass
-    return None
+            row = conn.execute(
+                "SELECT * FROM qrz WHERE callsign = ? COLLATE NOCASE", (cs,)
+            ).fetchone()
+            if row is None:
+                return None, False
+            cached_date = datetime.fromisoformat(row["insert_date"])
+            if cached_date.tzinfo is None:
+                cached_date = cached_date.replace(tzinfo=timezone.utc)
+            age_days = (datetime.now(timezone.utc) - cached_date).days
+            if age_days < CACHE_DAYS:
+                qrz_log(f"Cache hit for {cs} (age: {age_days} days)")
+                return dict(row), True
+            # What happens next (API refresh vs. local data) is decided and
+            # logged by QRZClient.lookup().
+            qrz_log(f"Cache expired for {cs} (age: {age_days} days)")
+            return dict(row), False
+    except (sqlite3.Error, ValueError, TypeError) as e:
+        qrz_log(f"Could not read the local qrz table for {cs}: {e}")
+        return None, False
 
 
 class QRZClient:
@@ -154,62 +172,32 @@ class QRZClient:
         active, _, _ = load_qrz_config()
         return active
 
-    def _get_cached(self, callsign: str) -> tuple:
-        """
-        Check cache for callsign data.
-
-        Args:
-            callsign: Callsign to look up
-
-        Returns:
-            (data_dict, is_fresh) where data_dict may be None if no row exists,
-            and is_fresh is True when the cached entry is within CACHE_DAYS.
-        """
-        try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                cursor.execute(
-                    "SELECT * FROM qrz WHERE callsign = ?",
-                    (callsign.upper(),)
-                )
-                row = cursor.fetchone()
-
-                if row:
-                    cached_date = datetime.fromisoformat(row["insert_date"])
-                    if cached_date.tzinfo is None:
-                        cached_date = cached_date.replace(tzinfo=timezone.utc)
-                    age_days = (datetime.now(timezone.utc) - cached_date).days
-
-                    if age_days < CACHE_DAYS:
-                        return dict(row), True
-                    else:
-                        # What happens next (API refresh vs. local data) is
-                        # decided and logged by lookup().
-                        qrz_log(f"Cache expired for {callsign} (age: {age_days} days)")
-                        return dict(row), False
-
-                return None, False
-        except sqlite3.Error:
-            return None, False
-
-    def _save_to_cache(self, data: Dict) -> None:
+    def _save_to_cache(self, data: Dict) -> bool:
         """
         Save callsign data to cache.
 
         Args:
             data: Callsign data dict from QRZ XML API
+
+        Returns:
+            True if the row was written. On failure the reason is logged and
+            False is returned: the caller still has the data, but it will not
+            be in the local table, so the next lookup asks QRZ again.
         """
+        callsign = (data.get("call") or "").strip().upper()
+        if not callsign:
+            qrz_log("Not cached: the reply has no callsign")
+            return False
+
         # Combine fname + name into a single full name, apply normalization
         fname     = (data.get("fname")   or "").strip()
         name      = (data.get("name")    or "").strip()
-        full_name = " ".join(x for x in (fname, name) if x).title()
-        address   = (data.get("addr1")   or "").strip().title()
-        city      = (data.get("addr2")   or "").strip().title()   # QRZ uses addr2 for city
-        county    = (data.get("county")  or "").strip().title()
+        full_name = title_case(" ".join(x for x in (fname, name) if x))
+        address   = title_case((data.get("addr1")   or "").strip())
+        city      = title_case((data.get("addr2")   or "").strip())   # QRZ uses addr2 for city
+        county    = title_case((data.get("county")  or "").strip())
         email     = (data.get("email")   or "").strip().lower()
 
-        callsign = data.get("call", "").upper()
         values = (
             full_name, address, city, county,
             data.get("state"), data.get("zip"), data.get("country"),
@@ -224,7 +212,7 @@ class QRZClient:
         )
 
         try:
-            with sqlite3.connect(DB_PATH, timeout=10) as conn:
+            with db_connect() as conn:
                 cursor = conn.cursor()
                 # Update existing row (preserves memo and active columns —
                 # active is the operator-controlled watchlist show/hide flag,
@@ -251,8 +239,10 @@ class QRZClient:
                         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, (callsign, 1) + values)
                 conn.commit()
-        except sqlite3.Error:
-            pass
+            return True
+        except sqlite3.Error as e:
+            qrz_log(f"Could not save {callsign} to the local database: {e}")
+            return False
 
     def _api_request(self, params: Dict) -> Optional[ET.Element]:
         """
@@ -270,8 +260,11 @@ class QRZClient:
             return None
 
         try:
-            url = QRZ_API_URL + "?" + urllib.parse.urlencode(params, safe="")
-            with urllib.request.urlopen(url, timeout=10) as response:
+            # POST: the password and session key stay out of the URL (proxy
+            # and server logs record URLs).
+            body = urllib.parse.urlencode(params, safe="").encode("utf-8")
+            request = urllib.request.Request(QRZ_API_URL, data=body, method="POST")
+            with urllib.request.urlopen(request, timeout=10, context=create_verified_ssl_context()) as response:
                 xml_data = response.read().decode("utf-8")
                 return ET.fromstring(xml_data)
 
@@ -306,7 +299,7 @@ class QRZClient:
         params = {
             "username": username,
             "password": password,
-            "agent": "CommStat/2.5"
+            "agent": USER_AGENT
         }
 
         root = self._api_request(params)
@@ -363,25 +356,24 @@ class QRZClient:
 
         return False
 
-    def lookup(self, callsign: str, use_cache: bool = True) -> Optional[Dict]:
+    def lookup(self, callsign: str, use_cache: bool = True, _retried: bool = False) -> Optional[Dict]:
         """
         Look up a callsign.
 
         Args:
             callsign: Callsign to look up
             use_cache: Check cache first (default True)
+            _retried: internal; set on the one retry after a session timeout
 
         Returns:
             Dict with callsign data or None if not found
         """
-        callsign = callsign.upper().strip()
-        if '/' in callsign:
-            callsign = max(callsign.split('/'), key=len)
+        callsign = base_callsign(callsign)
 
         # Check cache first (works even if QRZ is disabled)
         stale_data = None
         if use_cache:
-            cached, fresh = self._get_cached(callsign)
+            cached, fresh = read_qrz_cache(callsign)
             if cached and fresh:
                 qrz_log(f"Cache hit for {callsign}")
                 return cached
@@ -438,11 +430,16 @@ class QRZClient:
                 error = session.find("Error")
             if error is not None and error.text:
                 if "Session Timeout" in error.text or "Invalid session" in error.text:
-                    # Session expired, re-login and retry
-                    qrz_log(f"Session expired, re-authenticating...")
+                    # Session expired: log in again and retry ONCE. A second
+                    # timeout right after a fresh login means something else is
+                    # wrong; retrying forever would hammer QRZ with requests.
                     self.session_key = None
-                    if self.login():
-                        return self.lookup(callsign, use_cache=False)
+                    if _retried:
+                        qrz_log(f"Session still rejected after re-login; giving up on {callsign}")
+                    else:
+                        qrz_log("Session expired, re-authenticating...")
+                        if self.login():
+                            return self.lookup(callsign, use_cache=False, _retried=True)
                 else:
                     qrz_log(f"Lookup error for {callsign}: {error.text}")
                 return stale_data
@@ -463,7 +460,7 @@ class QRZClient:
             data[tag] = child.text
 
         # Save to cache
-        self._save_to_cache(data)
+        self._save_to_cache(data)   # logs its own failure; the data is still returned
 
         name = " ".join(filter(None, [data.get("fname", ""), data.get("name", "")])).strip()
         grid = data.get("grid", "")
@@ -473,23 +470,31 @@ class QRZClient:
 
 
 # Command-line test
+#   python qrz_client.py [CALLSIGN]                 credentials from the database
+#   python qrz_client.py USERNAME PASSWORD [CALLSIGN]
 if __name__ == "__main__":
-    import sys
-
     print("QRZ.com API Test")
     print("-" * 40)
+
+    args = sys.argv[1:]
+    if len(args) == 1:
+        arg_user = arg_pass = None
+        arg_callsign = args[0]
+    else:
+        arg_user = args[0] if len(args) >= 2 else None
+        arg_pass = args[1] if len(args) >= 2 else None
+        arg_callsign = args[2] if len(args) >= 3 else None
 
     # Get config from database
     active, username, password = load_qrz_config()
 
     print(f"QRZ Active: {active}")
 
-    if username and password:
-        print(f"Using credentials from database (user: {username})")
-    elif len(sys.argv) >= 3:
-        username = sys.argv[1]
-        password = sys.argv[2]
+    if arg_user and arg_pass:
+        username, password = arg_user, arg_pass
         active = True  # Override for command-line testing
+    elif username and password:
+        print(f"Using credentials from database (user: {username})")
     else:
         print("No credentials in database")
         username = input("QRZ Username: ")
@@ -500,13 +505,7 @@ if __name__ == "__main__":
         print("\nQRZ is disabled. Enable it in Menu > QRZ ENABLE.")
         sys.exit(0)
 
-    # Get callsign to lookup
-    if len(sys.argv) > 3:
-        callsign = sys.argv[3]
-    elif len(sys.argv) == 2:
-        callsign = sys.argv[1]
-    else:
-        callsign = input("Callsign to lookup (default AA7BQ): ") or "AA7BQ"
+    callsign = arg_callsign or input("Callsign to lookup (default AA7BQ): ") or "AA7BQ"
 
     # Test
     print(f"\nLooking up: {callsign}")

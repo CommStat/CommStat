@@ -5,12 +5,9 @@
 #!/usr/bin/env python3
 import subprocess
 import sys
-import os
 import platform
-import shutil
 
-DATABASE_FILE = "traffic.db3"
-DATABASE_TEMPLATE = "traffic.db3.template"
+import commstat   # the launcher: owns the database setup and the install folder paths
 
 pyver = ""
 osver = ""
@@ -41,26 +38,13 @@ def oscheck():
         return
 
 
-def create_from_template(target: str, template: str) -> None:
-    """Create a file from template if it doesn't exist."""
-    if not os.path.exists(target):
-        if os.path.exists(template):
-            shutil.copy(template, target)
-            src_size = os.path.getsize(template)
-            dst_size = os.path.getsize(target)
-            if dst_size != src_size:
-                os.remove(target)
-                print(f"Error: {target} copy was incomplete ({dst_size} of {src_size} bytes). "
-                      f"Check available disk space and try again.")
-                sys.exit(1)
-            print(f"Created {target} from template")
-        else:
-            print(f"Warning: {template} not found, cannot create {target}")
-
-
 def setup_files():
-    """Create database from template if missing."""
-    create_from_template(DATABASE_FILE, DATABASE_TEMPLATE)
+    """Create the database from the template (in the CommStat folder) if missing."""
+    try:
+        commstat.setup_database()
+    except OSError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 def runsettings():
@@ -82,10 +66,14 @@ def pip_supports_break_system_packages():
         return False
 
 
-def install(package):
-    print(f"  Installing {package}...")
-    is_unix = sys.platform == 'darwin' or sys.platform.startswith('linux')
+def in_virtualenv() -> bool:
+    """True inside a venv/virtualenv, where pip installs into the environment
+    and "--user" is refused."""
+    return sys.prefix != getattr(sys, "base_prefix", sys.prefix)
 
+
+def install_commands(package):
+    """Candidate pip commands for this package, to try in order."""
     # Some packages must be refreshed even when an older version is already
     # present. certifi ships the CA trust bundle: a stale bundle causes TLS
     # "certificate has expired" failures against renewed Let's Encrypt certs,
@@ -93,29 +81,43 @@ def install(package):
     # "already satisfied").
     pkg_name = package.split("==")[0].split(">=")[0].split("<")[0].strip().lower()
     upgrade = ["--upgrade"] if pkg_name in ("certifi",) else []
+    pip = [sys.executable, "-m", "pip", "install"]
 
-    # Build candidate command lists to try in order
+    is_unix = sys.platform == 'darwin' or sys.platform.startswith('linux')
+    if in_virtualenv() or not is_unix:
+        # Windows, or a virtualenv: install into the active environment
+        return [pip + upgrade + [package]]
+
     attempts = []
-    if is_unix:
-        if pip_supports_break_system_packages():
-            # Preferred: user install with break-system-packages (needed on Ubuntu 24.04+ / Mint 22+)
-            attempts.append([sys.executable, "-m", "pip", "install", "--user", "--break-system-packages", *upgrade, package])
-        # Fallback: user install without break-system-packages (older distros)
-        attempts.append([sys.executable, "-m", "pip", "install", "--user", *upgrade, package])
-    else:
-        attempts.append([sys.executable, "-m", "pip", "install", *upgrade, package])
+    if pip_supports_break_system_packages():
+        # Preferred: user install with break-system-packages (needed on Ubuntu 24.04+ / Mint 22+)
+        attempts.append(pip + ["--user", "--break-system-packages", *upgrade, package])
+    # Fallback: user install without break-system-packages (older distros)
+    attempts.append(pip + ["--user", *upgrade, package])
+    return attempts
 
-    last_error = None
-    for cmd in attempts:
-        try:
-            subprocess.check_call(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+def install(package, optional=False):
+    print(f"  Installing {package}...")
+
+    failures = []   # (command, pip's error output) for each failed attempt
+    for cmd in install_commands(package):
+        result = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0:
             print(f"  OK: {package}")
             return
-        except subprocess.CalledProcessError as e:
-            last_error = e
+        failures.append((cmd, (result.stderr or "").strip()))
 
-    # All attempts failed
-    print(f"\nERROR: Could not install '{package}'.")
+    # All attempts failed: show pip's own explanation, not just "could not install"
+    label = "WARNING" if optional else "ERROR"
+    print(f"\n{label}: Could not install '{package}'.")
+    for cmd, error_text in failures:
+        print("  Tried: " + " ".join(cmd[2:]))
+        for line in error_text.splitlines()[-8:]:
+            print("    " + line)
+    if optional:
+        print(f"  {package} is optional; CommStat will run without it. Continuing.")
+        return
     print("  This may be due to a network issue or a restricted Python environment.")
     print("  Try manually: pip3 install " + package + " --user --break-system-packages")
     print("  For help, join the community support channel: https://t.me/+3k3n7O8a1yI1N2E5")
@@ -154,62 +156,56 @@ def test_python():
         print("System not recognized")
 
 
-def lininstall():
-    """Install dependencies for Linux/Pi systems."""
-    packages = [
-        "branca>=0.6.0",
-        "folium",
-        # numpy>=2.4 wheels default to an x86-64-v2 CPU baseline and crash on
-        # older/virtualized CPUs (RuntimeError: "doesn't support: (X86_V2)").
-        # Pin below that until numpy restores a broader default baseline.
-        "numpy<2.4",
-        "pandas",
-        "maidenhead",
-        "pyenchant",
-        "certifi",
-    ]
-    print(f"\nInstalling {len(packages)} packages...")
+# Packages every platform needs.
+COMMON_PACKAGES = [
+    "branca>=0.6.0",
+    "folium",
+    # numpy>=2.4 wheels default to an x86-64-v2 CPU baseline and crash on
+    # older/virtualized CPUs (RuntimeError: "doesn't support: (X86_V2)").
+    # Pin below that until numpy restores a broader default baseline.
+    "numpy<2.4",
+    "pandas",
+    "maidenhead",
+    "certifi",
+]
+
+# The Qt packages come from pip on Windows and macOS. On Linux/Raspberry Pi they are
+# left to the distribution's own packages (python3-pyqt5, python3-pyqt5.qtwebengine),
+# because pip has no PyQt5 wheels for ARM and the distro build matches the system Qt.
+QT_PACKAGES = ["PyQt5", "PyQtWebEngine"]
+
+# Nice to have: CommStat starts without them (the import is guarded), so a failed
+# install is reported but does not stop the installation.
+OPTIONAL_PACKAGES = ["pyenchant"]
+
+
+def install_all(platform_name):
+    """Install the dependencies for this platform, then set up the database."""
+    packages = list(COMMON_PACKAGES)
+    if platform_name != "Linux":
+        packages = QT_PACKAGES + packages
+    print(f"\nInstalling {len(packages) + len(OPTIONAL_PACKAGES)} packages...")
     for package in packages:
         install(package)
+    for package in OPTIONAL_PACKAGES:
+        install(package, optional=True)
     runsettings()
+
+
+def lininstall():
+    """Install dependencies for Linux/Pi systems."""
+    install_all("Linux")
 
 
 def macinstall():
     """Install dependencies for macOS systems."""
-    packages = [
-        "PyQt5",
-        "PyQtWebEngine",
-        "branca>=0.6.0",
-        "folium",
-        "numpy<2.4",
-        "pandas",
-        "maidenhead",
-        "pyenchant",
-        "certifi",
-    ]
-    print(f"\nInstalling {len(packages)} packages...")
-    for package in packages:
-        install(package)
-    runsettings()
+    install_all("macOS")
 
 
 def wininstall():
     """Install dependencies for Windows systems."""
-    packages = [
-        "pyqt5",
-        "PyQtWebEngine",
-        "branca>=0.6.0",
-        "folium",
-        "numpy<2.4",
-        "pandas",
-        "maidenhead",
-        "pyenchant",
-        "certifi",
-    ]
-    print(f"\nInstalling {len(packages)} packages...")
-    for package in packages:
-        install(package)
-    runsettings()
+    install_all("Windows")
 
 
-oscheck()
+if __name__ == "__main__":
+    oscheck()

@@ -12,7 +12,6 @@ The server SQL uses INSERT OR IGNORE/REPLACE, so re-installing a preset is
 harmless. Opened from the Manage Watchlists dialog's Presets button.
 """
 
-import base64
 import sqlite3
 import urllib.parse
 import urllib.request
@@ -24,7 +23,8 @@ from PyQt5.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView,
 )
 
-from constants import DEFAULT_COLORS, DATABASE_FILE
+from constants import DEFAULT_COLORS, COMMSRVR_URL
+from db_utils import db_connect
 from ui_helpers import make_button, connect_single, apply_standard_dialog_chrome
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ _COL_CLOSE   = "#555555"
 _WIN_W = 640
 _WIN_H = 340
 
-_COMMSRVR = base64.b64decode("aHR0cHM6Ly9jb21tc3RhdC5hcHA=").decode()
+_COMMSRVR = COMMSRVR_URL
 _WATCHLIST_URL = _COMMSRVR + "/watchlist-808585.php"
 
 _TABLE_COLS = ["Watchlist", "Status", "Description"]
@@ -89,7 +89,7 @@ class _InstallThread(QThread):
         try:
             db_version, build_number = 0, 500
             try:
-                with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+                with db_connect() as conn:
                     row = conn.execute(
                         "SELECT db_version, build_number FROM controls WHERE id = 1"
                     ).fetchone()
@@ -102,7 +102,7 @@ class _InstallThread(QThread):
                    f"&cs={urllib.parse.quote(self._callsign)}"
                    f"&db={db_version}&build={build_number}")
             # Verified TLS is mandatory here: the reply drives SQL execution.
-            from little_gucci import create_verified_ssl_context
+            from ssl_utils import create_verified_ssl_context
             with urllib.request.urlopen(
                     url, timeout=10, context=create_verified_ssl_context()) as resp:
                 content = resp.read().decode('utf-8').strip()

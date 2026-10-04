@@ -20,18 +20,15 @@ from PyQt5.QtWidgets import (
 )
 
 from constants import DEFAULT_COLORS, COLOR_BTN_GREEN, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER
-from ui_helpers import make_button, make_combobox, confirm, apply_standard_dialog_chrome
+from ui_helpers import (
+    make_button, make_combobox, make_title_strip, confirm, apply_standard_dialog_chrome,
+    DIALOG_TABLE_QSS,
+)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
-_PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
-_TITLE_BG = DEFAULT_COLORS.get("title_bar_background", "#F07800")
-_TITLE_FG = DEFAULT_COLORS.get("title_bar_foreground", "#FFFFFF")
-_DATA_BG  = DEFAULT_COLORS.get("data_background",      "#F8F6F4")
-_DATA_FG  = DEFAULT_COLORS.get("data_foreground",      "#000000")
 
 _COL_RUN   = COLOR_BTN_GREEN
 _COL_CLOSE = "#555555"
@@ -72,7 +69,7 @@ class DataManagerDialog(QDialog):
     def _setup_ui(self) -> None:
         self.setStyleSheet(
             f"QDialog {{ background-color:{_PANEL_BG}; color:{_PANEL_FG}; }}"
-            f"QLabel {{ font-size:13px; color:{_PANEL_FG}; }}"
+            f"QLabel {{ font-family:Roboto; font-size:13px; color:{_PANEL_FG}; }}"
         )
 
         body = QVBoxLayout(self)
@@ -80,16 +77,7 @@ class DataManagerDialog(QDialog):
         body.setSpacing(10)
 
         # ── Title ─────────────────────────────────────────────────────────────
-        title_lbl = QLabel("Data Manager")
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
-        body.addWidget(title_lbl)
+        body.addWidget(make_title_strip("Data Manager"))
 
         # ── Summary table ─────────────────────────────────────────────────────
         self.table = QTableWidget(len(_RECORD_TABLES), len(_TABLE_COLS))
@@ -107,15 +95,7 @@ class DataManagerDialog(QDialog):
         hh.setSectionResizeMode(2, QHeaderView.Stretch)
         hh.setSectionResizeMode(3, QHeaderView.ResizeToContents)
 
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background-color:{_DATA_BG}; alternate-background-color:{_DATA_BG};"
-            f" gridline-color:#cccccc; color:{_DATA_FG};"
-            f" font-family:'Kode Mono'; font-size:13px; }}"
-            f"QTableWidget::item {{ padding:4px 6px; }}"
-            f"QHeaderView::section {{ background-color:{_TITLE_BG}; color:{_TITLE_FG};"
-            f" padding:5px 6px; border:none; font-family:Roboto; font-size:13px;"
-            f" font-weight:bold; }}"
-        )
+        self.table.setStyleSheet(DIALOG_TABLE_QSS)
         body.addWidget(self.table)
 
         # Size the table to exactly fit its header + fixed row count, then pad

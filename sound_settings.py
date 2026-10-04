@@ -18,23 +18,18 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QTableWidget, QTableWidgetItem,
-    QHeaderView, QAbstractItemView, QComboBox, QWidget,
+    QHeaderView, QAbstractItemView, QComboBox,
 )
 
 from constants import DEFAULT_COLORS, SOUNDS_DIR
 from ui_helpers import (
-    make_button, make_checkbox_cell, mono_font, apply_standard_dialog_chrome,
+    make_button, make_button_cell, make_combobox, make_checkbox_cell, apply_standard_dialog_chrome,
+    make_title_strip, DIALOG_TABLE_QSS,
 )
 
 
-_PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
-_TITLE_BG = DEFAULT_COLORS.get("title_bar_background", "#F07800")
-_TITLE_FG = DEFAULT_COLORS.get("title_bar_foreground", "#FFFFFF")
-_DATA_BG  = DEFAULT_COLORS.get("data_background",      "#F8F6F4")
-_DATA_FG  = DEFAULT_COLORS.get("data_foreground",      "#000000")
 
 _COL_PLAY  = "#17a2b8"
 _COL_CLOSE = "#555555"
@@ -78,23 +73,15 @@ class SoundSettingsDialog(QDialog):
 
     def _setup_ui(self) -> None:
         self.setStyleSheet(
-            f"QDialog {{ background-color:{_PANEL_BG}; }}"
-            f"QLabel {{ font-size:13px; }}"
+            f"QDialog {{ background-color:{_PANEL_BG}; color:{_PANEL_FG}; }}"
+            f"QLabel {{ font-size:13px; color:{_PANEL_FG}; }}"
         )
 
         body = QVBoxLayout(self)
         body.setContentsMargins(15, 15, 15, 15)
         body.setSpacing(10)
 
-        title_lbl = QLabel("Sound Settings")
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
+        title_lbl = make_title_strip("Sound Settings")
         body.addWidget(title_lbl)
 
         self.table = QTableWidget(len(_ROWS), len(_TABLE_COLS))
@@ -111,25 +98,22 @@ class SoundSettingsDialog(QDialog):
         hh.setSectionResizeMode(2, QHeaderView.Stretch)
         hh.setSectionResizeMode(3, QHeaderView.ResizeToContents)
 
-        self.table.setStyleSheet(
-            f"QTableWidget {{ background-color:{_DATA_BG}; gridline-color:#cccccc;"
-            f" color:{_DATA_FG}; font-family:'Kode Mono'; font-size:13px; }}"
-            f"QTableWidget::item {{ padding:4px 6px; }}"
-            f"QHeaderView::section {{ background-color:{_TITLE_BG}; color:{_TITLE_FG};"
-            f" padding:5px 6px; border:none; font-family:Roboto; font-size:13px;"
-            f" font-weight:bold; }}"
-        )
+        self.table.setStyleSheet(DIALOG_TABLE_QSS)
 
         self.table.verticalHeader().setDefaultSectionSize(40)
         body.addWidget(self.table)
 
         tip_lbl = QLabel(
             f"<span style='color:{_PANEL_FG}'>"
-            f"Drop additional <b>.wav</b> files into the <code>{SOUNDS_DIR}/</code>"
+            f"Drop additional <b>.wav</b> files into the"
+            f" <span style=\"font-family:'Kode Mono'\">{SOUNDS_DIR}/</span>"
             f" folder and reopen this dialog to see them in the dropdown."
             f"</span>"
         )
         tip_lbl.setWordWrap(True)
+        tip_lbl.setStyleSheet(
+            f"QLabel {{ font-family:Roboto; font-size:13px; color:{_PANEL_FG}; }}"
+        )
         body.addWidget(tip_lbl)
 
         btn_row = QHBoxLayout()
@@ -147,12 +131,7 @@ class SoundSettingsDialog(QDialog):
             # Column 0 — Play button (wrapped so cell padding doesn't collapse)
             play_btn = make_button("▶", _COL_PLAY, 40)
             play_btn.clicked.connect(lambda _checked, e=event: self._on_play(e))
-            play_cell = QWidget()
-            play_cell.setStyleSheet("background-color: transparent;")
-            play_layout = QHBoxLayout(play_cell)
-            play_layout.setContentsMargins(6, 4, 10, 4)
-            play_layout.addWidget(play_btn)
-            self.table.setCellWidget(row_idx, 0, play_cell)
+            self.table.setCellWidget(row_idx, 0, make_button_cell(play_btn))
 
             # Column 1 — Event label (static, bold)
             item = QTableWidgetItem(label)
@@ -164,21 +143,13 @@ class SoundSettingsDialog(QDialog):
             self.table.setItem(row_idx, 1, item)
 
             # Column 2 — Sound file combo
-            combo = QComboBox()
-            combo.setStyleSheet(
-                "QComboBox { background-color:#FFFFFF; color:#000000;"
-                " border:1px solid #cccccc; border-radius:4px; padding:2px 4px; }"
-                f"QComboBox QAbstractItemView {{ background-color:{_PANEL_BG}; color:#000000;"
-                " selection-background-color:#cce5ff; selection-color:#000000; }"
-            )
-            combo.setFont(mono_font())
-            combo.addItems(wav_files)
+            combo = make_combobox([(f, f) for f in wav_files])
             current = self.config.get_sound_file(event)
             if current and current not in wav_files:
                 # File configured but not present on disk — show it flagged so
                 # the user knows why nothing plays for this event.
                 display = current + _MISSING_SUFFIX
-                combo.addItem(display)
+                combo.addItem(display, display)
                 combo.setCurrentText(display)
             elif current in wav_files:
                 combo.setCurrentText(current)

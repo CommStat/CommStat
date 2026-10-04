@@ -8,33 +8,33 @@ Group Message Dialog for CommStat
 Allows creating and transmitting group messages via JS8Call.
 """
 
-import base64
 import re
 import sqlite3
-import threading
-import urllib.parse
-import urllib.request
 from typing import Optional, TYPE_CHECKING
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, QDateTime
+from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtCore import QDateTime
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QComboBox, QPlainTextEdit,
-    QMessageBox, QCheckBox,
+    QLabel, QPlainTextEdit,
+    QCheckBox,
 )
 
 from constants import (
+    SPEED_OPTIONS, INTERNET_RIG,
+    COMMSRVR_URL,
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
-    COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
     COLOR_BTN_CYAN, COLOR_BTN_BLUE, COLOR_BTN_RED, COLOR_BTN_HELP,
     RIG_FETCH_DELAY_MS,
 )
+from db_utils import db_connect
 from id_utils import generate_time_based_id
-from little_gucci import create_verified_ssl_context
-from ui_helpers import (
+from transmit_base import RigDialogMixin
+from ui_helpers import (show_error, show_info, get_internet_user_settings, make_title_strip,
     make_button, apply_standard_dialog_chrome, connect_single, show_help_dialog,
+    make_combobox, make_input,
 )
+from commsrvr_client import submit_to_commsrvr
 
 if TYPE_CHECKING:
     from js8_tcp_client import TCPConnectionPool
@@ -47,16 +47,10 @@ if TYPE_CHECKING:
 
 MIN_MESSAGE_LENGTH   = 4
 MAX_MESSAGE_LENGTH   = 1500
-MAX_MESSAGE_LENGTH_INTERNET = 1500
-DATABASE_FILE = "traffic.db3"
 
-_COMMSRVR = base64.b64decode("aHR0cHM6Ly9jb21tc3RhdC5hcHA=").decode()
-_DATAFEED  = _COMMSRVR + "/datafeed-808585.php"
+_COMMSRVR = COMMSRVR_URL
 
-INTERNET_RIG = "INTERNET ONLY"
 
-_PROG_BG  = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG  = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
 _DATA_BG  = DEFAULT_COLORS.get("data_background",      "#F8F6F4")
@@ -66,8 +60,7 @@ _COL_CANCEL = "#555555"
 _COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 _WIN_W          = 640
-_WIN_H_RF       = 460
-_WIN_H_INTERNET = 460
+_WIN_H          = 460
 
 # ── Help content ──────────────────────────────────────────────────────────────
 # Beside the feature it documents. Chrome comes from ui_helpers.
@@ -132,10 +125,11 @@ def _labeled_col(lbl_text: str, ctrl: QtWidgets.QWidget) -> QHBoxLayout:
 # Dialog
 # =============================================================================
 
-class GroupMessageDialog(QDialog):
+class GroupMessageDialog(RigDialogMixin, QDialog):
     """Group Message dialog — compose and transmit a group message."""
 
-    _commsrvr_result = QtCore.pyqtSignal(str)
+    ALLOW_INTERNET_RIG = True
+
 
     def __init__(
         self,
@@ -151,30 +145,17 @@ class GroupMessageDialog(QDialog):
         self.refresh_callback    = refresh_callback
         self._internet_available_override = internet_available
         self.callsign: str       = ""
-        self.selected_group: str = ""
         self.msg_id: str         = ""
         self._pending_message: str   = ""
         self._pending_save_data: Optional[dict] = None
-        self._message_is_expanded: bool = False
         self._is_grp_reply: bool = False
 
-        self._commsrvr_result.connect(self._on_commsrvr_result)
 
-        apply_standard_dialog_chrome(self, "Group Message", _WIN_W, _WIN_H_RF)
+        apply_standard_dialog_chrome(self, "Group Message", _WIN_W, _WIN_H)
 
         self.setStyleSheet(
             f"QDialog {{ background-color:{_PANEL_BG}; }}"
             f"QLabel {{ color:{_PANEL_FG}; font-family:Roboto; font-size:13px; }}"
-            f"QLineEdit {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:2px 4px;"
-            f" font-family:'Kode Mono'; font-size:13px; }}"
-            f"QComboBox {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:2px 4px;"
-            f" font-family:'Kode Mono'; font-size:13px; combobox-popup:0; }}"
-            f"QComboBox:disabled {{ background-color:{COLOR_DISABLED_BG}; color:{COLOR_DISABLED_TEXT}; }}"
-            f"QComboBox QAbstractItemView {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" selection-background-color:#cce5ff; selection-color:#000000; }}"
-            f"QComboBox QAbstractItemView::item {{ min-height:22px; padding:0 6px; }}"
             f"QPlainTextEdit {{ background-color:white; color:{COLOR_INPUT_TEXT};"
             f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px;"
             f" font-family:'Kode Mono'; font-size:13px; }}"
@@ -205,7 +186,7 @@ class GroupMessageDialog(QDialog):
         self.rfi_checkbox.setChecked(False)
         self.rfi_checkbox.setEnabled(False)
         if body:
-            self.message_expanded.setPlainText(body)
+            self.message_edit.setPlainText(body)
 
     def set_relay_context(self, body: str) -> None:
         """Pre-populate the dialog when opened via 'Relay' from a Message detail view.
@@ -216,7 +197,7 @@ class GroupMessageDialog(QDialog):
         """
         self.rfi_checkbox.setChecked(True)
         if body:
-            self.message_expanded.setPlainText(body)
+            self.message_edit.setPlainText(body)
 
     # -------------------------------------------------------------------------
     # UI construction
@@ -228,54 +209,32 @@ class GroupMessageDialog(QDialog):
         body.setSpacing(10)
 
         # Title
-        title_lbl = QLabel("Group Message")
-        title_lbl.setAlignment(Qt.AlignCenter)
-        title_lbl.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title_lbl.setFixedHeight(36)
-        title_lbl.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
+        title_lbl = make_title_strip("Group Message")
         body.addWidget(title_lbl)
 
         # Settings row: Rig | Mode | Freq | Delivery
         settings_row = QHBoxLayout()
         settings_row.setSpacing(8)
 
-        self.rig_combo = QComboBox()
+        self.rig_combo = make_combobox([], list_popup=True)
         self.rig_combo.setFixedWidth(150)
-        self.rig_combo.setMaxVisibleItems(30)
-        self.rig_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.rig_combo))
         settings_row.addLayout(_labeled_col("Rig:", self.rig_combo))
 
-        self.mode_combo = QComboBox()
+        self.mode_combo = make_combobox(
+            SPEED_OPTIONS,
+            list_popup=True,
+        )
         self.mode_combo.setFixedWidth(100)
-        self.mode_combo.setMaxVisibleItems(30)
-        self.mode_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.mode_combo))
-        self.mode_combo.addItem("Slow",   4)
-        self.mode_combo.addItem("Normal", 0)
-        self.mode_combo.addItem("Fast",   1)
-        self.mode_combo.addItem("Turbo",  2)
-        self.mode_combo.addItem("Ultra",  8)
         settings_row.addLayout(_labeled_col("Mode:", self.mode_combo))
 
-        self.freq_field = QLineEdit()
+        self.freq_field = make_input(read_only=True)
         self.freq_field.setFixedWidth(90)
-        self.freq_field.setReadOnly(True)
-        self.freq_field.setStyleSheet(
-            "QLineEdit { background-color:white; color:#333333;"
-            " border:1px solid #cccccc; border-radius:4px; padding:2px 4px;"
-            " font-family:'Kode Mono'; font-size:13px; }"
-        )
         settings_row.addLayout(_labeled_col("Freq:", self.freq_field))
 
-        self.delivery_combo = QComboBox()
+        self.delivery_combo = make_combobox(
+            [("Maximum Reach", None), ("Limited Reach", None)], list_popup=True
+        )
         self.delivery_combo.setFixedWidth(160)
-        self.delivery_combo.setMaxVisibleItems(30)
-        self.delivery_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.delivery_combo))
-        self.delivery_combo.addItem("Maximum Reach")
-        self.delivery_combo.addItem("Limited Reach")
         settings_row.addLayout(_labeled_col("Delivery:", self.delivery_combo))
 
         settings_row.addStretch()
@@ -284,10 +243,8 @@ class GroupMessageDialog(QDialog):
         # Group row
         group_row = QHBoxLayout()
         group_row.setSpacing(8)
-        self.group_combo = QComboBox()
+        self.group_combo = make_combobox([], list_popup=True)
         self.group_combo.setFixedWidth(180)
-        self.group_combo.setMaxVisibleItems(30)
-        self.group_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.group_combo))
         group_row.addLayout(_labeled_col("Group:", self.group_combo))
         group_row.addStretch()
 
@@ -320,11 +277,11 @@ class GroupMessageDialog(QDialog):
         msg_row.addWidget(self.message_count_label)
         body.addLayout(msg_row)
 
-        self.message_expanded = QPlainTextEdit()
-        self.message_expanded.setMinimumHeight(160)
-        self.message_expanded.setPlaceholderText("1500 characters max")
-        self.message_expanded.textChanged.connect(self._enforce_message_limit)
-        body.addWidget(self.message_expanded)
+        self.message_edit = QPlainTextEdit()
+        self.message_edit.setMinimumHeight(160)
+        self.message_edit.setPlaceholderText(f"{MAX_MESSAGE_LENGTH} characters max")
+        self.message_edit.textChanged.connect(self._enforce_message_limit)
+        body.addWidget(self.message_edit)
         self._update_message_count_label()
 
         body.addStretch()
@@ -362,7 +319,6 @@ class GroupMessageDialog(QDialog):
     # -------------------------------------------------------------------------
 
     def _load_config(self) -> None:
-        self.selected_group = self._get_active_group_from_db()
         all_groups = self._get_all_groups_from_db()
         if len(all_groups) == 1:
             self.group_combo.addItem(all_groups[0])
@@ -370,52 +326,6 @@ class GroupMessageDialog(QDialog):
             self.group_combo.addItem("")
             for group in all_groups:
                 self.group_combo.addItem(group)
-
-    def _load_rigs(self) -> None:
-        self.rig_combo.blockSignals(True)
-        self.rig_combo.clear()
-
-        enabled = self.connector_manager.get_all_connectors(enabled_only=True) if self.connector_manager else []
-        connected = self.tcp_pool.get_connected_rig_names() if self.tcp_pool else []
-        available = [c for c in enabled if c['rig_name'] in connected]
-
-        if self._internet_available_override is not None:
-            internet_available = bool(self._internet_available_override)
-        else:
-            internet_available = bool(self.parent() and getattr(self.parent(), '_internet_available', False))
-
-        if not available:
-            if internet_available:
-                self.rig_combo.addItem(INTERNET_RIG)
-        else:
-            self.rig_combo.addItem("")
-            for c in available:
-                self.rig_combo.addItem(c['rig_name'])
-            if internet_available:
-                self.rig_combo.addItem(INTERNET_RIG)
-
-        self.rig_combo.blockSignals(False)
-
-        current = self.rig_combo.currentText()
-        if current:
-            self._on_rig_changed(current)
-
-    def closeEvent(self, event) -> None:
-        if self.tcp_pool:
-            for rig_name in self.tcp_pool.get_all_rig_names():
-                client = self.tcp_pool.get_client(rig_name)
-                if client:
-                    for sig, slot in [
-                        (client.callsign_received, self._on_callsign_received),
-                        (client.frequency_received, self._on_frequency_received),
-                        (client.frequency_received, self._on_frequency_for_transmit),
-                        (client.call_selected_received, self._on_call_selected_for_transmit),
-                    ]:
-                        try:
-                            sig.disconnect(slot)
-                        except (TypeError, RuntimeError):
-                            pass
-        super().closeEvent(event)
 
     # -------------------------------------------------------------------------
     # Signal handlers
@@ -426,7 +336,7 @@ class GroupMessageDialog(QDialog):
         show_help_dialog(self, "Group Message Help", _HELP_HTML, width=520)
 
     def _on_rig_changed(self, rig_name: str) -> None:
-        if not rig_name or "(disconnected)" in rig_name:
+        if not rig_name:
             self.callsign = ""
             self.freq_field.setText("")
             return
@@ -440,10 +350,8 @@ class GroupMessageDialog(QDialog):
             self.delivery_combo.addItem("Limited Reach")
         self.delivery_combo.blockSignals(False)
 
-        self._swap_message_widget(is_internet)
-
         if is_internet:
-            self.callsign = self._get_internet_callsign()
+            self.callsign = get_internet_user_settings()[0]
             self.freq_field.setText("")
             self.mode_combo.setEnabled(False)
             return
@@ -453,32 +361,15 @@ class GroupMessageDialog(QDialog):
         if not self.tcp_pool:
             return
 
-        for cn in self.tcp_pool.get_all_rig_names():
-            c = self.tcp_pool.get_client(cn)
-            if c:
-                for sig, slot in [
-                    (c.callsign_received, self._on_callsign_received),
-                    (c.frequency_received, self._on_frequency_received),
-                ]:
-                    try:
-                        sig.disconnect(slot)
-                    except (TypeError, RuntimeError):
-                        pass
-
+        self._disconnect_rig_signals("rig")
         client = self.tcp_pool.get_client(rig_name)
         if client and client.is_connected():
-            speed_name = (client.speed_name or "").upper()
-            mode_map = {"SLOW": 0, "NORMAL": 1, "FAST": 2, "TURBO": 3, "ULTRA": 4}
-            idx = mode_map.get(speed_name, 1)
-            self.mode_combo.blockSignals(True)
-            self.mode_combo.setCurrentIndex(idx)
-            self.mode_combo.blockSignals(False)
+            self._sync_mode_combo(client)
 
-            frequency = client.frequency
-            self.freq_field.setText(f"{frequency:.3f}" if frequency else "")
+            self._show_frequency(client)
 
-            client.callsign_received.connect(self._on_callsign_received)
-            client.frequency_received.connect(self._on_frequency_received)
+            self._connect_rig_signal(client, "callsign_received", self._on_callsign_received)
+            self._connect_rig_signal(client, "frequency_received", self._on_frequency_received)
             client.get_callsign()
             QtCore.QTimer.singleShot(RIG_FETCH_DELAY_MS, client.get_frequency)
         else:
@@ -488,25 +379,17 @@ class GroupMessageDialog(QDialog):
         if self.rig_combo.currentText() == rig_name:
             self.callsign = callsign
 
-    def _on_frequency_received(self, rig_name: str, dial_freq: int) -> None:
-        if self.rig_combo.currentText() == rig_name:
-            self.freq_field.setText(f"{dial_freq / 1_000_000:.3f}")
-
-    def _swap_message_widget(self, internet_only: bool) -> None:
-        self._message_is_expanded = internet_only
-        self._enforce_message_limit()
-
     def _enforce_message_limit(self) -> None:
-        limit = MAX_MESSAGE_LENGTH_INTERNET if self._message_is_expanded else MAX_MESSAGE_LENGTH
-        text = self.message_expanded.toPlainText()
+        limit = MAX_MESSAGE_LENGTH
+        text = self.message_edit.toPlainText()
         if len(text) > limit:
-            cursor = self.message_expanded.textCursor()
+            cursor = self.message_edit.textCursor()
             pos = min(cursor.position(), limit)
-            self.message_expanded.blockSignals(True)
-            self.message_expanded.setPlainText(text[:limit])
+            self.message_edit.blockSignals(True)
+            self.message_edit.setPlainText(text[:limit])
             cursor.setPosition(pos)
-            self.message_expanded.setTextCursor(cursor)
-            self.message_expanded.blockSignals(False)
+            self.message_edit.setTextCursor(cursor)
+            self.message_edit.blockSignals(False)
             text = text[:limit]
         self._update_message_count_label(len(text), limit)
 
@@ -515,93 +398,49 @@ class GroupMessageDialog(QDialog):
         if not hasattr(self, 'message_count_label'):
             return
         if limit is None:
-            limit = MAX_MESSAGE_LENGTH_INTERNET if self._message_is_expanded else MAX_MESSAGE_LENGTH
+            limit = MAX_MESSAGE_LENGTH
         if count is None:
-            count = len(self.message_expanded.toPlainText())
+            count = len(self.message_edit.toPlainText())
         self.message_count_label.setText(f"{count} of {limit}")
         color = COLOR_BTN_RED if count >= limit else _COL_COUNTER
         self.message_count_label.setStyleSheet(
             f"QLabel {{ font-family:'Kode Mono'; font-size:13px; color:{color}; }}"
         )
 
-    def _on_mode_changed(self, index: int) -> None:
-        rig_name = self.rig_combo.currentText()
-        if not rig_name or rig_name == INTERNET_RIG or "(disconnected)" in rig_name:
-            return
-        if not self.tcp_pool:
-            return
-        client = self.tcp_pool.get_client(rig_name)
-        if client and client.is_connected():
-            speed_value = self.mode_combo.currentData()
-            client.send_message("MODE.SET_SPEED", "", {"SPEED": speed_value})
-
     # -------------------------------------------------------------------------
     # Database helpers
     # -------------------------------------------------------------------------
 
-    def _get_active_group_from_db(self) -> str:
-        try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                row = conn.execute("SELECT name FROM groups ORDER BY name LIMIT 1").fetchone()
-                return row[0] if row else ""
-        except sqlite3.Error as e:
-            print(f"Error reading group from database: {e}")
-        return ""
-
     def _get_all_groups_from_db(self) -> list:
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 return [r[0] for r in conn.execute("SELECT name FROM groups ORDER BY name").fetchall()]
         except sqlite3.Error as e:
             print(f"Error reading groups from database: {e}")
         return []
 
-    def _get_internet_callsign(self) -> str:
-        try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
-                row = conn.execute("SELECT callsign FROM controls WHERE id = 1").fetchone()
-                return (row[0] or "").strip().upper() if row else ""
-        except sqlite3.Error:
-            return ""
-
     # -------------------------------------------------------------------------
     # Validation / messaging helpers
     # -------------------------------------------------------------------------
 
-    def _show_error(self, message: str) -> None:
-        msg = QMessageBox(self)
-        msg.setWindowTitle("CommStat Error")
-        msg.setText(message)
-        msg.setIcon(QMessageBox.Critical)
-        msg.setWindowFlag(Qt.WindowStaysOnTopHint)
-        msg.exec_()
-
-    def _show_info(self, message: str) -> None:
-        msg = QMessageBox(self)
-        msg.setWindowTitle("CommStat TX")
-        msg.setText(message)
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowFlag(Qt.WindowStaysOnTopHint)
-        msg.exec_()
-
     def _validate_input(self) -> Optional[tuple]:
         rig_name = self.rig_combo.currentText()
         if not rig_name:
-            self._show_error("Please select a Rig")
+            show_error(self, "Please select a Rig")
             self.rig_combo.setFocus()
             return None
 
         group_name = self.group_combo.currentText()
         if not group_name:
-            self._show_error("Please select a Group")
+            show_error(self, "Please select a Group")
             self.group_combo.setFocus()
             return None
 
-        message_raw = self.message_expanded.toPlainText()
+        message_raw = self.message_edit.toPlainText()
         message = re.sub(r"[^ -~]+", " ", message_raw)
 
         if len(message) < MIN_MESSAGE_LENGTH:
-            self._show_error("Message too short")
+            show_error(self, "Message too short")
             return None
 
         return (self.callsign.upper(), message)
@@ -618,55 +457,6 @@ class GroupMessageDialog(QDialog):
     # -------------------------------------------------------------------------
     # Commsrvr / database
     # -------------------------------------------------------------------------
-
-    def _submit_to_commsrvr_async(self, frequency: int, callsign: str, message_data: str, now: str, on_complete=None) -> None:
-        """Start background thread to submit the message to commsrvr.
-
-        Args:
-            on_complete: Optional callable(global_id: int) invoked after the
-                request completes (success or failure). global_id is 0 on
-                failure or when the server returns a non-numeric response.
-        """
-        def submit_thread():
-            import netguard
-            global_id = 0
-            if not netguard.guard("Message internet submission"):
-                self._commsrvr_result.emit("ERR::Off-Grid Mode is enabled — switch back to ONLINE to send.")
-                if on_complete:
-                    on_complete(global_id)
-                return
-            try:
-                data_string = f"{now}\t{frequency}\t0\t30\t{message_data}"
-                post_data = urllib.parse.urlencode({'cs': callsign, 'data': data_string}).encode('utf-8')
-                print(f"[Commsrvr] POST data: {post_data}")
-                req = urllib.request.Request(_DATAFEED, data=post_data, method='POST')
-                with urllib.request.urlopen(req, timeout=5, context=create_verified_ssl_context()) as response:
-                    result = response.read().decode('utf-8').strip()
-                if result.isdigit():
-                    global_id = int(result)
-                    print(f"[Commsrvr] Message submitted successfully (global_id={global_id})")
-                else:
-                    print(f"[Commsrvr] Message submission failed — server returned: {result}")
-                    self._commsrvr_result.emit(result)
-            except Exception as e:
-                reason = getattr(e, 'reason', e)
-                if isinstance(reason, TimeoutError):
-                    err = "ERR::Server timeout — the server did not respond in time."
-                else:
-                    err = f"ERR::Connection error — {e}"
-                print(f"[Commsrvr] Message submission failed — {err[5:]}")
-                self._commsrvr_result.emit(err)
-            finally:
-                if on_complete:
-                    on_complete(global_id)
-
-        threading.Thread(target=submit_thread, daemon=True).start()
-
-    def _on_commsrvr_result(self, result: str) -> None:
-        if result.startswith("ERR::"):
-            from qrz_lookup import InternetDeliveryFailureDialog
-            parent = self if self.isVisible() else (self.parent() or self)
-            InternetDeliveryFailureDialog(result[5:], parent=parent).exec_()
 
     def _capture_save_data(self, callsign: str, message: str, frequency: int = 0) -> dict:
         """Snapshot Qt widget state on the main thread before a background submit."""
@@ -690,7 +480,7 @@ class GroupMessageDialog(QDialog):
             saved_data: Snapshot from _capture_save_data().
             global_id: The global ID returned by the commsrvr server (0 if unknown).
         """
-        with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+        with db_connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO messages "
                 "(global_id, datetime, date, freq, db, source, msg_id, from_callsign, target, message, rfi) "
@@ -713,14 +503,14 @@ class GroupMessageDialog(QDialog):
     def _save_only(self) -> None:
         rig_name = self.rig_combo.currentText()
         if rig_name == INTERNET_RIG:
-            self.callsign = self._get_internet_callsign()
+            self.callsign = get_internet_user_settings()[0]
             if not self.callsign:
-                self._show_error(
+                show_error(self, 
                     "No callsign configured.\n\nPlease set your callsign in Settings → User Settings."
                 )
                 return
         elif not self.callsign:
-            self._show_error(
+            show_error(self, 
                 "Callsign not yet received from the rig.\n\nPlease wait a moment and try again."
             )
             return
@@ -731,8 +521,10 @@ class GroupMessageDialog(QDialog):
 
         callsign, message = result
         tx_message = self._build_message(message)
-        self._show_info(f"CommStat has saved:\n{tx_message}")
-        self._save_to_database(self._capture_save_data(callsign, message))
+        show_info(self, f"CommStat has saved:\n{tx_message}")
+        saved_data = self._capture_save_data(callsign, message)
+        saved_data['source'] = 0  # saved locally, never transmitted
+        self._save_to_database(saved_data)
 
         if self.refresh_callback:
             self.refresh_callback()
@@ -743,9 +535,9 @@ class GroupMessageDialog(QDialog):
         rig_name = self.rig_combo.currentText()
 
         if rig_name == INTERNET_RIG:
-            self.callsign = self._get_internet_callsign()
+            self.callsign = get_internet_user_settings()[0]
             if not self.callsign:
-                self._show_error(
+                show_error(self, 
                     "No callsign configured.\n\nPlease set your callsign in Settings → User Settings."
                 )
                 return
@@ -757,6 +549,13 @@ class GroupMessageDialog(QDialog):
         callsign, message = result
 
         if rig_name == INTERNET_RIG:
+            import netguard
+            if not netguard.is_network_enabled():
+                show_error(self, 
+                    "Cannot transmit — Off-Grid Mode is enabled.\n\n"
+                    "Switch to Online mode to transmit via the Internet."
+                )
+                return
             self._pending_message  = self._build_message(message)
             self._pending_save_data = self._capture_save_data(callsign, message, 0)
             now = QDateTime.currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss")
@@ -768,83 +567,34 @@ class GroupMessageDialog(QDialog):
             )
 
             def _on_internet_commsrvr_complete(global_id: int) -> None:
-                self._save_to_database(self._pending_save_data, global_id)
-                QtCore.QTimer.singleShot(0, self._refresh_and_close)
+                # Internet-only: save only when the server accepted it (numeric global_id)
+                if global_id:
+                    self._save_to_database(self._pending_save_data, global_id)
+                    self._refresh_and_close()
 
-            self._submit_to_commsrvr_async(0, callsign, message_data, now, on_complete=_on_internet_commsrvr_complete)
+            submit_to_commsrvr(self, 0, callsign, message_data, now, on_complete=_on_internet_commsrvr_complete)
             return
 
-        if "(disconnected)" in rig_name:
-            self._show_error("Cannot transmit: rig is disconnected")
-            return
-
-        if not self.tcp_pool:
-            self._show_error("Cannot transmit: TCP pool not available")
-            return
-
-        client = self.tcp_pool.get_client(rig_name)
-        if not client or not client.is_connected():
-            self._show_error("Cannot transmit: not connected to rig")
+        client = self._connected_client(rig_name)
+        if client is None:
             return
 
         if not callsign:
-            self._show_error(
+            show_error(self, 
                 "Callsign not yet received from the rig.\n\nPlease wait a moment and try again."
             )
             return
 
         self._pending_message = self._build_message(message)
 
-        try:
-            client.call_selected_received.disconnect(self._on_call_selected_for_transmit)
-        except TypeError:
-            pass
-        client.call_selected_received.connect(self._on_call_selected_for_transmit)
-        client.get_call_selected()
+        self._begin_rf_transmit(client)
 
-    def _on_call_selected_for_transmit(self, rig_name: str, selected_call: str) -> None:
-        if self.rig_combo.currentText() != rig_name:
-            return
-
-        client = self.tcp_pool.get_client(rig_name)
-        if client:
-            try:
-                client.call_selected_received.disconnect(self._on_call_selected_for_transmit)
-            except TypeError:
-                pass
-
-        if selected_call:
-            QMessageBox.critical(
-                self, "ERROR",
-                f"JS8Call has {selected_call} selected.\n\n"
-                "Go to JS8Call and click the \"Deselect\" button.\n\n"
-                "The Deselect button is above the waterfall."
-            )
-            return
-
-        if client:
-            try:
-                client.frequency_received.disconnect(self._on_frequency_for_transmit)
-            except TypeError:
-                pass
-            client.frequency_received.connect(self._on_frequency_for_transmit)
-            client.get_frequency()
-
-    def _on_frequency_for_transmit(self, rig_name: str, frequency: int) -> None:
-        if self.rig_combo.currentText() != rig_name:
-            return
-
-        client = self.tcp_pool.get_client(rig_name)
-        if client:
-            try:
-                client.frequency_received.disconnect(self._on_frequency_for_transmit)
-            except TypeError:
-                pass
-
+    def _transmit_with_frequency(self, client, frequency: int) -> None:
+        """Send over the rig and save; runs once the rig has reported its frequency."""
         try:
             client.send_tx_message(self._pending_message)
 
-            message_raw = self.message_expanded.toPlainText()
+            message_raw = self.message_edit.toPlainText()
             message = re.sub(r"[^ -~]+", " ", message_raw)
 
             self._pending_save_data = self._capture_save_data(self.callsign, message, frequency)
@@ -861,11 +611,11 @@ class GroupMessageDialog(QDialog):
 
                 def _on_radio_commsrvr_complete(global_id: int) -> None:
                     self._save_to_database(self._pending_save_data, global_id)
-                    QtCore.QTimer.singleShot(0, self._refresh_and_close)
+                    self._refresh_and_close()
 
-                self._submit_to_commsrvr_async(frequency, self.callsign, message_data, self._pending_save_data['datetime_str'], on_complete=_on_radio_commsrvr_complete)
+                submit_to_commsrvr(self, frequency, self.callsign, message_data, self._pending_save_data['datetime_str'], on_complete=_on_radio_commsrvr_complete)
         except Exception as e:
-            self._show_error(f"Failed to transmit message: {e}")
+            show_error(self, f"Failed to transmit message: {e}")
 
     def _generate_msg_id(self) -> None:
         self.msg_id = generate_time_based_id()

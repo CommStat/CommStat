@@ -9,34 +9,36 @@ Point-to-point JS8 message to a single callsign, sent directly or via a relay
 that has been observed hearing the target.
 """
 
-import os
 import re
 import sqlite3
 from datetime import datetime, timezone
 from html import escape
 from typing import TYPE_CHECKING
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import Qt, QDateTime
 from PyQt5.QtGui import QStandardItem, QStandardItemModel
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QComboBox, QPlainTextEdit,
-    QMessageBox,
+    QLabel, QPlainTextEdit,
 )
 
 from constants import (
+    SPEED_OPTIONS,
     DEFAULT_COLORS,
     COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
-    COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
     COLOR_BTN_BLUE, COLOR_BTN_RED, COLOR_BTN_CYAN,
     COLOR_BTN_HELP, COLOR_BTN_CLOSE,
     CONTACTS_RETENTION_HOURS,
 )
+from db_utils import db_connect
 from id_utils import generate_time_based_id
 from qrz_client import get_qrz_cached
-from ui_helpers import (make_button, apply_standard_dialog_chrome, connect_single,
-                        show_help_dialog)
+from text_utils import base_callsign
+from transmit_base import RigDialogMixin
+from ui_helpers import (show_error, make_title_strip, make_button,
+                        connect_single, show_help_dialog, make_combobox, make_input,
+                        apply_standard_dialog_chrome)
 
 if TYPE_CHECKING:
     from js8_tcp_client import TCPConnectionPool
@@ -47,13 +49,12 @@ if TYPE_CHECKING:
 # Constants
 # =============================================================================
 
-DATABASE_FILE = "traffic.db3"
 
 MIN_MESSAGE_LENGTH = 1
 MAX_MESSAGE_LENGTH = 500
 
 WINDOW_WIDTH  = 600
-WINDOW_HEIGHT = 460
+WINDOW_HEIGHT = 480
 
 QRZ_MISS_TEXT = "Callsign not found in local cache"
 
@@ -71,8 +72,6 @@ NEWLINE_PLACEHOLDER = "||"
 # that looks like a callsign.
 _CALLSIGN_PATTERN = re.compile(r"^[A-Z0-9/]{3,12}$")
 
-_PROG_BG    = DEFAULT_COLORS.get("program_background",   "#A52A2A")
-_PROG_FG    = DEFAULT_COLORS.get("program_foreground",   "#FFFFFF")
 _PANEL_BG   = DEFAULT_COLORS.get("module_background",    "#DDDDDD")
 _PANEL_FG   = DEFAULT_COLORS.get("module_foreground",    "#000000")
 _COL_HELP   = COLOR_BTN_HELP
@@ -154,51 +153,11 @@ carries no signal numbers.</p>
 
 
 
-class _UpperCaseLineEdit(QtWidgets.QLineEdit):
-    """QLineEdit that auto-uppercases typed characters and pasted text.
-
-    Installed as the line edit inside the editable Target / Relay combos via
-    QComboBox.setLineEdit(). Uppercasing happens in keyPressEvent (typing)
-    and insertFromMimeData (paste / drag-drop), which are the widget-level
-    hooks that run before any text-modified signals are emitted.
-
-    Why not a QValidator: on an editable QComboBox with NoInsert, a
-    validator that rewrites text inside validate() silently blocks typed
-    input until the line edit's text matches an existing item.
-
-    Why not a textChanged / textEdited slot: calling setText() inside a
-    signal slot re-enters Qt's signal-dispatch loop and corrupts the C++
-    iterator on Linux/Qt5 (target textChanged → setText → relay model.clear
-    cascade → relay line-edit textChanged → crash). blockSignals() and
-    QTimer.singleShot() do not avoid this.
-
-    An event filter on the line edit was tried as well, but on Windows the
-    QLineEdit inside an editable QComboBox does not reliably fire installed
-    eventFilters for KeyPress, so typed characters bypass it.
-    """
-
-    def keyPressEvent(self, event):
-        text = event.text()
-        if text and text != text.upper():
-            self.insert(text.upper())
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def insertFromMimeData(self, source):
-        if source is not None and source.hasText():
-            mime = QtCore.QMimeData()
-            mime.setText(source.text().upper())
-            super().insertFromMimeData(mime)
-        else:
-            super().insertFromMimeData(source)
-
-
 class _UpperCaseEventFilter(QtCore.QObject):
     """Intercept key presses on a QPlainTextEdit and force them to uppercase.
 
     Used by the Message body. Line edits (Target / Relay combos) use
-    _UpperCaseLineEdit instead — see that class for the reasoning.
+    UpperCaseLineEdit (ui_helpers) instead — see that class for the reasoning.
 
     An event filter runs before the widget processes the key and before any
     signals are emitted, so insertPlainText() here is always called outside
@@ -218,8 +177,10 @@ class _UpperCaseEventFilter(QtCore.QObject):
 # JS8 Direct Message Dialog
 # =============================================================================
 
-class JS8DirectMessageDialog(QDialog):
+class JS8DirectMessageDialog(RigDialogMixin, QDialog):
     """Send a JS8 directed message to a single callsign, optionally via a relay."""
+
+    AUTO_SELECT_SINGLE_RIG = True
 
     def __init__(
         self,
@@ -236,20 +197,7 @@ class JS8DirectMessageDialog(QDialog):
         self._current_freq_mhz = None
         self._pending_payload = ""
 
-        self.setWindowTitle("JS8 Direct Message")
-        self.setMinimumSize(WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.resize(WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.setWindowFlags(
-            Qt.Window |
-            Qt.CustomizeWindowHint |
-            Qt.WindowTitleHint |
-            Qt.WindowCloseButtonHint |
-            Qt.WindowMaximizeButtonHint |
-            Qt.WindowStaysOnTopHint
-        )
-
-        if os.path.exists("radiation-32.png"):
-            self.setWindowIcon(QtGui.QIcon("radiation-32.png"))
+        apply_standard_dialog_chrome(self, "JS8 Direct Message", WINDOW_WIDTH, WINDOW_HEIGHT)
 
         self._setup_ui()
         self._load_rigs()
@@ -278,19 +226,9 @@ class JS8DirectMessageDialog(QDialog):
         self.setStyleSheet(
             f"QDialog {{ background-color:{_PANEL_BG}; }}"
             f"QLabel {{ color:{_PANEL_FG}; font-family:Roboto; font-size:13px; }}"
-            f"QLineEdit {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:2px 4px;"
-            f" font-family:'Kode Mono'; font-size:13px; }}"
             f"QPlainTextEdit {{ background-color:white; color:{COLOR_INPUT_TEXT};"
             f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px;"
             f" font-family:'Kode Mono'; font-size:13px; }}"
-            f"QComboBox {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:2px 4px;"
-            f" font-family:'Kode Mono'; font-size:13px; combobox-popup:0; }}"
-            f"QComboBox:disabled {{ background-color:{COLOR_DISABLED_BG}; color:{COLOR_DISABLED_TEXT}; }}"
-            f"QComboBox QAbstractItemView {{ background-color:white; color:{COLOR_INPUT_TEXT};"
-            f" selection-background-color:#cce5ff; selection-color:#000000; }}"
-            f"QComboBox QAbstractItemView::item {{ min-height:22px; padding:0 6px; }}"
         )
 
         layout = QVBoxLayout(self)
@@ -298,15 +236,7 @@ class JS8DirectMessageDialog(QDialog):
         layout.setContentsMargins(15, 15, 15, 15)
 
         # Title
-        title = QLabel("JS8 Direct Message")
-        title.setAlignment(Qt.AlignCenter)
-        title.setFont(QtGui.QFont("Roboto Slab", -1, QtGui.QFont.Black))
-        title.setFixedHeight(36)
-        title.setStyleSheet(
-            f"QLabel {{ background-color:{_PROG_BG}; color:{_PROG_FG};"
-            f" font-family:'Roboto Slab'; font-size:16px; font-weight:900;"
-            f" padding-top:9px; padding-bottom:9px; }}"
-        )
+        title = make_title_strip("JS8 Direct Message")
         layout.addWidget(title)
         layout.addSpacing(4)
 
@@ -314,28 +244,21 @@ class JS8DirectMessageDialog(QDialog):
         rig_row = QHBoxLayout()
         rig_row.setSpacing(10)
 
-        self.rig_combo = QComboBox()
+        self.rig_combo = make_combobox([], list_popup=True)
         self.rig_combo.setMinimumWidth(150)
-        self.rig_combo.setMaxVisibleItems(30)
-        self.rig_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.rig_combo))
         self.rig_combo.currentTextChanged.connect(self._on_rig_changed)
         rig_row.addLayout(self._labeled_col("Rig:", self.rig_combo))
 
-        self.mode_combo = QComboBox()
+        self.mode_combo = make_combobox(
+            SPEED_OPTIONS,
+            list_popup=True,
+        )
         self.mode_combo.setFixedWidth(130)
-        self.mode_combo.setMaxVisibleItems(30)
-        self.mode_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.mode_combo))
-        self.mode_combo.addItem("Slow",   4)
-        self.mode_combo.addItem("Normal", 0)
-        self.mode_combo.addItem("Fast",   1)
-        self.mode_combo.addItem("Turbo",  2)
-        self.mode_combo.addItem("Ultra",  8)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         rig_row.addLayout(self._labeled_col("Mode:", self.mode_combo))
 
-        self.freq_field = QLineEdit()
+        self.freq_field = make_input(read_only=True)
         self.freq_field.setFixedWidth(90)
-        self.freq_field.setReadOnly(True)
         rig_row.addLayout(self._labeled_col("Freq:", self.freq_field))
 
         # Read-only "Target:" reminder box — shown only when this dialog is
@@ -344,14 +267,13 @@ class JS8DirectMessageDialog(QDialog):
         # toggled. Hidden by default so a normal menu-launch shows nothing.
         self.reply_target_label = QLabel("Target:")
         self.reply_target_label.setStyleSheet(
-            "QLabel { font-family:Roboto; font-size:13px; font-weight:bold; }"
+            f"QLabel {{ color:{_PANEL_FG}; font-family:Roboto; font-size:13px; font-weight:bold; }}"
         )
-        self.reply_target_field = QLineEdit()
+        self.reply_target_field = make_input(read_only=True)
         self.reply_target_field.setFixedWidth(110)
-        self.reply_target_field.setReadOnly(True)
         self.reply_target_field.setStyleSheet(
             "QLineEdit { background-color:#FFFF00; color:#000000;"
-            " border:1px solid #999999; border-radius:4px; padding:2px 4px;"
+            " border:1px solid #999999; border-radius:4px; padding:2px 6px;"
             " font-family:'Kode Mono'; font-size:13px; }"
         )
         rt_col = QVBoxLayout()
@@ -369,29 +291,18 @@ class JS8DirectMessageDialog(QDialog):
         sta_row = QHBoxLayout()
         sta_row.setSpacing(10)
 
-        self.target_combo = QComboBox()
+        # Editable + uppercase; connect line-edit signals only after this call
+        self.target_combo = make_combobox([], list_popup=True, editable=True)
         self.target_combo.setFixedWidth(150)
-        self.target_combo.setEditable(True)
-        self.target_combo.setInsertPolicy(QComboBox.NoInsert)
-        self.target_combo.setCompleter(None)
-        self.target_combo.setMaxVisibleItems(30)
-        self.target_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.target_combo))
-        self._wire_uppercase(self.target_combo)  # replaces the line edit; connect line-edit signals AFTER this
         self.target_combo.currentTextChanged.connect(self._on_target_changed)
         self.target_combo.activated.connect(lambda _: self._on_target_committed())
         self.target_combo.lineEdit().editingFinished.connect(self._on_target_committed)
         sta_row.addLayout(self._labeled_col("Target:", self.target_combo))
 
-        self.relay_combo = QComboBox()
+        self.relay_combo = make_combobox([], list_popup=True, editable=True)
         self.relay_combo.setFixedWidth(220)
-        self.relay_combo.setEditable(True)
-        self.relay_combo.setInsertPolicy(QComboBox.NoInsert)
-        self.relay_combo.setCompleter(None)
-        self.relay_combo.setMaxVisibleItems(30)
-        self.relay_combo.setItemDelegate(QtWidgets.QStyledItemDelegate(self.relay_combo))
         self.relay_combo.setModel(QStandardItemModel(self.relay_combo))
         self.relay_combo.currentTextChanged.connect(lambda _t: self._update_transmit_state())
-        self._wire_uppercase(self.relay_combo)
         sta_row.addLayout(self._labeled_col("Relay:", self.relay_combo))
 
         self.btn_refresh = make_button("Refresh", COLOR_BTN_CYAN, min_w=90)
@@ -407,8 +318,8 @@ class JS8DirectMessageDialog(QDialog):
         self.qrz_info_label.setFixedHeight(22)
         self.qrz_info_label.setTextFormat(Qt.PlainText)
         self.qrz_info_label.setStyleSheet(
-            "QLabel { background-color:transparent; color:#000000;"
-            " padding-left:2px; font-size:13px; }"
+            f"QLabel {{ background-color:transparent; color:{_PANEL_FG};"
+            f" padding-left:2px; font-family:Roboto; font-size:13px; }}"
         )
         layout.addWidget(self.qrz_info_label)
 
@@ -426,11 +337,10 @@ class JS8DirectMessageDialog(QDialog):
         layout.addLayout(msg_row)
 
         self.body = QPlainTextEdit()
-        self.body.setMinimumHeight(144)
         self.body.setPlaceholderText(f"{MAX_MESSAGE_LENGTH} characters max")
         self.body.installEventFilter(_UpperCaseEventFilter(self.body))
         self.body.textChanged.connect(self._on_body_changed)
-        layout.addWidget(self.body, 1)  # stretch factor — absorbs extra vertical space
+        layout.addWidget(self.body, 1)
         self._update_message_count_label()
 
         # Buttons: Help (left) · Clear · Transmit · Cancel (right)
@@ -465,16 +375,6 @@ class JS8DirectMessageDialog(QDialog):
         col.addWidget(lbl)
         col.addWidget(ctrl)
         return col
-
-    @staticmethod
-    def _wire_uppercase(combo: QComboBox) -> None:
-        """Replace the combo's default line edit with _UpperCaseLineEdit so
-        typed and pasted text are forced to uppercase.
-
-        Must be called AFTER setEditable(True) and BEFORE wiring any signals
-        on combo.lineEdit() — setLineEdit() destroys the previous editor, so
-        connections made before this call are lost."""
-        combo.setLineEdit(_UpperCaseLineEdit(combo))
 
     def _effective_target_cs(self) -> str:
         """Target callsign currently in the dropdown — typed or selected."""
@@ -522,9 +422,9 @@ class JS8DirectMessageDialog(QDialog):
             self.qrz_info_label.setTextFormat(Qt.PlainText)
             self.qrz_info_label.setText(QRZ_MISS_TEXT)
             self.qrz_info_label.setStyleSheet(
-                "QLabel { background-color:transparent; color:#000000;"
-                " padding-left:2px; font-family:Roboto; font-size:13px;"
-                " font-weight:bold; }"
+                f"QLabel {{ background-color:transparent; color:{_PANEL_FG};"
+                f" padding-left:2px; font-family:Roboto; font-size:13px;"
+                f" font-weight:bold; }}"
             )
             return
 
@@ -552,8 +452,8 @@ class JS8DirectMessageDialog(QDialog):
         self.qrz_info_label.setTextFormat(Qt.RichText)
         self.qrz_info_label.setText("".join(segments))
         self.qrz_info_label.setStyleSheet(
-            "QLabel { background-color:transparent; color:#000000;"
-            " padding-left:2px; font-family:'Kode Mono'; font-size:13px; }"
+            f"QLabel {{ background-color:transparent; color:{_PANEL_FG};"
+            f" padding-left:2px; font-family:'Kode Mono'; font-size:13px; }}"
         )
 
     def _last_seen_text(self, target_cs: str) -> str:
@@ -570,7 +470,7 @@ class JS8DirectMessageDialog(QDialog):
 
         insert_date = None
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 cur = conn.execute(
                     "SELECT MAX(insert_date) FROM contacts WHERE target_cs = ?",
                     (cs,),
@@ -643,32 +543,6 @@ class JS8DirectMessageDialog(QDialog):
     # Rig wiring
     # -------------------------------------------------------------------------
 
-    def _load_rigs(self) -> None:
-        """Populate rig dropdown with connected radio rigs only (no INTERNET ONLY)."""
-        if not self.tcp_pool:
-            return
-
-        self.rig_combo.blockSignals(True)
-        self.rig_combo.clear()
-
-        enabled = (self.connector_manager.get_all_connectors(enabled_only=True)
-                   if self.connector_manager else [])
-        connected = set(self.tcp_pool.get_connected_rig_names())
-        available = [c['rig_name'] for c in enabled if c['rig_name'] in connected]
-
-        if len(available) == 1:
-            self.rig_combo.addItem(available[0])
-        elif len(available) > 1:
-            self.rig_combo.addItem("")
-            for name in available:
-                self.rig_combo.addItem(name)
-
-        self.rig_combo.blockSignals(False)
-
-        current = self.rig_combo.currentText()
-        if current:
-            self._on_rig_changed(current)
-
     def _on_rig_changed(self, rig_name: str) -> None:
         if not rig_name or not self.tcp_pool:
             self.freq_field.setText("")
@@ -677,14 +551,7 @@ class JS8DirectMessageDialog(QDialog):
             return
 
         # Disconnect from prior clients to avoid double-fires
-        for client_name in self.tcp_pool.get_all_rig_names():
-            client = self.tcp_pool.get_client(client_name)
-            if client:
-                try:
-                    client.frequency_received.disconnect(self._on_frequency_received)
-                except TypeError:
-                    pass
-
+        self._disconnect_rig_signals("rig")
         client = self.tcp_pool.get_client(rig_name)
         if not (client and client.is_connected()):
             self.freq_field.setText("")
@@ -693,15 +560,10 @@ class JS8DirectMessageDialog(QDialog):
             self._update_transmit_state()
             return
 
-        client.frequency_received.connect(self._on_frequency_received)
+        self._connect_rig_signal(client, "frequency_received", self._on_frequency_received)
 
         # Sync mode dropdown from rig's current speed
-        speed_name = (client.speed_name or "").upper()
-        mode_map = {"SLOW": 0, "NORMAL": 1, "FAST": 2, "TURBO": 3, "ULTRA": 4}
-        idx = mode_map.get(speed_name, 1)
-        self.mode_combo.blockSignals(True)
-        self.mode_combo.setCurrentIndex(idx)
-        self.mode_combo.blockSignals(False)
+        self._sync_mode_combo(client)
 
         # Use cached freq if available, then request a fresh one
         freq = client.frequency
@@ -732,15 +594,6 @@ class JS8DirectMessageDialog(QDialog):
         self._current_freq_mhz = float(freq_mhz)
         self._load_targets(self._current_freq_mhz)
 
-    def _on_mode_changed(self, _index: int) -> None:
-        rig_name = self.rig_combo.currentText()
-        if not rig_name or not self.tcp_pool:
-            return
-        client = self.tcp_pool.get_client(rig_name)
-        if client and client.is_connected():
-            speed_value = self.mode_combo.currentData()
-            client.send_message("MODE.SET_SPEED", "", {"SPEED": speed_value})
-
     # -------------------------------------------------------------------------
     # Contacts queries
     # -------------------------------------------------------------------------
@@ -748,7 +601,7 @@ class JS8DirectMessageDialog(QDialog):
     def _load_targets(self, freq_mhz: float) -> None:
         rows = []
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 cur = conn.execute(
                     "SELECT DISTINCT target_cs FROM contacts "
                     "WHERE freq = ? ORDER BY target_cs",
@@ -790,7 +643,7 @@ class JS8DirectMessageDialog(QDialog):
 
         rows = []
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 cur = conn.execute(
                     "SELECT relay_cs, target_snr, insert_date FROM contacts "
                     "WHERE target_cs = ? AND freq = ? "
@@ -889,14 +742,6 @@ class JS8DirectMessageDialog(QDialog):
         client = self.tcp_pool.get_client(rig_name)
         return bool(client and client.is_connected())
 
-    def _show_error(self, message: str) -> None:
-        msg = QMessageBox(self)
-        msg.setWindowTitle("JS8 Direct Message")
-        msg.setText(message)
-        msg.setIcon(QMessageBox.Critical)
-        msg.setWindowFlag(Qt.WindowStaysOnTopHint)
-        msg.exec_()
-
     def _on_help_clicked(self) -> None:
         """Show a styled help dialog explaining how JS8 Direct Message works."""
         show_help_dialog(self, "JS8 Direct Message Help", _HELP_HTML, width=900)
@@ -930,16 +775,16 @@ class JS8DirectMessageDialog(QDialog):
 
     def _on_transmit(self) -> None:
         if not self._rig_client_connected():
-            self._show_error("Cannot transmit: rig is not connected.")
+            show_error(self, "Cannot transmit: rig is not connected.")
             return
 
         target = self._effective_target_cs()
         relay_cs = self._effective_relay_cs()
         if not _CALLSIGN_PATTERN.match(target):
-            self._show_error("Enter or pick a valid Target callsign.")
+            show_error(self, "Enter or pick a valid Target callsign.")
             return
         if relay_cs and not _CALLSIGN_PATTERN.match(relay_cs):
-            self._show_error("Enter or pick a valid Relay callsign, or leave Relay blank for a direct transmission.")
+            show_error(self, "Enter or pick a valid Relay callsign, or leave Relay blank for a direct transmission.")
             return
 
         raw = self.body.toPlainText().strip()
@@ -948,7 +793,7 @@ class JS8DirectMessageDialog(QDialog):
                       .replace('\r',   NEWLINE_PLACEHOLDER))
         text = re.sub(r"[^ -~]+", " ", encoded).strip()
         if len(text) < MIN_MESSAGE_LENGTH:
-            self._show_error("Message is empty.")
+            show_error(self, "Message is empty.")
             return
         if len(text) > MAX_MESSAGE_LENGTH:
             text = text[:MAX_MESSAGE_LENGTH]
@@ -978,12 +823,7 @@ class JS8DirectMessageDialog(QDialog):
         # whether a call is currently selected. If yes, abort with the
         # standard "Deselect" instruction; if no, transmit in the callback.
         client = self.tcp_pool.get_client(rig_name)
-        try:
-            client.call_selected_received.disconnect(self._on_call_selected_for_transmit)
-        except TypeError:
-            pass
-        client.call_selected_received.connect(self._on_call_selected_for_transmit)
-        client.get_call_selected()
+        self._begin_rf_transmit(client)
 
     def _refresh_and_close(self) -> None:
         if self.refresh_callback:
@@ -1009,10 +849,10 @@ class JS8DirectMessageDialog(QDialog):
         datetime_str = now.toString("yyyy-MM-dd HH:mm:ss")
         date_only    = now.toString("yyyy-MM-dd")
         freq_hz = int(round(self._pending_freq_mhz * 1_000_000)) if self._pending_freq_mhz else 0
-        from_cs = (from_callsign or "").split("/")[0].strip().upper()
+        from_cs = base_callsign(from_callsign)
 
         try:
-            with sqlite3.connect(DATABASE_FILE, timeout=10) as conn:
+            with db_connect() as conn:
                 conn.execute(
                     "INSERT OR REPLACE INTO messages "
                     "(global_id, datetime, date, freq, db, source, msg_id, from_callsign, target, message) "
@@ -1025,32 +865,8 @@ class JS8DirectMessageDialog(QDialog):
         except sqlite3.Error as e:
             print(f"[JS8DirectMessage] failed to save message to local table: {e}")
 
-    def _on_call_selected_for_transmit(self, rig_name: str, selected_call: str) -> None:
-        """JS8Call response to RX.GET_CALL_SELECTED — proceed only if nothing
-        is selected over there. Matches the pattern used by statrep.py,
-        group_message.py, and alert.py."""
-        if self.rig_combo.currentText() != rig_name:
-            return
-
-        client = self.tcp_pool.get_client(rig_name)
-        if client:
-            try:
-                client.call_selected_received.disconnect(self._on_call_selected_for_transmit)
-            except TypeError:
-                pass
-
-        if selected_call:
-            QMessageBox.critical(
-                self, "ERROR",
-                f"JS8Call has {selected_call} selected.\n\n"
-                "Go to JS8Call and click the \"Deselect\" button.\n\n"
-                "The Deselect button is above the waterfall."
-            )
-            return
-
-        if not client:
-            return
-
+    def _on_call_clear(self, client, rig_name: str) -> None:
+        """No call selected in JS8Call: transmit now."""
         try:
             client.send_tx_message(self._pending_payload)
 
@@ -1068,7 +884,7 @@ class JS8DirectMessageDialog(QDialog):
             self._save_to_local_messages(client.callsign)
             QtCore.QTimer.singleShot(0, self._refresh_and_close)
         except Exception as e:
-            self._show_error(f"Failed to transmit: {e}")
+            show_error(self, f"Failed to transmit: {e}")
 
 
 # =============================================================================
@@ -1083,7 +899,6 @@ if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
 
     connector_manager = ConnectorManager()
-    connector_manager.init_connectors_table()
     tcp_pool = TCPConnectionPool(connector_manager)
     tcp_pool.connect_all()
 

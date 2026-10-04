@@ -4,22 +4,33 @@
 
 """
 CommStat UI and application constants.
-Import with: from constants import *
+Import the names you need explicitly: from constants import NAME, ...
 """
 
+import base64
 from typing import Dict
 
 # =============================================================================
 # Application Identity
 # =============================================================================
 
-VERSION = "5.0"
+VERSION = "5.1"
+
+# Identifies CommStat in outbound HTTP requests (User-Agent) and the QRZ XML "agent" field.
+USER_AGENT = f"CommStat/{VERSION}"
+
+# commstat.app server address (base64 so it isn't a plain-text string in the source).
+COMMSRVR_URL = base64.b64decode("aHR0cHM6Ly9jb21tc3RhdC5hcHA=").decode()
+DATAFEED_URL = COMMSRVR_URL + "/datafeed-808585.php"
+
+# Invite link shown in the menu-bar Help dialog.
+TELEGRAM_INVITE_URL = "https://t.me/+3k3n7O8a1yI1N2E5"
 
 # When True, MainWindow._resolve_dialog_class() re-imports a dialog's module
 # from disk every time it's opened, instead of reusing the cached import —
 # lets edits to files like maintenance.py show up without restarting
 # CommStat. Leave False for normal/shipped runs.
-DEV_RELOAD_DIALOGS = False
+DEV_RELOAD_DIALOGS = True
 
 WINDOW_TITLE = f"CommStat (v{VERSION}) by N0DDK"
 WINDOW_SIZE = (1360, 768)
@@ -38,6 +49,13 @@ HEARTBEAT_DELAY_MS    = 5000       # initial delay before first CommStat server 
 HEARTBEAT_INTERVAL_MS = 180000     # normal heartbeat interval (3 minutes)
 RIG_FETCH_DELAY_MS  = 100    # staggered delay for grid/callsign requests after rig select
 RIG_FREQ_DELAY_MS   = 200    # staggered delay for frequency request after rig select
+
+# JS8Call speed modes for the Transmit dialogs: (label, value sent in MODE.SET_SPEED).
+# Order matters: the rig's reported speed name is matched to these labels.
+SPEED_OPTIONS = [("Slow", 4), ("Normal", 0), ("Fast", 1), ("Turbo", 2), ("Ultra", 8)]
+
+# Rig-dropdown entry that sends through the Internet instead of a radio.
+INTERNET_RIG = "INTERNET ONLY"
 
 FONT_ROBOTO   = "Roboto"
 FONT_MONO     = "Kode Mono"
@@ -147,7 +165,8 @@ SLIDESHOW_INTERVAL    = 5   # minutes between image changes
 # Timing
 # =============================================================================
 
-INTERNET_CHECK_INTERVAL    = 30 * 60 * 1000   # 30 minutes in ms
+INTERNET_CHECK_INTERVAL    = 30 * 60 * 1000   # 30 minutes in ms: re-check while offline
+INTERNET_MONITOR_INTERVAL  = 5 * 60 * 1000    # 5 minutes in ms: re-check while online, to notice a dropped connection
 NEWSFEED_TYPE_INTERVAL_MS  = 60               # ms per character during type-on
 NEWSFEED_PAUSE_MS          = 20000            # ms to hold when window is full
 NEWSFEED_SCROLL_DURATION_MS = 1000            # total ms for scroll-off phase
@@ -172,17 +191,19 @@ STATREP_HEADERS = [
 # =============================================================================
 # The wire/DB representation is always a single digit code ("1"-"5"); the
 # combo box + DB + RF/commsrvr text is the display string for that code.
-# A future update renames codes 1-4 and retires code 5 (no successor, but
-# it must stay decodable forever since old DB rows / other stations' RF
-# traffic may still send it).
+# Codes 1-4 were renamed and code 5 was retired (no successor, but it must
+# stay decodable forever since old DB rows / other stations' RF traffic may
+# still send it).
 #
-# To ship the rename: flip SCOPE_USE_NEW_LABELS to True. Everything that
-# picks display text (SCOPE_OPTIONS, scope_text_for_code) follows
-# automatically. Everything that resolves existing/incoming text back to a
-# code (scope_code_for_text, SCOPE_RADIUS) already understands both label
-# sets, so no other edit is required.
-SCOPE_USE_NEW_LABELS = True  # flip to True when the rename ships
+# SCOPE_USE_NEW_LABELS selects which label set is shown. It is True: the
+# renamed labels are live. Everything that picks display text (SCOPE_OPTIONS,
+# scope_text_for_code) follows it. Everything that resolves existing/incoming
+# text back to a code (scope_code_for_text, SCOPE_RADIUS) understands both
+# label sets, so old rows and older stations keep working. Setting it to
+# False would bring the old labels back.
+SCOPE_USE_NEW_LABELS = True
 
+# Labels used before the rename. Still needed to decode old DB rows and RF traffic.
 SCOPE_CODE_TO_TEXT_OLD = {
     "1": "My Location",
     "2": "My Community",
@@ -191,8 +212,8 @@ SCOPE_CODE_TO_TEXT_OLD = {
     "5": "Other Location",
 }
 
-# Code "5" has no successor; intentionally absent so it drops out of the
-# combo box once active, while remaining decodable via the OLD map fallback.
+# Current labels. Code "5" has no successor; intentionally absent so it is not
+# offered in the combo box, while remaining decodable via the OLD map fallback.
 SCOPE_CODE_TO_TEXT_NEW = {
     "1": "My QTH",
     "2": "Community",
@@ -217,7 +238,7 @@ SCOPE_CODE_TO_TEXT_DB = {
 
 # Codes no longer offered as a picker choice, but still decodable from
 # legacy DB rows / incoming RF traffic (see scope_text_for_code's fallback).
-# "Other Location" (5) is dropped now, ahead of the full label rename.
+# "Other Location" (5) is retired.
 SCOPE_RETIRED_CODES = {"5"}
 
 # (display, code) pairs for building the Scope QComboBox.
@@ -300,7 +321,7 @@ class ConsoleColors:
 DEFAULT_RSS_FEEDS: Dict[str, str] = {
     "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
     "AP News":    "https://news.google.com/rss/search?q=when:24h+site:apnews.com&hl=en-US&gl=US&ceid=US:en",
-    "BBC World":  "http://feeds.bbci.co.uk/news/world/rss.xml",
+    "BBC World":  "https://feeds.bbci.co.uk/news/world/rss.xml",
     "Fox News":   "https://moxie.foxnews.com/google-publisher/latest.xml",
     "NPR News":   "https://feeds.npr.org/1001/rss.xml",
     "Reuters":    "https://news.google.com/rss/search?q=when:24h+site:reuters.com&hl=en-US&gl=US&ceid=US:en",

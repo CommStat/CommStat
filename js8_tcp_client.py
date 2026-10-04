@@ -16,6 +16,7 @@ from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 from PyQt5.QtNetwork import QTcpSocket, QAbstractSocket
 
 from connector_manager import ConnectorManager
+from constants import SPEED_OPTIONS
 
 
 # Constants
@@ -44,7 +45,7 @@ class JS8CallTCPClient(QObject):
     gave_up = pyqtSignal(str)                     # rig_name - emitted when max reconnect attempts reached
 
     # Speed mode names
-    SPEED_NAMES = {0: "NORMAL", 1: "FAST", 2: "TURBO", 4: "SLOW", 8: "ULTRA"}
+    SPEED_NAMES = {value: label.upper() for label, value in SPEED_OPTIONS}
 
     def __init__(self, rig_name: str, port: int, host: str = DEFAULT_HOST, parent: QObject = None):
         """
@@ -65,6 +66,7 @@ class JS8CallTCPClient(QObject):
         self._auto_reconnect = True
         self._reconnect_attempts = 0
         self._was_connected = False  # Tracks last-emitted connection state
+        self._grid_requested = False  # STATION.GET_GRID is sent once per connection
         self.callsign = ""  # Cached callsign from JS8Call
         self.speed_name = ""  # Cached speed mode name (NORMAL, FAST, TURBO, etc.)
         self.frequency = 0.0  # Cached frequency in MHz
@@ -99,11 +101,42 @@ class JS8CallTCPClient(QObject):
             self.socket.connectToHost(self.host, self.port)
 
     def disconnect_from_host(self) -> None:
-        """Disconnect from JS8Call."""
+        """Disconnect from JS8Call and stop auto-reconnecting."""
+        self._auto_reconnect = False
+        self._reconnect_timer.stop()
+        state = self.socket.state()
+        if state == QAbstractSocket.ConnectedState:
+            self.socket.disconnectFromHost()
+        elif state != QAbstractSocket.UnconnectedState:
+            self.socket.abort()   # still connecting or closing: drop it now
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable this connector.
+
+        Enabled: reset the retry counter, allow auto-reconnect and connect now
+        if down. Disabled: stop retries and drop the socket, so the connector
+        is fully quiescent (even if a connection attempt was in flight)."""
+        self._enabled = enabled
+        self._auto_reconnect = enabled
+        self._reconnect_timer.stop()
+        if enabled:
+            self._reconnect_attempts = 0
+            if not self.is_connected():
+                self.connect_to_host()
+        else:
+            self.disconnect_from_host()
+
+    def shutdown(self) -> None:
+        """Close immediately and stop retrying, before the client is deleted.
+        connection_changed(False) is emitted right away if it was connected."""
         self._auto_reconnect = False
         self._reconnect_timer.stop()
         if self.socket.state() != QAbstractSocket.UnconnectedState:
-            self.socket.disconnectFromHost()
+            self.socket.abort()
 
     def is_connected(self) -> bool:
         """Return True if connected to JS8Call."""
@@ -186,8 +219,9 @@ class JS8CallTCPClient(QObject):
         print(f"[{self.rig_name}] Connected to JS8Call on port {self.port}")
         self._reconnect_timer.stop()
         self._reconnect_attempts = 0
-        self._auto_reconnect = True
+        self._auto_reconnect = self._enabled   # a disabled connector must not come back
         self._was_connected = True
+        self._grid_requested = False
         self.connection_changed.emit(self.rig_name, True)
         # Emit connected message immediately
         self.status_message.emit(
@@ -253,8 +287,12 @@ class JS8CallTCPClient(QObject):
             dial_freq = params.get("DIAL", 0)
             self.frequency = dial_freq / 1000000  # Store dial frequency in MHz
             self.frequency_received.emit(self.rig_name, dial_freq)
-            # Chain to grid request (combined status printed after grid received)
-            self.get_grid()
+            # Chain to the grid request (combined status printed after grid
+            # received), once per connection: JS8Call repeats RIG.FREQ, and the
+            # grid does not change with it.
+            if not self._grid_requested:
+                self._grid_requested = True
+                self.get_grid()
 
         elif msg_type == "MODE.SPEED":
             speed = params.get("SPEED", 0)
@@ -309,16 +347,12 @@ class JS8CallTCPClient(QObject):
             self._was_connected = False
             self.connection_changed.emit(self.rig_name, False)
 
-        # Schedule reconnect on connection errors. _try_reconnect is the single
-        # authority for the attempt cap and give-up.
-        if self._auto_reconnect and error in (
-            QAbstractSocket.ConnectionRefusedError,
-            QAbstractSocket.RemoteHostClosedError,
-            QAbstractSocket.NetworkError
-        ):
-            if not self._reconnect_timer.isActive():
-                print(f"[{self.rig_name}] Will retry in {RECONNECT_INTERVAL_MS // 1000}s...")
-                self._reconnect_timer.start(RECONNECT_INTERVAL_MS)
+        # Schedule a reconnect after any error (refused, host not found, timeout,
+        # network down...), so a JS8Call on another computer is retried too.
+        # _try_reconnect is the single authority for the attempt cap and give-up.
+        if self._auto_reconnect and not self._reconnect_timer.isActive():
+            print(f"[{self.rig_name}] Will retry in {RECONNECT_INTERVAL_MS // 1000}s...")
+            self._reconnect_timer.start(RECONNECT_INTERVAL_MS)
 
     def _give_up_reconnect(self) -> None:
         """Stop auto-reconnect after exhausting attempts. Idempotent: gated by
@@ -343,14 +377,6 @@ class JS8CallTCPClient(QObject):
 
         self._reconnect_attempts += 1
         print(f"[{self.rig_name}] Reconnect attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS}...")
-        self.connect_to_host()
-
-    def manual_reconnect(self) -> None:
-        """Manually trigger reconnection (resets attempt counter)."""
-        self._reconnect_attempts = 0
-        self._auto_reconnect = True
-        self._reconnect_timer.stop()
-        print(f"[{self.rig_name}] Manual reconnect requested...")
         self.connect_to_host()
 
 
@@ -402,7 +428,8 @@ class TCPConnectionPool(QObject):
     def disconnect_all(self) -> None:
         """Disconnect and remove all TCP clients."""
         for client in self.clients.values():
-            client.disconnect_from_host()
+            client.shutdown()
+            client.deleteLater()
         self.clients.clear()
 
     def refresh_connections(self) -> None:
@@ -441,21 +468,8 @@ class TCPConnectionPool(QObject):
                 continue
 
             # Propagate enable-state change to existing client
-            if client._enabled != is_enabled:
-                client._enabled = is_enabled
-                if is_enabled:
-                    # Re-enable: reset attempt counter and reconnect if down
-                    client._reconnect_attempts = 0
-                    client._auto_reconnect = True
-                    if not client.is_connected():
-                        client.connect_to_host()
-                else:
-                    # Disable: stop retries and drop any live socket so the
-                    # connector is fully quiescent, matching disabled-at-startup.
-                    client._auto_reconnect = False
-                    client._reconnect_timer.stop()
-                    if client.is_connected():
-                        client.disconnect_from_host()
+            if client.enabled != is_enabled:
+                client.set_enabled(is_enabled)
 
     def _create_client(self, rig_name: str, port: int, host: str = DEFAULT_HOST, enabled: bool = True) -> None:
         """Create a single TCP client.
@@ -466,8 +480,6 @@ class TCPConnectionPool(QObject):
         auto_connect=0 row).
         """
         client = JS8CallTCPClient(rig_name, port, host, self)
-        client._enabled = enabled
-        client._auto_reconnect = enabled
 
         # Connect signals to aggregate signals
         client.message_received.connect(self.any_message_received)
@@ -478,8 +490,7 @@ class TCPConnectionPool(QObject):
         client.gave_up.connect(self._on_client_gave_up)
 
         self.clients[rig_name] = client
-        if enabled:
-            client.connect_to_host()
+        client.set_enabled(enabled)   # connects now if enabled
 
     def _on_client_gave_up(self, rig_name: str) -> None:
         """Handle client giving up after max reconnect attempts - disable the connector."""
@@ -488,14 +499,15 @@ class TCPConnectionPool(QObject):
             self.connector_manager.set_enabled(conn["id"], False)
             client = self.clients.get(rig_name)
             if client is not None:
-                client._enabled = False
+                client.set_enabled(False)
             print(f"[{rig_name}] Connector disabled. Use Menu > JS8 CONNECTORS to reconnect.")
 
     def _remove_client(self, rig_name: str) -> None:
         """Disconnect and remove a client."""
         if rig_name in self.clients:
             client = self.clients.pop(rig_name)
-            client.disconnect_from_host()
+            client.shutdown()
+            client.deleteLater()
 
     def get_client(self, rig_name: str) -> Optional[JS8CallTCPClient]:
         """
