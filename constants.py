@@ -31,7 +31,6 @@ TELEGRAM_INVITE_URL = "https://t.me/+3k3n7O8a1yI1N2E5"
 # lets edits to files like maintenance.py show up without restarting
 # CommStat. Leave False for normal/shipped runs.
 DEV_RELOAD_DIALOGS = True
-
 WINDOW_TITLE = f"CommStat (v{VERSION}) by N0DDK"
 WINDOW_SIZE = (1360, 768)
 CONFIG_FILE = "config.ini"
