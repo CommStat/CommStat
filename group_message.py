@@ -25,6 +25,7 @@ from constants import (
     COMMSRVR_URL,
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
     COLOR_BTN_CYAN, COLOR_BTN_BLUE, COLOR_BTN_RED, COLOR_BTN_HELP,
+    COLOR_BTN_GREEN, COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
     RIG_FETCH_DELAY_MS,
 )
 from db_utils import db_connect
@@ -256,6 +257,14 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         self.rfi_checkbox.setStyleSheet(
             "QCheckBox { font-family:Roboto; font-size:13px; font-weight:bold;"
             f" color:{_PANEL_FG}; }}"
+            f"QCheckBox::indicator {{ width:16px; height:16px; background-color:white;"
+            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:3px; }}"
+            f"QCheckBox::indicator:checked {{ background-color:{COLOR_BTN_GREEN};"
+            f" border:1px solid {COLOR_BTN_GREEN}; }}"
+            f"QCheckBox::indicator:disabled {{ background-color:{COLOR_DISABLED_BG};"
+            f" border:1px solid {COLOR_INPUT_BORDER}; }}"
+            f"QCheckBox::indicator:checked:disabled {{ background-color:{COLOR_DISABLED_TEXT};"
+            f" border:1px solid {COLOR_DISABLED_TEXT}; }}"
         )
         rfi_row.addWidget(self.rfi_checkbox)
         rfi_row.addStretch()
@@ -443,7 +452,17 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             show_error(self, "Message too short")
             return None
 
-        return (self.callsign.upper(), message)
+        return (self.callsign.upper(), self._apply_rfi_text(message))
+
+    def _apply_rfi_text(self, message: str) -> str:
+        """For an RFI, prefix "RFI - " and append the "||" newline marker, UTC date, and message id.
+        For a group reply, prefix "RFI REPLY - "."""
+        if self._is_grp_reply:
+            return f"RFI REPLY - {message}"
+        if not self.rfi_checkbox.isChecked():
+            return message
+        date = QDateTime.currentDateTimeUtc().toString("yyyy-MM-dd")
+        return f"RFI - {message}||{date} {self.msg_id}"
 
     def _build_message(self, message: str) -> str:
         group  = "@" + self.group_combo.currentText()
@@ -595,7 +614,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             client.send_tx_message(self._pending_message)
 
             message_raw = self.message_edit.toPlainText()
-            message = re.sub(r"[^ -~]+", " ", message_raw)
+            message = self._apply_rfi_text(re.sub(r"[^ -~]+", " ", message_raw))
 
             self._pending_save_data = self._capture_save_data(self.callsign, message, frequency)
 

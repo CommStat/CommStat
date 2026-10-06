@@ -9835,13 +9835,9 @@ window.commstatBouncePin = function(srid) {
                 decoded_remarks = display_value.replace("||", "\n")
                 display_value = display_value.replace("||", " ")
             elif is_message_table and col_num == 7:
-                if "||" in display_value or row_is_rfi:
+                if "||" in display_value:
                     raw_message = display_value      # preserve real body for detail dialog
                 display_value = display_value.replace("||", " ")
-                if rfi_value == 1:
-                    display_value = " REQUEST FOR INFORMATION"
-                elif rfi_value == 2:
-                    display_value = " REQUEST FOR INFORMATION REPLY"
                 decoded_remarks = None
             else:
                 decoded_remarks = None
