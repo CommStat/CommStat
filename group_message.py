@@ -149,7 +149,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         self.msg_id: str         = ""
         self._pending_message: str   = ""
         self._pending_save_data: Optional[dict] = None
-        self._is_grp_reply: bool = False
+        self._is_rfi_reply: bool = False
 
 
         apply_standard_dialog_chrome(self, "Group Message", _WIN_W, _WIN_H)
@@ -167,15 +167,17 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         self._load_config()
         self._load_rigs()
 
-    def set_group_reply_context(self, group_name: str, body: str = "") -> None:
+    def set_group_reply_context(self, group_name: str, body: str = "",
+                                is_rfi_reply: bool = False) -> None:
         """Pre-populate the dialog when opened via 'GRP Reply' from a Message detail view.
 
-        Locks the Group selector to the replied-to group (an RFI reply must go back
-        to the same group), disables the RFI checkbox (a reply is never itself an
-        RFI), and flags the dialog so the transmitted marker gets a trailing "-"
-        (see _build_message) identifying it as a GRP Reply on the wire.
+        Locks the Group selector to the replied-to group (a reply must go back
+        to the same group) and disables the RFI checkbox (a reply is never itself an
+        RFI). When is_rfi_reply is set (the replied-to message has rfi=1), the
+        transmitted marker gets a trailing "-" (see _build_message) identifying it
+        as an RFI Reply on the wire.
         """
-        self._is_grp_reply = True
+        self._is_rfi_reply = is_rfi_reply
         group_name = (group_name or "").strip().lstrip("@").upper()
         if group_name:
             idx = self.group_combo.findText(group_name)
@@ -457,7 +459,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
     def _apply_rfi_text(self, message: str) -> str:
         """For an RFI, prefix "RFI - " and append the "||" newline marker, UTC date, and message id.
         For a group reply, prefix "RFI REPLY - "."""
-        if self._is_grp_reply:
+        if self._is_rfi_reply:
             return f"RFI REPLY - {message}"
         if not self.rfi_checkbox.isChecked():
             return message
@@ -469,7 +471,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         marker = "{^%3}" if self.rig_combo.currentText() == INTERNET_RIG else "{^%}"
         if self.rfi_checkbox.isChecked():
             marker += "+"
-        if self._is_grp_reply:
+        if self._is_rfi_reply:
             marker += "-"
         return f"{group} MSG ,{self.msg_id},{message},{marker}"
 
@@ -489,7 +491,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             'source': 3 if self.rig_combo.currentText() == INTERNET_RIG else 1,
             'target': "@" + self.group_combo.currentText(),
             'msg_id': self.msg_id,
-            'rfi': 2 if self._is_grp_reply else (1 if self.rfi_checkbox.isChecked() else 0),
+            'rfi': 2 if self._is_rfi_reply else (1 if self.rfi_checkbox.isChecked() else 0),
         }
 
     def _save_to_database(self, saved_data: dict, global_id: int = 0) -> None:
@@ -579,7 +581,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             self._pending_save_data = self._capture_save_data(callsign, message, 0)
             now = QDateTime.currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss")
             rfi_suffix = "+" if self.rfi_checkbox.isChecked() else ""
-            grp_reply_suffix = "-" if self._is_grp_reply else ""
+            grp_reply_suffix = "-" if self._is_rfi_reply else ""
             message_data = (
                 f"{callsign}: @{self.group_combo.currentText()}"
                 f" MSG ,{self.msg_id},{message},{{^%3}}{rfi_suffix}{grp_reply_suffix}"
@@ -625,7 +627,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             else:
                 group = "@" + self.group_combo.currentText()
                 rfi_suffix = "+" if self.rfi_checkbox.isChecked() else ""
-                grp_reply_suffix = "-" if self._is_grp_reply else ""
+                grp_reply_suffix = "-" if self._is_rfi_reply else ""
                 message_data = f"{self.callsign}: {group} MSG ,{self.msg_id},{message},{{^%}}{rfi_suffix}{grp_reply_suffix}"
 
                 def _on_radio_commsrvr_complete(global_id: int) -> None:

@@ -2558,7 +2558,7 @@ class MessageDetailDialog(_DetailDialogBase):
             internet_available=self.internet_available,
             parent=self,
         )
-        dlg.set_group_reply_context(self._target, prefill)
+        dlg.set_group_reply_context(self._target, prefill, is_rfi_reply=self._rfi == 1)
         dlg.exec_()
         dlg.deleteLater()
 
