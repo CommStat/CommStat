@@ -251,21 +251,35 @@ class StatRepDialog(RigDialogMixin, QDialog):
         """Set remarks text on the remarks box."""
         self.remarks_edit.setPlainText(text)
 
+    def _clean_remarks(self, text: str) -> str:
+        """Replace newlines with the storage/transmission placeholder and strip
+        characters outside the allowed transmit charset."""
+        cleaned = text.replace('\r\n', NEWLINE_PLACEHOLDER).replace('\n', NEWLINE_PLACEHOLDER).replace('\r', NEWLINE_PLACEHOLDER)
+        return re.sub(r"[^A-Za-z0-9*\-\s|.?!'/:()#@+=&]+", " ", cleaned)
+
     def _on_remarks_text_changed(self) -> None:
-        """Hard-cap remarks at the character limit and refresh the counter."""
+        """Hard-cap remarks at the character limit (measured post-cleaning,
+        with newlines expanded to "||", same as _validate/_build_message) and
+        refresh the counter."""
         max_len = REMARKS_MAX
-        text = self.remarks_edit.toPlainText()
-        if len(text) > max_len:
+        raw = self.remarks_edit.toPlainText()
+        cleaned = self._clean_remarks(raw)
+        if len(cleaned) > max_len:
             cursor = self.remarks_edit.textCursor()
             pos = cursor.position()
-            text = text[:max_len]
+            # Pre-trim to the limit so a large paste doesn't loop char-by-char
+            # over thousands of characters
+            raw = raw[:max_len]
+            while raw and len(self._clean_remarks(raw)) > max_len:
+                raw = raw[:-1]
+            cleaned = self._clean_remarks(raw)
             self.remarks_edit.blockSignals(True)
-            self.remarks_edit.setPlainText(text)
+            self.remarks_edit.setPlainText(raw)
             self.remarks_edit.blockSignals(False)
             cursor = self.remarks_edit.textCursor()
-            cursor.setPosition(min(pos, len(text)))
+            cursor.setPosition(min(pos, len(raw)))
             self.remarks_edit.setTextCursor(cursor)
-        self._update_remarks_count_label(len(text), max_len)
+        self._update_remarks_count_label(len(cleaned), max_len)
 
     def _update_remarks_count_label(self, count: Optional[int] = None, max_len: Optional[int] = None) -> None:
         """Refresh the 'N of MAX' counter next to the Remarks label."""
@@ -274,7 +288,7 @@ class StatRepDialog(RigDialogMixin, QDialog):
         if max_len is None:
             max_len = REMARKS_MAX
         if count is None:
-            count = len(self.remarks_edit.toPlainText())
+            count = len(self._clean_remarks(self.remarks_edit.toPlainText()))
         self.remarks_count_label.setText(f"{count} of {max_len}")
         color = COLOR_BTN_RED if count >= max_len else _COL_COUNTER
         self.remarks_count_label.setStyleSheet(f"color: {color};")
@@ -729,8 +743,9 @@ class StatRepDialog(RigDialogMixin, QDialog):
             self.grid_field.setFocus()
             return False
 
-        # Check remarks length
-        remarks = self._get_remarks_text()
+        # Check remarks length (measured post-cleaning, with newlines expanded
+        # to the 2-char "||" placeholder — that's what is transmitted/stored)
+        remarks = self._clean_remarks(self._get_remarks_text())
         max_len = REMARKS_MAX
         if len(remarks) > max_len:
             show_error(self, f"Remarks too long (max {max_len} characters)")
@@ -959,14 +974,8 @@ class StatRepDialog(RigDialogMixin, QDialog):
         """Build the StatRep message string for transmission."""
         values = self._get_status_values()
         scope_code = self.scope_combo.currentData()
-        raw_remarks = self._get_remarks_text()
-        remarks = raw_remarks
-
-        # Replace newlines with || for storage/transmission
-        remarks = remarks.replace('\r\n', NEWLINE_PLACEHOLDER).replace('\n', NEWLINE_PLACEHOLDER).replace('\r', NEWLINE_PLACEHOLDER)
-
-        # Clean remarks - only alphanumeric, spaces, hyphens, asterisks, and pipe chars
-        remarks = re.sub(r"[^A-Za-z0-9*\-\s|.?!'/:()#@+=&]+", " ", remarks)
+        # Replace newlines with || and clean to the transmit charset
+        remarks = self._clean_remarks(self._get_remarks_text())
 
         # Build status string (all 12 values concatenated)
         status_str = "".join([
@@ -1013,9 +1022,7 @@ class StatRepDialog(RigDialogMixin, QDialog):
             Dict of pre-captured values ready for _save_to_database().
         """
         values = self._get_status_values()
-        remarks = self._get_remarks_text()
-        remarks = remarks.replace('\r\n', NEWLINE_PLACEHOLDER).replace('\n', NEWLINE_PLACEHOLDER).replace('\r', NEWLINE_PLACEHOLDER)
-        remarks = re.sub(r"[^A-Za-z0-9*\-\s|.?!'/:()#@+=&]+", " ", remarks)
+        remarks = self._clean_remarks(self._get_remarks_text())
 
         now = QDateTime.currentDateTimeUtc()
         return {

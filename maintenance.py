@@ -282,3 +282,7 @@ class MaintenanceDialog(QDialog):
 
         if self.isVisible():
             show_help_dialog(self, "Maintenance", message, width=360, height=220)
+            # A successful code is done; closing the popup closes Maintenance too.
+            # Invalid/error results keep it open so the user can try again.
+            if status == "success":
+                self.accept()

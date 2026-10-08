@@ -13,7 +13,7 @@ import sqlite3
 from typing import Optional, TYPE_CHECKING
 
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtCore import QDateTime
+from PyQt5.QtCore import QDateTime, Qt
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QPlainTextEdit,
@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
 MIN_MESSAGE_LENGTH   = 4
 MAX_MESSAGE_LENGTH   = 1500
+NEWLINE_PLACEHOLDER  = "||"
 
 _COMMSRVR = COMMSRVR_URL
 
@@ -60,8 +61,15 @@ _DATA_FG  = DEFAULT_COLORS.get("data_foreground",      "#000000")
 _COL_CANCEL = "#555555"
 _COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
-_WIN_W          = 640
-_WIN_H          = 460
+_WIN_W          = 700  # matches the Incident dialog
+_WIN_H          = 514  # room for the RFI note below the checkbox
+
+# Shown below the RFI checkbox while it is checked (same idea as the Incident
+# dialog's type description).
+_RFI_NOTE = (
+    "RFIs are for emergencies only: a grid-down station requesting information\n"
+    "it cannot obtain itself, such as severe weather, floods, evacuation routes, or wellness checks."
+)
 
 # ── Help content ──────────────────────────────────────────────────────────────
 # Beside the feature it documents. Chrome comes from ui_helpers.
@@ -70,39 +78,34 @@ _HELP_HTML = """
 <div style="font-family: Roboto; font-size: 13px; color: #333333;">
 
 <h3 style="color:#555555;">What Is an RFI?</h3>
-<p>A <b>Request for Information (RFI)</b> is a special CommStat message used
-when an operator needs information, assistance, or help relaying a request.
-When the <b>RFI</b> checkbox is selected, CommStat marks the message as an
-RFI and makes it highly visible so that other operators can quickly
-recognize that someone is actively requesting help. RFIs may be used for
-anything from
-requesting current conditions in another area, locating needed resources,
-obtaining technical or emergency information, or asking another operator to
-help relay a message.</p>
+<p>A <b>Request for Information (RFI)</b> is a CommStat emergency message.
+It is sent on behalf of a <b>grid-down</b> operator who needs information
+they cannot obtain themselves. Checking the <b>RFI</b> box marks the message
+as an RFI and makes it highly visible, so emergency communicators can see
+at a glance that someone needs information or communications help.</p>
 
-<h3 style="color:#555555;">Why It Matters</h3>
-<p>RFIs become especially valuable during a regional communications outage or
-grid-down emergency. For example, an operator inside an affected area may
-have radio communications but no working Internet, cellular service, or
-access to normal information sources. That operator might need information
-about road conditions, fuel availability, shelters, weather, medical
-resources, water safety, or the status of surrounding communities. Another
-operator outside the affected area may still have Internet access and can
-use CommStat to help obtain that information.</p>
+<h3 style="color:#555555;">When to Use It</h3>
+<p>RFIs are reserved for <b>emergency situations</b>, such as a regional
+communications outage, severe weather, or another grid-down event. In these
+situations an operator may still have radio contact but no Internet, cellular
+service, or other normal sources of information. Typical requests include:</p>
+<ul>
+<li>Severe weather reports and forecasts</li>
+<li>Flood and road conditions</li>
+<li>Evacuation routes and shelter locations</li>
+<li>Wellness checks on family or others outside the affected area</li>
+</ul>
+<p>Please do not use the RFI checkbox for routine traffic. Keeping RFIs for
+real emergencies ensures they get immediate attention.</p>
 
 <h3 style="color:#555555;">How an RFI Moves</h3>
-<p>A typical RFI may move through several operators. An operator in the
-affected area sends a request over radio to an <b>RFI Relay Operator</b>. The
-relay operator enters the request into CommStat as an RFI. CommStat users
-monitoring the system can see the highly visible request, research the
-information using available resources, and reply through CommStat. The relay
-operator then transmits the response back over radio to the operator who
-originally requested the information.</p>
-<p>In this way, CommStat can act as an information bridge between an
-isolated area and operators who still have access to outside resources. The
-RFI feature is not limited to major emergencies&mdash;it can be used anytime
-an operator needs information or assistance that other members of the
-CommStat network may be able to provide.</p>
+<p>The grid-down operator sends a request over radio to an
+<b>RFI Relay Operator</b>, who enters it into CommStat as an RFI. Grid-up
+operators monitoring CommStat see the request, gather the information from
+available resources, and reply through CommStat. The relay operator then
+transmits the answer back over radio to the operator who asked.</p>
+<p>In this way, CommStat serves as an information bridge between an isolated
+area and operators who still have access to outside resources.</p>
 
 </div>
 """
@@ -273,6 +276,18 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
 
         body.addLayout(rfi_row)
 
+        # RFI note, shown directly below the checkbox while it is checked
+        self.rfi_note = QLabel("")
+        self.rfi_note.setMinimumHeight(48)  # Two-line note height; keeps layout stable while blank
+        self.rfi_note.setAlignment(Qt.AlignCenter)
+        self.rfi_note.setWordWrap(True)
+        self.rfi_note.setStyleSheet(
+            f"QLabel {{ color:{_PANEL_FG}; background-color:transparent;"
+            f" font-family:Roboto; font-size:15px; padding:2px 10px 4px 10px; }}"
+        )
+        body.addWidget(self.rfi_note)
+        self.rfi_checkbox.toggled.connect(self._on_rfi_toggled)
+
         # Message label + inputs
         msg_row = QHBoxLayout()
         msg_lbl = QLabel("Message:")
@@ -290,7 +305,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
 
         self.message_edit = QPlainTextEdit()
         self.message_edit.setMinimumHeight(160)
-        self.message_edit.setPlaceholderText(f"{MAX_MESSAGE_LENGTH} characters max")
+        self.message_edit.setPlaceholderText(f"{MAX_MESSAGE_LENGTH} characters max, multiple lines allowed")
         self.message_edit.textChanged.connect(self._enforce_message_limit)
         body.addWidget(self.message_edit)
         self._update_message_count_label()
@@ -346,6 +361,9 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         """Explain the Request for Information (RFI) checkbox."""
         show_help_dialog(self, "Group Message Help", _HELP_HTML, width=520)
 
+    def _on_rfi_toggled(self, checked: bool) -> None:
+        self.rfi_note.setText(_RFI_NOTE if checked else "")
+
     def _on_rig_changed(self, rig_name: str) -> None:
         if not rig_name:
             self.callsign = ""
@@ -391,18 +409,28 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             self.callsign = callsign
 
     def _enforce_message_limit(self) -> None:
+        """Hard-cap the message at the character limit (measured post-cleaning,
+        with newlines expanded to "||", same as what is transmitted/stored)
+        and refresh the counter."""
         limit = MAX_MESSAGE_LENGTH
-        text = self.message_edit.toPlainText()
-        if len(text) > limit:
+        raw = self.message_edit.toPlainText()
+        cleaned = self._clean_message(raw)
+        if len(cleaned) > limit:
             cursor = self.message_edit.textCursor()
-            pos = min(cursor.position(), limit)
+            pos = cursor.position()
+            # Pre-trim to the limit so a large paste doesn't loop char-by-char
+            # over thousands of characters
+            raw = raw[:limit]
+            while raw and len(self._clean_message(raw)) > limit:
+                raw = raw[:-1]
+            cleaned = self._clean_message(raw)
             self.message_edit.blockSignals(True)
-            self.message_edit.setPlainText(text[:limit])
-            cursor.setPosition(pos)
-            self.message_edit.setTextCursor(cursor)
+            self.message_edit.setPlainText(raw)
             self.message_edit.blockSignals(False)
-            text = text[:limit]
-        self._update_message_count_label(len(text), limit)
+            cursor = self.message_edit.textCursor()
+            cursor.setPosition(min(pos, len(raw)))
+            self.message_edit.setTextCursor(cursor)
+        self._update_message_count_label(len(cleaned), limit)
 
     def _update_message_count_label(self, count: Optional[int] = None, limit: Optional[int] = None) -> None:
         """Refresh the 'N of MAX' counter next to the Message label."""
@@ -411,7 +439,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         if limit is None:
             limit = MAX_MESSAGE_LENGTH
         if count is None:
-            count = len(self.message_edit.toPlainText())
+            count = len(self._clean_message(self.message_edit.toPlainText()))
         self.message_count_label.setText(f"{count} of {limit}")
         color = COLOR_BTN_RED if count >= limit else _COL_COUNTER
         self.message_count_label.setStyleSheet(
@@ -447,14 +475,20 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             self.group_combo.setFocus()
             return None
 
-        message_raw = self.message_edit.toPlainText()
-        message = re.sub(r"[^ -~]+", " ", message_raw)
+        message = self._clean_message(self.message_edit.toPlainText())
 
         if len(message) < MIN_MESSAGE_LENGTH:
             show_error(self, "Message too short")
             return None
 
         return (self.callsign.upper(), self._apply_rfi_text(message))
+
+    @staticmethod
+    def _clean_message(text: str) -> str:
+        """Encode newlines as "||" (decoded back to newlines in the detail view),
+        then replace any remaining non-printable/non-ASCII runs with a space."""
+        text = text.replace('\r\n', NEWLINE_PLACEHOLDER).replace('\n', NEWLINE_PLACEHOLDER).replace('\r', NEWLINE_PLACEHOLDER)
+        return re.sub(r"[^ -~]+", " ", text)
 
     def _apply_rfi_text(self, message: str) -> str:
         """For an RFI, prefix "RFI - " and append the "||" newline marker, UTC date, and message id.
@@ -615,8 +649,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         try:
             client.send_tx_message(self._pending_message)
 
-            message_raw = self.message_edit.toPlainText()
-            message = self._apply_rfi_text(re.sub(r"[^ -~]+", " ", message_raw))
+            message = self._apply_rfi_text(self._clean_message(self.message_edit.toPlainText()))
 
             self._pending_save_data = self._capture_save_data(self.callsign, message, frequency)
 

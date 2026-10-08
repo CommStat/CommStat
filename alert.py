@@ -46,6 +46,7 @@ MIN_CALLSIGN_LENGTH = 4
 MAX_CALLSIGN_LENGTH = 8
 MAX_TITLE_LENGTH    = 20
 MAX_MESSAGE_LENGTH  = 195
+NEWLINE_PLACEHOLDER = "||"
 
 _COMMSRVR = COMMSRVR_URL
 
@@ -203,7 +204,7 @@ class AlertDialog(RigDialogMixin, QDialog):
         body.addLayout(message_row)
 
         self.message_field = QPlainTextEdit()
-        self.message_field.setPlaceholderText("195 characters max")
+        self.message_field.setPlaceholderText(f"{MAX_MESSAGE_LENGTH} characters max, multiple lines allowed")
         self.message_field.setFixedHeight(86)
         self.message_field.textChanged.connect(self._enforce_message_limit)
         body.addWidget(self.message_field)
@@ -294,25 +295,42 @@ class AlertDialog(RigDialogMixin, QDialog):
             print(f"Error reading groups from database: {e}")
         return []
 
+    @staticmethod
+    def _clean_message(text: str) -> str:
+        """Encode newlines as "||" (decoded back to newlines in the alert display),
+        then replace any remaining non-printable/non-ASCII runs with a space."""
+        text = text.replace('\r\n', NEWLINE_PLACEHOLDER).replace('\n', NEWLINE_PLACEHOLDER).replace('\r', NEWLINE_PLACEHOLDER)
+        return re.sub(r"[^ -~]+", " ", text)
+
     def _enforce_message_limit(self) -> None:
-        text = self.message_field.toPlainText()
-        if len(text) > MAX_MESSAGE_LENGTH:
+        """Hard-cap the message at the character limit (measured post-cleaning,
+        with newlines expanded to "||", same as what is transmitted/stored)
+        and refresh the counter."""
+        raw = self.message_field.toPlainText()
+        cleaned = self._clean_message(raw)
+        if len(cleaned) > MAX_MESSAGE_LENGTH:
             cursor = self.message_field.textCursor()
-            pos = min(cursor.position(), MAX_MESSAGE_LENGTH)
+            pos = cursor.position()
+            # Pre-trim to the limit so a large paste doesn't loop char-by-char
+            # over thousands of characters
+            raw = raw[:MAX_MESSAGE_LENGTH]
+            while raw and len(self._clean_message(raw)) > MAX_MESSAGE_LENGTH:
+                raw = raw[:-1]
+            cleaned = self._clean_message(raw)
             self.message_field.blockSignals(True)
-            self.message_field.setPlainText(text[:MAX_MESSAGE_LENGTH])
-            cursor.setPosition(pos)
-            self.message_field.setTextCursor(cursor)
+            self.message_field.setPlainText(raw)
             self.message_field.blockSignals(False)
-            text = text[:MAX_MESSAGE_LENGTH]
-        self._update_message_count_label(len(text))
+            cursor = self.message_field.textCursor()
+            cursor.setPosition(min(pos, len(raw)))
+            self.message_field.setTextCursor(cursor)
+        self._update_message_count_label(len(cleaned))
 
     def _update_message_count_label(self, count: Optional[int] = None) -> None:
         """Refresh the 'N of MAX' counter next to the Message label."""
         if not hasattr(self, 'message_count_label'):
             return
         if count is None:
-            count = len(self.message_field.toPlainText())
+            count = len(self._clean_message(self.message_field.toPlainText()))
         self.message_count_label.setText(f"{count} of {MAX_MESSAGE_LENGTH}")
         color = COLOR_BTN_RED if count >= MAX_MESSAGE_LENGTH else _COL_COUNTER
         self.message_count_label.setStyleSheet(
@@ -353,7 +371,7 @@ class AlertDialog(RigDialogMixin, QDialog):
             self.title_field.setFocus()
             return None
 
-        message = re.sub(r"[^ -~]+", " ", self.message_field.toPlainText()).strip()
+        message = self._clean_message(self.message_field.toPlainText().strip()).strip()
         if len(message) < 1:
             show_error(self, "Message is required")
             self.message_field.setFocus()

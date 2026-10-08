@@ -987,7 +987,7 @@ class QRZLookupDialog(QDialog):
 
         self.msg_edit = QPlainTextEdit()
         self.msg_edit.setFont(_mono_font())
-        self.msg_edit.setPlaceholderText("Enter message…")
+        self.msg_edit.setPlaceholderText("Enter message, multiple lines allowed")
         self.msg_edit.setStyleSheet(
             f"background-color:white; color:{COLOR_INPUT_TEXT};"
             f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:4px 8px;"

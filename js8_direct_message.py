@@ -337,7 +337,7 @@ class JS8DirectMessageDialog(RigDialogMixin, QDialog):
         layout.addLayout(msg_row)
 
         self.body = QPlainTextEdit()
-        self.body.setPlaceholderText(f"{MAX_MESSAGE_LENGTH} characters max")
+        self.body.setPlaceholderText(f"{MAX_MESSAGE_LENGTH} characters max, multiple lines allowed")
         self.body.installEventFilter(_UpperCaseEventFilter(self.body))
         self.body.textChanged.connect(self._on_body_changed)
         layout.addWidget(self.body, 1)
@@ -694,13 +694,26 @@ class JS8DirectMessageDialog(RigDialogMixin, QDialog):
     # Transmit state + actions
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _clean_message(text: str) -> str:
+        """Encode newlines as "||" (decoded back to newlines in the detail view),
+        then replace any remaining non-printable/non-ASCII runs with a space."""
+        text = text.replace('\r\n', NEWLINE_PLACEHOLDER).replace('\n', NEWLINE_PLACEHOLDER).replace('\r', NEWLINE_PLACEHOLDER)
+        return re.sub(r"[^ -~]+", " ", text)
+
     def _on_body_changed(self) -> None:
         """Force body text to uppercase, cap length at MAX_MESSAGE_LENGTH
-        (handles paste in both cases), then refresh transmit state."""
+        (measured post-cleaning, with newlines expanded to "||", same as what
+        is transmitted/stored; handles paste in both cases), then refresh
+        transmit state."""
         text = self.body.toPlainText()
         normalized = text.upper()
-        if len(normalized) > MAX_MESSAGE_LENGTH:
+        if len(self._clean_message(normalized)) > MAX_MESSAGE_LENGTH:
+            # Pre-trim to the limit so a large paste doesn't loop char-by-char
+            # over thousands of characters
             normalized = normalized[:MAX_MESSAGE_LENGTH]
+            while normalized and len(self._clean_message(normalized)) > MAX_MESSAGE_LENGTH:
+                normalized = normalized[:-1]
         if text != normalized:
             cursor = self.body.textCursor()
             pos = cursor.position()
@@ -710,7 +723,7 @@ class JS8DirectMessageDialog(RigDialogMixin, QDialog):
             cursor = self.body.textCursor()
             cursor.setPosition(min(pos, len(normalized)))
             self.body.setTextCursor(cursor)
-        self._update_message_count_label(len(normalized))
+        self._update_message_count_label(len(self._clean_message(normalized)))
         self._update_transmit_state()
 
     def _update_message_count_label(self, count: int = None) -> None:
@@ -718,7 +731,7 @@ class JS8DirectMessageDialog(RigDialogMixin, QDialog):
         if not hasattr(self, 'message_count_label'):
             return
         if count is None:
-            count = len(self.body.toPlainText())
+            count = len(self._clean_message(self.body.toPlainText()))
         self.message_count_label.setText(f"{count} of {MAX_MESSAGE_LENGTH}")
         color = COLOR_BTN_RED if count >= MAX_MESSAGE_LENGTH else _COL_COUNTER
         self.message_count_label.setStyleSheet(
@@ -787,11 +800,7 @@ class JS8DirectMessageDialog(RigDialogMixin, QDialog):
             show_error(self, "Enter or pick a valid Relay callsign, or leave Relay blank for a direct transmission.")
             return
 
-        raw = self.body.toPlainText().strip()
-        encoded = (raw.replace('\r\n', NEWLINE_PLACEHOLDER)
-                      .replace('\n',   NEWLINE_PLACEHOLDER)
-                      .replace('\r',   NEWLINE_PLACEHOLDER))
-        text = re.sub(r"[^ -~]+", " ", encoded).strip()
+        text = self._clean_message(self.body.toPlainText().strip()).strip()
         if len(text) < MIN_MESSAGE_LENGTH:
             show_error(self, "Message is empty.")
             return

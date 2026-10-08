@@ -5490,13 +5490,14 @@ class MainWindow(QtWidgets.QMainWindow):
             # JS8Call transmits/decodes radio traffic in all-caps, so alert
             # text often arrives as "HTTPS://..." — match case-insensitively
             # or those links would never get highlighted.
-            _parts = re.split(r'(https?://\S+)', message, flags=re.IGNORECASE)
+            # Decode the "||" newline placeholder first so a URL never swallows it.
+            _parts = re.split(r'(https?://\S+)', (message or "").replace("||", "\n"), flags=re.IGNORECASE)
             _msg_html = "".join(
                 f'<a href="{p.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace(chr(34),"&quot;")}"'
                 f' style="color:#00FF00;">'
                 f'{p.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")}</a>'
                 if i % 2 else
-                p.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                p.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
                 for i, p in enumerate(_parts)
             )
             self.alert_message_label.setText(_msg_html)
