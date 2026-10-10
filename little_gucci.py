@@ -3346,7 +3346,6 @@ class MainWindow(QtWidgets.QMainWindow):
         # Left side of the bottom splitter can show Map, Images, or Alerts.
         self.map_stack = QtWidgets.QStackedWidget(self.central_widget)
         self.map_stack.setObjectName("mapStack")
-        self.map_stack.setMinimumSize(320, 180)
 
         # Refit images/alert text after the pane is resized. Debounced via
         # single-shot QTimer to avoid rescaling on every pixel of a drag.
@@ -4388,6 +4387,9 @@ class MainWindow(QtWidgets.QMainWindow):
         data_bg = self.config.get_color('data_background')
         data_fg = self.config.get_color('data_foreground')
 
+        # Cells are read-only: select and right-click copy only.
+        table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+
         table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: {data_bg};
@@ -4872,7 +4874,6 @@ class MainWindow(QtWidgets.QMainWindow):
         """Create the map widget using QWebEngineView."""
         self.map_widget = QWebEngineView(self.central_widget)
         self.map_widget.setObjectName("mapWidget")
-        self.map_widget.setMinimumSize(320, 180)
         self.map_widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
 
         # Set custom page to handle statrep links
@@ -4886,7 +4887,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self._update_map_background_color()
 
         # Add to resizable map stack
-        self.map_widget.setMinimumSize(320, 180)
         self.map_widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         self.map_stack.addWidget(self.map_widget)
 
@@ -4912,7 +4912,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def _setup_map_disabled_label(self) -> None:
         """Create the label/image display shown when map is hidden."""
         self.map_disabled_label = ClickableLabel(self.central_widget)
-        self.map_disabled_label.setMinimumSize(320, 180)
         self.map_disabled_label.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Expanding
@@ -4970,7 +4969,6 @@ class MainWindow(QtWidgets.QMainWindow):
     def _setup_alert_display(self) -> None:
         """Create the alert display widget shown when Show Alerts is enabled."""
         self.alert_display = QtWidgets.QWidget(self.central_widget)
-        self.alert_display.setMinimumSize(320, 180)
         self.alert_display.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding,
             QtWidgets.QSizePolicy.Expanding
@@ -5317,7 +5315,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 QTimer.singleShot(0, lambda: self._set_map_view_mode("contacts"))
 
-    def _unlock_map_pane(self, min_w: int = 604, min_h: int = 340) -> None:
+    def _unlock_map_pane(self, min_w: int = 626, min_h: int = 352) -> None:
         """Make the lower-left pane splitter-resizable with the given minimum."""
         self.map_stack.setMinimumSize(min_w, min_h)
         self.map_stack.setMaximumSize(16777215, 16777215)
@@ -7127,7 +7125,7 @@ class MainWindow(QtWidgets.QMainWindow):
 
         outer.addWidget(self.contacts_table)
 
-        self.contacts_widget.setMinimumSize(320, 180)
+        self.contacts_widget.setMinimumHeight(180)
         self.contacts_widget.setSizePolicy(QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred)
         self.content_splitter.addWidget(self.contacts_widget)
         self.contacts_widget.hide()
