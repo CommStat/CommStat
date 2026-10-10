@@ -967,7 +967,7 @@ class BrevityApp(QMainWindow):
         super().__init__(parent)
         self.panel_bg = panel_bg
         self.panel_fg = panel_fg
-        apply_standard_dialog_chrome(self, "Brevity", 930, 580)
+        apply_standard_dialog_chrome(self, "Brevity", 930, 594)
         self._state = _fresh_state()
         self._activate_state()
         self._setup_ui()
@@ -1030,7 +1030,7 @@ class BrevityApp(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         main = QVBoxLayout(central)
-        main.setContentsMargins(15, 15, 15, 2)
+        main.setContentsMargins(15, 15, 15, 16)
         main.setSpacing(10)
 
         main.addWidget(make_title_strip("Brevity"))
