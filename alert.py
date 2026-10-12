@@ -24,7 +24,7 @@ from constants import (
     SPEED_OPTIONS, INTERNET_RIG,
     COMMSRVR_URL,
     DEFAULT_COLORS,
-    COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_RED,
+    COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_RED, COLOR_BTN_HELP,
 )
 from db_utils import db_connect
 from id_utils import generate_time_based_id
@@ -32,7 +32,7 @@ from transmit_base import RigDialogMixin
 from ui_helpers import (show_error, get_internet_user_settings, make_button, label_font, apply_standard_dialog_chrome, connect_single,
                         make_title_strip, make_combobox, make_input,
                         make_group_combo, make_callsign_combo, link_group_and_callsign,
-                        make_or_label, mark_callsign_favorite)
+                        make_or_label, mark_callsign_favorite, show_help_dialog)
 from commsrvr_client import submit_to_commsrvr
 
 if TYPE_CHECKING:
@@ -58,6 +58,38 @@ _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
 
 _COL_CANCEL = "#555555"
 _COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
+
+# ── Help content ──────────────────────────────────────────────────────────────
+# Lives beside the feature it documents. Chrome comes from ui_helpers.
+
+_HELP_HTML = """
+<div style="font-family: Roboto; font-size: 13px; color: #333333;">
+
+<h3 style="color:#555555;">Group or Callsign</h3>
+<p>Send the alert to a <b>Group</b> or to a single station's
+<b>Callsign</b>. Use one or the other: choosing a group clears the
+Callsign box, and typing a callsign clears the Group box.</p>
+
+<h3 style="color:#555555;">Group</h3>
+<p>The Group box lists the groups you have set up. Pick one to send the alert
+to everyone in that group. Leave it blank to send to a callsign instead.</p>
+
+<h3 style="color:#555555;">Callsign</h3>
+<ul>
+<li>Letters are capitalized as you type.</li>
+<li>Click the arrow at the right end of the box to open your
+<b>Favorites</b>. Picking one fills in the callsign.</li>
+<li>When what you type matches the start of a favorite, the rest is filled in
+and highlighted. Keep typing to replace it, or press <b>Enter</b> to accept
+it.</li>
+<li>A callsign you send an alert to is saved as a favorite, as long as it is
+already in your local QRZ database. You can also check its <b>Fav</b> box in
+the <b>Contacts</b> table.</li>
+</ul>
+
+</div>
+"""
+
 
 _WIN_W = 640
 _WIN_H = 440
@@ -227,6 +259,12 @@ class AlertDialog(RigDialogMixin, QDialog):
         # ── Buttons ───────────────────────────────────────────────────────────
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
+
+        self.help_button = make_button("Help", COLOR_BTN_HELP, min_w=100)
+        self.help_button.setAutoDefault(False)
+        self.help_button.clicked.connect(self._on_help_clicked)
+        btn_row.addWidget(self.help_button)
+
         btn_row.addStretch()
 
         self.save_button = make_button("Save Only", COLOR_BTN_CYAN, min_w=100)
@@ -242,6 +280,9 @@ class AlertDialog(RigDialogMixin, QDialog):
         btn_row.addWidget(self.cancel_button)
 
         body.addLayout(btn_row)
+
+    def _on_help_clicked(self) -> None:
+        show_help_dialog(self, "Alert Help", _HELP_HTML, width=470, height=440)
 
     # =========================================================================
     # Config / DB

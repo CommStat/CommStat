@@ -903,6 +903,20 @@ class _QRZInfoSection(QWidget):
 _QRZ_LOOKUP_HELP_HTML = """
 <div style="font-family: Roboto; font-size: 13px;">
 
+<h3 style="color:#555555;">Privacy, Security and Encryption</h3>
+<p>Direct messages are delivered over the <b>Internet</b>, not over the air.
+Because of this they can be very large. JS8Call can take a minute to
+transmit a single sentence, while CommStat can send several paragraphs in
+<b>less than a second</b>. CommStat checks the server for new messages every
+3 minutes, so a message reaches the recipient within about 3 minutes.</p>
+<p>Every message travels over an encrypted <b>TLS (HTTPS)</b> connection, the
+same industry-standard encryption that protects online banking. CommStat
+verifies the server's security certificate on every connection, so you know
+you are talking to the real CommStat server and not an impostor. Your
+messages are protected in transit from eavesdroppers.</p>
+<p>Private, and built for real communication: send the whole story, not just
+a sentence.</p>
+
 <h3 style="color:#555555;">The Callsign Box</h3>
 <p>Type any callsign and press <b>Enter</b> or click <b>Search</b> to look it
 up. Letters are capitalized as you type.</p>
@@ -1087,7 +1101,7 @@ class QRZLookupDialog(QDialog):
             self.resize(self.width() + (img_width - 275), self.height())
 
     def _on_help_clicked(self) -> None:
-        show_help_dialog(self, f"{self._title} Help", _QRZ_LOOKUP_HELP_HTML, width=560, height=700)
+        show_help_dialog(self, f"{self._title} Help", _QRZ_LOOKUP_HELP_HTML, width=860, height=480)
 
     def _search(self) -> None:
         if self._thread is not None and self._thread.isRunning():

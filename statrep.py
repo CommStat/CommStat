@@ -110,6 +110,22 @@ _HELP_HTML = f"""
 <li><b>Limited Reach</b> &mdash; RF Only</li>
 </ul>
 
+<h3 style="color:#555555;">Group or Callsign</h3>
+<p>Send the report to a <b>Group</b> or to a single station's
+<b>Callsign</b>. Use one or the other: choosing a group clears the
+Callsign box, and typing a callsign clears the Group box.</p>
+<ul>
+<li>Letters in the Callsign box are capitalized as you type.</li>
+<li>Click the arrow at the right end of the box to open your
+<b>Favorites</b>. Picking one fills in the callsign.</li>
+<li>When what you type matches the start of a favorite, the rest is filled in
+and highlighted. Keep typing to replace it, or press <b>Enter</b> to accept
+it.</li>
+<li>A callsign you send a report to is saved as a favorite, as long as it is
+already in your local QRZ database. You can also check its <b>Fav</b> box in
+the <b>Contacts</b> table.</li>
+</ul>
+
 <h3 style="color:#555555;">Color Selection</h3>
 <table cellspacing="0" cellpadding="8" width="100%">
 <tr>
@@ -697,7 +713,7 @@ class StatRepDialog(RigDialogMixin, QDialog):
 
     def _on_help_clicked(self, _link: str = "") -> None:
         """Show a styled help dialog explaining Mode, Delivery, and Color selection."""
-        show_help_dialog(self, "Status Report Help", _HELP_HTML, width=470, height=474)
+        show_help_dialog(self, "Status Report Help", _HELP_HTML, width=470, height=600)
 
     def _validate(self) -> bool:
         """Validate all form fields. Returns True if valid."""
