@@ -830,6 +830,55 @@ class _FilterHeader(QtWidgets.QHeaderView):
         painter.drawLine(strip.left(), strip.bottom(), strip.right(), strip.bottom())
 
 
+class _CenteredCheckDelegate(QtWidgets.QStyledItemDelegate):
+    """Draw an item's check indicator centered in its cell (Qt's default
+    pins it to the left edge) and toggle it on a click inside the box."""
+
+    def _check_rect(self, option: QtWidgets.QStyleOptionViewItem) -> QtCore.QRect:
+        style = option.widget.style() if option.widget else QtWidgets.QApplication.style()
+        w = style.pixelMetric(QtWidgets.QStyle.PM_IndicatorWidth, option, option.widget)
+        h = style.pixelMetric(QtWidgets.QStyle.PM_IndicatorHeight, option, option.widget)
+        r = QtCore.QRect(0, 0, w, h)
+        r.moveCenter(option.rect.center())
+        return r
+
+    def paint(self, painter, option, index) -> None:
+        opt = QtWidgets.QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        style = opt.widget.style() if opt.widget else QtWidgets.QApplication.style()
+        state = index.data(Qt.CheckStateRole)
+        # Background/selection only; the indicator is drawn separately below.
+        opt.features &= ~QtWidgets.QStyleOptionViewItem.HasCheckIndicator
+        opt.text = ""
+        style.drawControl(QtWidgets.QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        if state is None:
+            return
+        check = QtWidgets.QStyleOptionViewItem(opt)
+        check.rect = self._check_rect(option)
+        check.state = (check.state & ~QtWidgets.QStyle.State_HasFocus) | (
+            QtWidgets.QStyle.State_On if state == Qt.Checked else QtWidgets.QStyle.State_Off
+        )
+        style.drawPrimitive(QtWidgets.QStyle.PE_IndicatorViewItemCheck, check, painter, opt.widget)
+
+    def editorEvent(self, event, model, option, index) -> bool:
+        if not (index.flags() & Qt.ItemIsUserCheckable) or not (index.flags() & Qt.ItemIsEnabled):
+            return False
+        etype = event.type()
+        if etype in (QtCore.QEvent.MouseButtonPress, QtCore.QEvent.MouseButtonRelease,
+                     QtCore.QEvent.MouseButtonDblClick):
+            if event.button() != Qt.LeftButton or not self._check_rect(option).contains(event.pos()):
+                return False
+            if etype != QtCore.QEvent.MouseButtonRelease:
+                return True  # swallow so press/double-click don't also toggle
+        elif etype == QtCore.QEvent.KeyPress:
+            if event.key() not in (Qt.Key_Space, Qt.Key_Select):
+                return False
+        else:
+            return False
+        new_state = Qt.Unchecked if index.data(Qt.CheckStateRole) == Qt.Checked else Qt.Checked
+        return model.setData(index, new_state, Qt.CheckStateRole)
+
+
 # =============================================================================
 # Custom Web Engine Page for Map Links
 # =============================================================================
@@ -2349,6 +2398,17 @@ class DatabaseManager:
             return cursor.rowcount > 0
         return self._execute(op, False)
 
+    def set_qrz_favorite(self, callsign: str, is_favorite: bool) -> bool:
+        """Set (1) or clear (0) a contact's favorite flag."""
+        def op(cursor, conn):
+            cursor.execute(
+                "UPDATE qrz SET favorite = ? WHERE callsign = ?",
+                (1 if is_favorite else 0, callsign.strip().upper())
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+        return self._execute(op, False)
+
     def get_qrz_id(self, callsign: str) -> Optional[int]:
         """Get a qrz row id by callsign, or None if not cached."""
         def op(cursor, conn):
@@ -2491,7 +2551,7 @@ class DatabaseManager:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT callsign, name, address, city, state, zip, country, grid, "
+                "SELECT callsign, favorite, name, address, city, state, zip, country, grid, "
                 "class, email, image, memo, insert_date FROM qrz WHERE type = 1 "
                 "ORDER BY insert_date DESC"
             )
@@ -2994,6 +3054,19 @@ class MainWindow(QtWidgets.QMainWindow):
     # connectivity probe runs on a worker thread); this signal hands the change
     # over to the GUI thread.
     _netguard_state_changed = QtCore.pyqtSignal(bool)
+
+    # Contacts table columns; indices below are derived from this list.
+    _CONTACTS_HEADERS = [
+        "Callsign", "Fav", "Name", "Address", "City", "State",
+        "Zip", "Country", "Grid", "Class", "Email", "Image", "Memo", "Date Added",
+        "Delete"
+    ]
+    _CONTACTS_FAV_COL = _CONTACTS_HEADERS.index("Fav")
+    _CONTACTS_NAME_COL = _CONTACTS_HEADERS.index("Name")
+    _CONTACTS_IMAGE_COL = _CONTACTS_HEADERS.index("Image")
+    _CONTACTS_MEMO_COL = _CONTACTS_HEADERS.index("Memo")
+    _CONTACTS_DATE_COL = _CONTACTS_HEADERS.index("Date Added")
+    _CONTACTS_DELETE_COL = _CONTACTS_HEADERS.index("Delete")
 
     def __init__(self, config: ConfigManager, db: DatabaseManager):
         """
@@ -6715,6 +6788,7 @@ class MainWindow(QtWidgets.QMainWindow):
             f"Please close the application to install the update.\n\n"
             f"Close CommStat now?",
             default_yes=True,
+            on_top=True,
         ):
             # Close the application gracefully - this triggers closeEvent() which
             # disconnects TCP connections and saves state
@@ -7056,13 +7130,10 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _setup_contacts_widget(self) -> None:
         """Create the QRZ contacts table widget spanning both map and message columns."""
-        _CONTACTS_HEADERS = [
-            "Callsign", "Name", "Address", "City", "State",
-            "Zip", "Country", "Grid", "Class", "Email", "Image", "Memo", "Date Added",
-            "Delete"
-        ]
-        _MEMO_COL = _CONTACTS_HEADERS.index("Memo")
-        _DELETE_COL = len(_CONTACTS_HEADERS) - 1
+        _CONTACTS_HEADERS = self._CONTACTS_HEADERS
+        _FAV_COL = self._CONTACTS_FAV_COL
+        _MEMO_COL = self._CONTACTS_MEMO_COL
+        _DELETE_COL = self._CONTACTS_DELETE_COL
 
         self.contacts_widget = QtWidgets.QWidget(self.central_widget)
         outer = QtWidgets.QVBoxLayout(self.contacts_widget)
@@ -7086,6 +7157,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.contacts_table.setHorizontalHeader(header)
 
         self._setup_table_widget(self.contacts_table, _CONTACTS_HEADERS)
+        fav_header = QTableWidgetItem("Fav")
+        fav_header.setToolTip("Favorite")
+        self.contacts_table.setHorizontalHeaderItem(_FAV_COL, fav_header)
         self.contacts_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
         self.contacts_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
 
@@ -7106,6 +7180,24 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self._contacts_filters: List[Optional[QtWidgets.QLineEdit]] = []
         for col in range(len(_CONTACTS_HEADERS)):
+            if col == _FAV_COL:
+                # Fav filters with a checkbox (checked = favorites only)
+                # instead of a text box; see _apply_contacts_filter.
+                fav_box = QtWidgets.QWidget()
+                fav_box.setStyleSheet("background-color: white;")
+                fav_layout = QtWidgets.QHBoxLayout(fav_box)
+                fav_layout.setContentsMargins(0, 0, 0, 0)
+                self.contacts_fav_filter = QtWidgets.QCheckBox()
+                self.contacts_fav_filter.setStyleSheet(
+                    "QCheckBox { font-family: Roboto; font-size: 13px; "
+                    "color: #333333; background-color: white; }"
+                )
+                self.contacts_fav_filter.setToolTip("Show favorites only")
+                self.contacts_fav_filter.toggled.connect(self._apply_contacts_filter)
+                fav_layout.addWidget(self.contacts_fav_filter, 0, Qt.AlignCenter)
+                header.add_filter_edit(col, fav_box)
+                self._contacts_filters.append(None)
+                continue
             if col == _DELETE_COL:
                 # No filter box under the action column.
                 self._contacts_filters.append(None)
@@ -7119,6 +7211,10 @@ class MainWindow(QtWidgets.QMainWindow):
         header.set_filter_visible(True)
 
         self.contacts_table.itemClicked.connect(self._on_contacts_item_clicked)
+        self.contacts_table.itemChanged.connect(self._on_contacts_item_changed)
+        self.contacts_table.setItemDelegateForColumn(
+            _FAV_COL, _CenteredCheckDelegate(self.contacts_table)
+        )
         self.contacts_table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.contacts_table.customContextMenuRequested.connect(self._on_contacts_context_menu)
 
@@ -7132,10 +7228,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _load_contacts_data(self) -> None:
         """Populate the contacts table from the QRZ cache."""
-        _IMAGE_COL = 10
-        _MEMO_COL = 11
-        _DATE_COL = 12
-        _DELETE_COL = 13
+        _FAV_COL = self._CONTACTS_FAV_COL
+        _IMAGE_COL = self._CONTACTS_IMAGE_COL
+        _MEMO_COL = self._CONTACTS_MEMO_COL
+        _DATE_COL = self._CONTACTS_DATE_COL
+        _DELETE_COL = self._CONTACTS_DELETE_COL
 
         data_fg = self.config.get_color('data_foreground')
         kode_font = QtGui.QFont("Kode Mono", -1)
@@ -7146,10 +7243,12 @@ class MainWindow(QtWidgets.QMainWindow):
 
         rows = self.db.get_qrz_contacts()
 
-        col_keys = ["callsign", "name", "address", "city", "state",
+        col_keys = ["callsign", "favorite", "name", "address", "city", "state",
                     "zip", "country", "grid", "class", "email", "image", "memo",
                     "insert_date"]
 
+        # Populating Fav checkboxes fires itemChanged; keep it from writing back.
+        self.contacts_table.blockSignals(True)
         self.contacts_table.setUpdatesEnabled(False)
         self.contacts_table.setRowCount(len(rows))
 
@@ -7157,7 +7256,14 @@ class MainWindow(QtWidgets.QMainWindow):
             for col, key in enumerate(col_keys):
                 raw = row[key] if row[key] is not None else ""
 
-                if col == _IMAGE_COL:
+                if col == _FAV_COL:
+                    item = QTableWidgetItem("")
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+                    item.setCheckState(Qt.Checked if raw == 1 else Qt.Unchecked)
+                    item.setToolTip("Favorite")
+                    self.contacts_table.setItem(table_row, col, item)
+                    continue
+                elif col == _IMAGE_COL:
                     if raw:
                         item = QTableWidgetItem("View")
                         item.setForeground(QColor("#0078d7"))
@@ -7197,11 +7303,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self.contacts_table.setItem(table_row, _DELETE_COL, del_item)
 
         self.contacts_table.setUpdatesEnabled(True)
+        self.contacts_table.blockSignals(False)
         self.contacts_table.resizeColumnsToContents()
         self.contacts_table.setColumnWidth(_MEMO_COL, 160)  # Fixed column; content-resize ignored
 
         # Cap narrow columns that ResizeToContents makes too wide
-        _MAX_WIDTHS = {4: 55, 5: 70, 7: 70, 8: 60, 10: 55}
+        h = self._CONTACTS_HEADERS
+        _MAX_WIDTHS = {h.index("State"): 55, h.index("Zip"): 70, h.index("Grid"): 70,
+                       h.index("Class"): 60, _IMAGE_COL: 55}
         header = self.contacts_table.horizontalHeader()
         for col, max_w in _MAX_WIDTHS.items():
             if header.sectionSize(col) > max_w:
@@ -7235,6 +7344,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.contacts_table,
             {col: edit.text() for col, edit in enumerate(self._contacts_filters) if edit},
         )
+        if self.contacts_fav_filter.isChecked():
+            table = self.contacts_table
+            for row in range(table.rowCount()):
+                fav = table.item(row, self._CONTACTS_FAV_COL)
+                if fav is None or fav.checkState() != Qt.Checked:
+                    table.setRowHidden(row, True)
         self._update_contacts_count_label()
 
     def _update_contacts_count_label(self) -> None:
@@ -7244,7 +7359,7 @@ class MainWindow(QtWidgets.QMainWindow):
         table = self.contacts_table
         count = sum(1 for row in range(table.rowCount()) if not table.isRowHidden(row))
         table.setHorizontalHeaderItem(
-            1, QTableWidgetItem(f"Name   ({count} Records)")
+            self._CONTACTS_NAME_COL, QTableWidgetItem(f"Name   ({count} Records)")
         )
 
     @_guard_slot
@@ -7270,11 +7385,14 @@ class MainWindow(QtWidgets.QMainWindow):
                 dlg.exec_()
                 dlg.deleteLater()
                 self.contacts_table.viewport().setFocus()
-        elif col == 10:
+        elif col == self._CONTACTS_FAV_COL:
+            # Checkbox toggles are handled in _on_contacts_item_changed.
+            pass
+        elif col == self._CONTACTS_IMAGE_COL:
             url = item.data(Qt.UserRole)
             if url:
                 self._open_external_link(url, "Contact link")
-        elif col == 12:
+        elif col == self._CONTACTS_DELETE_COL:
             from ui_helpers import confirm
             cs_item = self.contacts_table.item(item.row(), 0)
             callsign = cs_item.text().strip() if cs_item else ""
@@ -7287,6 +7405,19 @@ class MainWindow(QtWidgets.QMainWindow):
             text = item.text().strip()
             if text and text != "—":
                 QtWidgets.QApplication.clipboard().setText(text)
+
+    @_guard_slot
+    def _on_contacts_item_changed(self, item: QTableWidgetItem) -> None:
+        """Save a Fav checkbox toggle to qrz.favorite."""
+        if item.column() != self._CONTACTS_FAV_COL:
+            return
+        cs_item = self.contacts_table.item(item.row(), 0)
+        callsign = cs_item.text().strip() if cs_item else ""
+        if callsign:
+            self.db.set_qrz_favorite(callsign, item.checkState() == Qt.Checked)
+        if self.contacts_fav_filter.isChecked():
+            # Favorites-only view: an unchecked row drops out right away.
+            self._apply_contacts_filter()
 
     def _on_contacts_context_menu(self, pos) -> None:
         """Show right-click context menu with Copy option for contacts table."""
@@ -10839,7 +10970,7 @@ window.commstatBouncePin = function(srid) {
         client.send_tx_message(ack_message)
         print(f"[{rig_name}] Sent STATREP ack: {ack_message}")
 
-        ack_note = f"||||ACK sent to {group} by {my_callsign}"
+        ack_note = f" ACK sent to {group} by {my_callsign}"
         row_id = None
         try:
             with db_connect() as conn:

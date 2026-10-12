@@ -28,7 +28,9 @@ from db_utils import db_connect
 from id_utils import generate_time_based_id
 from transmit_base import RigDialogMixin
 from ui_helpers import (show_error, show_info, get_internet_user_settings, make_title_strip, make_button, label_font, mono_font, apply_standard_dialog_chrome,
-                        connect_single, show_help_dialog, make_combobox, make_input)
+                        connect_single, show_help_dialog, make_combobox, make_input,
+                        make_group_combo, make_callsign_combo, link_group_and_callsign,
+                        make_or_label, mark_callsign_favorite)
 from commsrvr_client import submit_to_commsrvr
 
 if TYPE_CHECKING:
@@ -305,18 +307,15 @@ class StatRepDialog(RigDialogMixin, QDialog):
         return []
 
     def _get_group_target(self) -> str:
-        """Build the transmit/DB target from the Group-or-Callsign field.
+        """Build the transmit/DB target from the Group and Callsign boxes.
 
-        A saved group is prefixed with '@' (matches the '@GROUP' convention
-        parsed app-wide); an unrecognized entry is treated as a manually
-        typed callsign and sent bare, same as Alert's '_get_target'."""
-        text = self.to_combo.currentText().strip()
-        if not text:
-            return ""
-        known_groups = {g.strip().upper() for g in self._get_all_groups_from_db()}
-        if text.upper() in known_groups:
-            return f"@{text}"
-        return text.upper()
+        A callsign is sent bare; otherwise the group is prefixed with '@'
+        (the '@GROUP' convention parsed app-wide). "" when neither is set."""
+        callsign = self.callsign_combo.currentText().strip().upper()
+        if callsign:
+            return callsign
+        group = self.group_combo.currentText().strip()
+        return f"@{group}" if group else ""
 
     def _on_rig_changed(self, rig_name: str) -> None:
         """Handle rig selection change - fetch callsign and grid from JS8Call."""
@@ -497,62 +496,57 @@ class StatRepDialog(RigDialogMixin, QDialog):
         rig_row.setSpacing(8)
 
         self.rig_combo = make_combobox([], list_popup=True)
-        self.rig_combo.setMinimumWidth(180)
         self.rig_combo.currentTextChanged.connect(self._on_rig_changed)
-        rig_row.addLayout(_labeled_col("Rig:", self.rig_combo))
+        rig_row.addLayout(_labeled_col("Rig:", self.rig_combo), 3)
 
         self.mode_combo = make_combobox(
             SPEED_OPTIONS,
             list_popup=True,
         )
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        rig_row.addLayout(_labeled_col("Mode:", self.mode_combo))
+        rig_row.addLayout(_labeled_col("Mode:", self.mode_combo), 2)
 
         self.freq_field = make_input(read_only=True)
-        self.freq_field.setMaximumWidth(100)
-        rig_row.addLayout(_labeled_col("Freq:", self.freq_field))
+        rig_row.addLayout(_labeled_col("Freq:", self.freq_field), 2)
 
         self.delivery_combo = make_combobox(
             [("Maximum Reach", None), ("Limited Reach", None)], list_popup=True
         )
-        rig_row.addLayout(_labeled_col("Delivery:", self.delivery_combo))
+        rig_row.addLayout(_labeled_col("Delivery:", self.delivery_combo), 3)
 
-        rig_row.addStretch()
+        self.scope_combo = make_combobox(list(SCOPE_OPTIONS), list_popup=True)
+        rig_row.addLayout(_labeled_col("Scope:", self.scope_combo), 3)
+
         layout.addLayout(rig_row)
 
-        # ── Header row: From | To | Grid | Scope ────────────────────────
+        # ── Header row: From | Group  or  Callsign | Grid ───────────────
         header_grid = QtWidgets.QGridLayout()
         header_grid.setSpacing(8)
-        for col in range(4):
-            header_grid.setColumnStretch(col, 1)
 
-        def _add_header_cell(col, label_text, widget):
+        def _add_header_cell(col, label_text, widget, stretch):
             lbl = QtWidgets.QLabel(label_text)
             lbl.setFont(label_font())
             header_grid.addWidget(lbl, 0, col)
             header_grid.addWidget(widget, 1, col)
+            header_grid.setColumnStretch(col, stretch)
 
         self.from_field = make_input(default=self.callsign)
         self.from_field.textChanged.connect(self._on_from_field_changed)
         make_uppercase(self.from_field)
-        _add_header_cell(0, "From:", self.from_field)
+        _add_header_cell(0, "From:", self.from_field, 2)
 
-        all_groups = self._get_all_groups_from_db()
-        if len(all_groups) == 1:
-            to_items = all_groups
-        else:
-            to_items = [""] + list(all_groups)
-        self.to_combo = make_combobox(
-            [(g, None) for g in to_items], list_popup=True, editable=True
-        )
-        _add_header_cell(1, "Group or Callsign:", self.to_combo)
+        self.group_combo = make_group_combo(self._get_all_groups_from_db())
+        _add_header_cell(1, "Group:", self.group_combo, 3)
+
+        header_grid.addWidget(make_or_label(), 1, 2)
+
+        self.callsign_combo = make_callsign_combo()
+        _add_header_cell(3, "Callsign:", self.callsign_combo, 3)
+        link_group_and_callsign(self.group_combo, self.callsign_combo)
 
         self.grid_field = make_input(default=self.grid, max_len=6)
         self.grid_field.textChanged.connect(self._on_grid_field_changed)
-        _add_header_cell(2, "Grid:", self.grid_field)
-
-        self.scope_combo = make_combobox(list(SCOPE_OPTIONS), list_popup=True)
-        _add_header_cell(3, "Scope:", self.scope_combo)
+        _add_header_cell(4, "Grid:", self.grid_field, 2)
 
         layout.addLayout(header_grid)
 
@@ -715,10 +709,9 @@ class StatRepDialog(RigDialogMixin, QDialog):
             return False
 
         # Check group/callsign is entered
-        group_name = self.to_combo.currentText()
-        if not group_name or group_name == "":
+        if not self._get_group_target():
             show_error(self, "Please select a Group or enter a Callsign")
-            self.to_combo.setFocus()
+            self.group_combo.setFocus()
             return False
 
         # Check all status fields are selected
@@ -1140,7 +1133,7 @@ class StatRepDialog(RigDialogMixin, QDialog):
             print(f"STATREP SAVED - {now} UTC")
             print(f"{'='*60}")
             print(f"  ID:       {self.statrep_id}")
-            print(f"  To:       {self.to_combo.currentText()}")
+            print(f"  To:       {self._get_group_target()}")
             print(f"  From:     {self.callsign}")
             print(f"  Grid:     {self.grid}")
             print(f"  Scope:    {self.scope_combo.currentText()}")
@@ -1158,6 +1151,8 @@ class StatRepDialog(RigDialogMixin, QDialog):
         self._generate_statrep_id()
         if not self._validate():
             return
+
+        mark_callsign_favorite(self.callsign_combo.currentText())
 
         rig_name = self.rig_combo.currentText()
 
@@ -1189,7 +1184,7 @@ class StatRepDialog(RigDialogMixin, QDialog):
             print(f"STATREP TRANSMITTED (Internet) - {now} UTC")
             print(f"{'='*60}")
             print(f"  ID:       {self.statrep_id}")
-            print(f"  To:       {self.to_combo.currentText()}")
+            print(f"  To:       {self._get_group_target()}")
             print(f"  From:     {self.callsign}")
             print(f"  Grid:     {self.grid}")
             print(f"  Scope:    {self.scope_combo.currentText()}")
@@ -1242,7 +1237,7 @@ class StatRepDialog(RigDialogMixin, QDialog):
             print(f"STATREP TRANSMITTED - {now} UTC")
             print(f"{'='*60}")
             print(f"  ID:       {self.statrep_id}")
-            print(f"  To:       {self.to_combo.currentText()}")
+            print(f"  To:       {self._get_group_target()}")
             print(f"  From:     {self.callsign}")
             print(f"  Grid:     {self.grid}")
             print(f"  Scope:    {self.scope_combo.currentText()}")

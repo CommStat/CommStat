@@ -15,7 +15,7 @@ from typing import Optional, TYPE_CHECKING
 from PyQt5 import QtWidgets
 from PyQt5.QtCore import QDateTime
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout,
+    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QComboBox,
     QPlainTextEdit,
 )
@@ -30,7 +30,9 @@ from db_utils import db_connect
 from id_utils import generate_time_based_id
 from transmit_base import RigDialogMixin
 from ui_helpers import (show_error, get_internet_user_settings, make_button, label_font, apply_standard_dialog_chrome, connect_single,
-                        make_title_strip, make_combobox, make_input)
+                        make_title_strip, make_combobox, make_input,
+                        make_group_combo, make_callsign_combo, link_group_and_callsign,
+                        make_or_label, mark_callsign_favorite)
 from commsrvr_client import submit_to_commsrvr
 
 if TYPE_CHECKING:
@@ -101,7 +103,6 @@ class AlertDialog(RigDialogMixin, QDialog):
 
         self._setup_ui()
         self._generate_alert_id()
-        self._load_config()
         self._load_rigs()
 
         self.rig_combo.currentTextChanged.connect(self._on_rig_changed)
@@ -162,19 +163,30 @@ class AlertDialog(RigDialogMixin, QDialog):
         settings_row.addStretch()
         body.addLayout(settings_row)
 
-        # ── Target ────────────────────────────────────────────────────────────
-        target_lbl = QLabel("Group or Callsign:")
-        target_lbl.setFont(label_font())
-        body.addWidget(target_lbl)
+        # ── Target: Group  or  Callsign ──────────────────────────────────────
+        target_grid = QGridLayout()
+        target_grid.setHorizontalSpacing(8)
+        target_grid.setVerticalSpacing(2)
 
-        target_row = QHBoxLayout()
-        target_row.setSpacing(8)
+        group_lbl = QLabel("Group:")
+        group_lbl.setFont(label_font())
+        target_grid.addWidget(group_lbl, 0, 0)
+        self.group_combo = make_group_combo(self._get_all_groups_from_db())
+        self.group_combo.setFixedWidth(200)
+        target_grid.addWidget(self.group_combo, 1, 0)
 
-        self.to_combo = make_combobox([], list_popup=True, editable=True)
-        self.to_combo.setMinimumWidth(200)
-        target_row.addWidget(self.to_combo)
-        target_row.addStretch()
-        body.addLayout(target_row)
+        target_grid.addWidget(make_or_label(), 1, 1)
+
+        callsign_lbl = QLabel("Callsign:")
+        callsign_lbl.setFont(label_font())
+        target_grid.addWidget(callsign_lbl, 0, 2)
+        self.callsign_combo = make_callsign_combo()
+        self.callsign_combo.setFixedWidth(200)
+        target_grid.addWidget(self.callsign_combo, 1, 2)
+        link_group_and_callsign(self.group_combo, self.callsign_combo)
+
+        target_grid.setColumnStretch(3, 1)
+        body.addLayout(target_grid)
 
         # ── Color combo (functional, not displayed) ───────────────────────────
         self.color_combo = QComboBox()
@@ -234,15 +246,6 @@ class AlertDialog(RigDialogMixin, QDialog):
     # =========================================================================
     # Config / DB
     # =========================================================================
-
-    def _load_config(self) -> None:
-        all_groups = self._get_all_groups_from_db()
-        if len(all_groups) == 1:
-            self.to_combo.addItem(all_groups[0])
-        else:
-            self.to_combo.addItem("")
-            for group in all_groups:
-                self.to_combo.addItem(group)
 
     def _on_rig_changed(self, rig_name: str) -> None:
         if not rig_name:
@@ -338,18 +341,15 @@ class AlertDialog(RigDialogMixin, QDialog):
         )
 
     def _get_target(self) -> str:
-        """Build the transmit/DB target from the Group-or-Callsign field.
+        """Build the transmit/DB target from the Group and Callsign boxes.
 
-        A saved group is prefixed with '@' (matches the '@GROUP' convention
-        parsed app-wide); an unrecognized entry is treated as a manually
-        typed callsign and sent bare, same as StatRep's '_get_group_target'."""
-        text = self.to_combo.currentText().strip()
-        if not text:
-            return ""
-        known_groups = {g.strip().upper() for g in self._get_all_groups_from_db()}
-        if text.upper() in known_groups:
-            return f"@{text.upper()}"
-        return text.upper()
+        A callsign is sent bare; otherwise the group is prefixed with '@'
+        (the '@GROUP' convention parsed app-wide). "" when neither is set."""
+        callsign = self.callsign_combo.currentText().strip().upper()
+        if callsign:
+            return callsign
+        group = self.group_combo.currentText().strip()
+        return f"@{group.upper()}" if group else ""
 
     def _validate_input(self, validate_callsign: bool = True) -> Optional[tuple]:
         rig_name = self.rig_combo.currentText()
@@ -360,7 +360,7 @@ class AlertDialog(RigDialogMixin, QDialog):
 
         if not self._get_target():
             show_error(self, "Please select a Group or enter a Target Callsign")
-            self.to_combo.setFocus()
+            self.group_combo.setFocus()
             return None
 
         color_value = self.color_combo.currentData()
@@ -465,6 +465,8 @@ class AlertDialog(RigDialogMixin, QDialog):
         result = self._validate_input(validate_callsign=False)
         if result is None:
             return
+
+        mark_callsign_favorite(self.callsign_combo.currentText())
 
         rig_name = self.rig_combo.currentText()
         callsign, color, title, message = result

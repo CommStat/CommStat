@@ -51,7 +51,7 @@ from little_gucci import MAP_WHEEL_PX_PER_ZOOM
 from ssl_utils import create_verified_ssl_context
 from ui_helpers import (
     apply_standard_dialog_chrome, connect_single, make_button, make_input, make_title_strip,
-    show_help_dialog, open_external_url,
+    show_help_dialog, open_external_url, make_callsign_combo, mark_callsign_favorite,
 )
 
 _COMMSRVR_URL  = COMMSRVR_URL
@@ -898,6 +898,43 @@ class _QRZInfoSection(QWidget):
 
 # ── Dialog 1: Standalone QRZ Lookup ───────────────────────────────────────
 
+# Help for the callsign box. Beside the feature it documents; chrome comes
+# from ui_helpers.
+_QRZ_LOOKUP_HELP_HTML = """
+<div style="font-family: Roboto; font-size: 13px;">
+
+<h3 style="color:#555555;">The Callsign Box</h3>
+<p>Type any callsign and press <b>Enter</b> or click <b>Search</b> to look it
+up. Letters are capitalized as you type.</p>
+<p>Click the arrow at the right end of the box to open your
+<b>Favorites</b>. Each row shows the callsign, name, address, city, and
+state. Picking a favorite fills in just the callsign and looks it up right
+away.</p>
+<p>When what you type matches the start of a favorite, the rest of the
+callsign is filled in for you and highlighted. Keep typing to replace it, or
+press <b>Enter</b> to accept it.</p>
+
+<h3 style="color:#555555;">How a Callsign Becomes a Favorite</h3>
+<ul>
+<li>Check its <b>Fav</b> box in the <b>Contacts</b> table (the Contacts
+button below the map).</li>
+<li>Send it a message from this window, or send to it from the
+<b>Callsign</b> box in Status Report, Alerts, or Share YouTube Video.</li>
+</ul>
+<p>Only callsigns already saved in your local QRZ database can become
+favorites. A successful lookup here saves the callsign, so a station you
+have looked up is added when you send to it.</p>
+
+<h3 style="color:#555555;">Where Lookups Come From</h3>
+<p>Your local QRZ database is checked first. QRZ.com is only contacted when
+the saved record is missing or out of date <b>and</b> you have a QRZ XML
+subscription set up in QRZ Settings. Without a subscription, the saved record
+is used no matter how old it is.</p>
+
+</div>
+"""
+
+
 class QRZLookupDialog(QDialog):
     """QRZ callsign lookup and Internet direct message (QRZ menu, Transmit > Internet Tools)."""
 
@@ -958,11 +995,23 @@ class QRZLookupDialog(QDialog):
         main.addWidget(make_title_strip(self._title, self._program_bg, self._program_fg))
 
         row = QHBoxLayout()
-        self.cs_edit = make_input(placeholder="Enter callsign…", max_len=15)
-        self.cs_edit.setMinimumHeight(34)
+        # Callsign box: favorites dropdown ("CALLSIGN, Name, Address, City,
+        # State" - the box is wide enough) or type any callsign. cs_edit is
+        # the combo's own uppercasing line edit, so callers that do
+        # dlg.cs_edit.setText(...) keep working.
+        self.cs_combo = make_callsign_combo(with_address=True)
+        self.cs_combo.setMinimumHeight(34)
+        self.cs_edit = self.cs_combo.lineEdit()
+        # The dialog-wide QLineEdit rule would draw a second box inside the combo.
+        self.cs_edit.setStyleSheet(
+            f"QLineEdit {{ background-color:transparent; color:{COLOR_INPUT_TEXT}; border:none;"
+            f" padding:0px; font-family:'Kode Mono'; font-size:13px; }}"
+        )
+        self.cs_edit.setPlaceholderText("Enter callsign…")
+        self.cs_edit.setMaxLength(15)
         self.cs_edit.returnPressed.connect(self._search)
-        self.cs_edit.textChanged.connect(self._force_upper)
-        row.addWidget(self.cs_edit)
+        self.cs_combo.activated.connect(lambda _i: self._search())
+        row.addWidget(self.cs_combo)
 
         self.btn_search = make_button("Search", COLOR_BTN_BLUE)
         self.btn_search.setFixedWidth(90)
@@ -1022,6 +1071,10 @@ class QRZLookupDialog(QDialog):
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
+        self.btn_help = make_button("Help", COLOR_BTN_HELP, 60)
+        self.btn_help.setAutoDefault(False)
+        self.btn_help.clicked.connect(self._on_help_clicked)
+        btn_row.addWidget(self.btn_help)
         btn_row.addStretch()
         if self._internet_available:
             btn_row.addWidget(self.btn_clear_msg)
@@ -1033,13 +1086,8 @@ class QRZLookupDialog(QDialog):
         if img_width > 275:
             self.resize(self.width() + (img_width - 275), self.height())
 
-    def _force_upper(self, text: str) -> None:
-        if text != text.upper():
-            self.cs_edit.blockSignals(True)
-            pos = self.cs_edit.cursorPosition()
-            self.cs_edit.setText(text.upper())
-            self.cs_edit.setCursorPosition(pos)
-            self.cs_edit.blockSignals(False)
+    def _on_help_clicked(self) -> None:
+        show_help_dialog(self, f"{self._title} Help", _QRZ_LOOKUP_HELP_HTML, width=560, height=700)
 
     def _search(self) -> None:
         if self._thread is not None and self._thread.isRunning():
@@ -1148,6 +1196,7 @@ class QRZLookupDialog(QDialog):
         text = self._sanitize_message(self.msg_edit.toPlainText())
         if not cs or not text:
             return
+        mark_callsign_favorite(cs)
         my_cs = _get_local_callsign()
         if not my_cs:
             QMessageBox.warning(self, "Send Failed", "No operator callsign configured in Settings.")

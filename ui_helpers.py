@@ -130,8 +130,14 @@ def get_internet_user_settings() -> Tuple[str, str, str]:
 
 def confirm(parent, title: str, text: str,
             yes_label: str = "Yes", no_label: str = "No",
-            default_yes: bool = False) -> bool:
-    """Styled Yes/No confirmation. Returns True if user clicked the affirmative button."""
+            default_yes: bool = False, on_top: bool = False) -> bool:
+    """Styled Yes/No confirmation. Returns True if user clicked the affirmative button.
+
+    on_top: for prompts that can fire unprompted while feature modules are open
+    (those are WindowStaysOnTopHint windows). The box becomes application-modal
+    and stay-on-top, and is raised once shown, so it lands above every module and
+    any popup already open instead of hiding behind them and blocking the app.
+    """
     box = QMessageBox(parent)
     box.setWindowTitle(title)
     box.setText(text)
@@ -140,6 +146,11 @@ def confirm(parent, title: str, text: str,
     box.addButton(yes_btn, QMessageBox.YesRole)
     box.addButton(no_btn, QMessageBox.NoRole)
     box.setDefaultButton(yes_btn if default_yes else no_btn)
+    if on_top:
+        box.setWindowModality(Qt.ApplicationModal)
+        box.setWindowFlag(Qt.WindowStaysOnTopHint)
+        # Shown last among stay-on-top windows, so raising puts it above them all.
+        QTimer.singleShot(0, lambda: (box.raise_(), box.activateWindow()))
     box.exec_()
     answered_yes = box.clickedButton() is yes_btn
     box.deleteLater()
@@ -390,6 +401,119 @@ def make_combobox(items, list_popup: bool = False, editable: bool = False,
         # setLineEdit() must come after setEditable(True); it replaces the editor.
         cb.setLineEdit(UpperCaseLineEdit(cb))
     return cb
+
+
+# ── Group / Callsign target pair ───────────────────────────────────────────────
+# Transmit dialogs (Status Report, Alerts, YouTube) address either a group or
+# a single callsign: a Group combo, the word "or", and a Callsign combo that
+# lists the operator's qrz favorites.
+
+def get_favorite_callsigns(with_address: bool = False) -> list:
+    """Return [(callsign, details), ...] for qrz rows marked favorite, by
+    callsign. details is the name, or with *with_address* "name, address,
+    city, state" (blank parts skipped)."""
+    try:
+        with db_connect() as conn:
+            rows = conn.execute(
+                "SELECT callsign, name, address, city, state FROM qrz "
+                "WHERE favorite = 1 ORDER BY callsign"
+            ).fetchall()
+    except sqlite3.Error as e:
+        print(f"Error reading favorite callsigns: {e}")
+        return []
+    favorites = []
+    for cs, *parts in rows:
+        if not cs:
+            continue
+        if not with_address:
+            parts = parts[:1]
+        details = ", ".join(p.strip() for p in parts if p and p.strip())
+        favorites.append((cs.strip().upper(), details))
+    return favorites
+
+
+def mark_callsign_favorite(callsign: str) -> None:
+    """Set qrz.favorite = 1 for *callsign*. A callsign with no qrz row is left alone."""
+    callsign = (callsign or "").strip().upper()
+    if not callsign:
+        return
+    try:
+        with db_connect() as conn:
+            conn.execute("UPDATE qrz SET favorite = 1 WHERE callsign = ?", (callsign,))
+    except sqlite3.Error as e:
+        print(f"Error marking {callsign} as favorite: {e}")
+
+
+class _CallsignNameDelegate(QStyledItemDelegate):
+    """Popup rows read "CALLSIGN, details" while the item text (what lands in
+    the combo's line edit when picked) stays the bare callsign."""
+
+    def initStyleOption(self, option, index) -> None:
+        super().initStyleOption(option, index)
+        details = index.data(Qt.UserRole)
+        if option.text and details:
+            option.text = f"{option.text}, {details}"
+
+
+def make_callsign_combo(with_address: bool = False) -> QComboBox:
+    """Editable, uppercasing Callsign combo listing qrz favorites as
+    "CALLSIGN, Name" (plus address, city, state with *with_address*, for wide
+    boxes). Picking one fills in just the callsign; any callsign can also be
+    typed."""
+    favorites = get_favorite_callsigns(with_address)
+    cb = make_combobox([("", None)] + favorites, list_popup=True, editable=True)
+    cb.setItemDelegate(_CallsignNameDelegate(cb))
+    # The popup sizes itself from the bare callsigns; widen it for the names.
+    font = QtGui.QFont(FONT_MONO)
+    font.setPixelSize(13)
+    metrics = QtGui.QFontMetrics(font)
+    widest = max((metrics.horizontalAdvance(f"{cs}, {name}") for cs, name in favorites), default=0)
+    if widest:
+        cb.view().setMinimumWidth(widest + 40)
+    return cb
+
+
+def make_group_combo(groups) -> QComboBox:
+    """List-only Group combo: a blank first entry, then *groups*. A lone group
+    is preselected; the blank stays available so it can be cleared."""
+    cb = make_combobox([("", None)] + [(g, None) for g in groups], list_popup=True)
+    if len(groups) == 1:
+        cb.setCurrentIndex(1)
+    return cb
+
+
+def link_group_and_callsign(group_combo: QComboBox, callsign_combo: QComboBox) -> None:
+    """Make the Group and Callsign boxes mutually exclusive: choosing a group
+    clears the callsign, and entering a callsign blanks the group. Each slot
+    only touches the *other* widget."""
+    def _on_group(text: str) -> None:
+        if text:
+            callsign_combo.blockSignals(True)
+            callsign_combo.lineEdit().blockSignals(True)
+            callsign_combo.setEditText("")
+            callsign_combo.lineEdit().blockSignals(False)
+            callsign_combo.blockSignals(False)
+
+    def _on_callsign(text: str) -> None:
+        if text:
+            group_combo.blockSignals(True)
+            group_combo.setCurrentIndex(0)
+            group_combo.blockSignals(False)
+
+    group_combo.currentTextChanged.connect(_on_group)
+    callsign_combo.lineEdit().textChanged.connect(_on_callsign)
+
+
+def make_or_label() -> QLabel:
+    """The small "or" between the Group and Callsign boxes."""
+    lbl = QLabel("or")
+    lbl.setFont(label_font())
+    lbl.setAlignment(Qt.AlignCenter)
+    lbl.setStyleSheet(
+        f"QLabel {{ font-family:{FONT_ROBOTO_STACK}; font-size:13px; font-weight:bold;"
+        f" color:{DEFAULT_COLORS.get('module_foreground', '#000000')}; background:transparent; }}"
+    )
+    return lbl
 
 
 # ── Checkbox cell ──────────────────────────────────────────────────────────────

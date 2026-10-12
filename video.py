@@ -19,7 +19,7 @@ from typing import Optional
 from PyQt5 import QtCore, QtWidgets
 from PyQt5.QtCore import QDateTime
 from PyQt5.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout,
+    QDialog, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit,
 )
 
@@ -28,8 +28,10 @@ from db_utils import db_connect
 from commsrvr_client import submit_to_commsrvr
 from ssl_utils import create_verified_ssl_context
 from ui_helpers import (
-    make_button, make_input, make_combobox, make_title_strip, show_error, label_font,
-    get_internet_user_settings, UpperCaseLineEdit, apply_standard_dialog_chrome, connect_single,
+    make_button, make_input, make_title_strip, show_error, label_font,
+    get_internet_user_settings, apply_standard_dialog_chrome, connect_single,
+    make_group_combo, make_callsign_combo, link_group_and_callsign, make_or_label,
+    mark_callsign_favorite,
 )
 
 
@@ -151,10 +153,6 @@ class VideoDialog(QDialog):
         apply_standard_dialog_chrome(self, "Share YouTube Video", _WIN_W, _WIN_H)
 
         self._setup_ui()
-        self._populate_groups()
-
-        self.group_combo.currentTextChanged.connect(self._on_group_changed)
-        self.target_call_field.textChanged.connect(self._on_target_callsign_changed)
 
         # Look the title up a beat after typing/pasting settles, so a pasted
         # URL doesn't fire a request per character.
@@ -184,29 +182,30 @@ class VideoDialog(QDialog):
         # ── Title ─────────────────────────────────────────────────────────────
         body.addWidget(make_title_strip("Share YouTube Video"))
 
-        # ── Target ────────────────────────────────────────────────────────────
-        target_lbl = QLabel("Target:")
-        target_lbl.setFont(label_font())
-        body.addWidget(target_lbl)
+        # ── Target: Group  or  Callsign ──────────────────────────────────────
+        target_grid = QGridLayout()
+        target_grid.setHorizontalSpacing(8)
+        target_grid.setVerticalSpacing(2)
 
-        target_row = QHBoxLayout()
-        target_row.setSpacing(8)
+        group_lbl = QLabel("Group:")
+        group_lbl.setFont(label_font())
+        target_grid.addWidget(group_lbl, 0, 0)
+        self.group_combo = make_group_combo(self._get_all_groups_from_db())
+        self.group_combo.setFixedWidth(200)
+        target_grid.addWidget(self.group_combo, 1, 0)
 
-        self.group_combo = make_combobox([], list_popup=True)
-        self.group_combo.setMinimumWidth(150)
-        target_row.addWidget(self.group_combo)
+        target_grid.addWidget(make_or_label(), 1, 1)
 
-        or_lbl = QLabel("OR Callsign")
-        or_lbl.setFont(label_font())
-        target_row.addWidget(or_lbl)
+        callsign_lbl = QLabel("Callsign:")
+        callsign_lbl.setFont(label_font())
+        target_grid.addWidget(callsign_lbl, 0, 2)
+        self.callsign_combo = make_callsign_combo()
+        self.callsign_combo.setFixedWidth(200)
+        target_grid.addWidget(self.callsign_combo, 1, 2)
+        link_group_and_callsign(self.group_combo, self.callsign_combo)
 
-        self.target_call_field = make_input(
-            placeholder="e.g. N0CALL", max_len=12, widget=UpperCaseLineEdit(),
-        )
-        self.target_call_field.setFixedWidth(150)
-        target_row.addWidget(self.target_call_field)
-        target_row.addStretch()
-        body.addLayout(target_row)
+        target_grid.setColumnStretch(3, 1)
+        body.addLayout(target_grid)
 
         # ── URL field ─────────────────────────────────────────────────────────
         # URL comes first: it's the only thing the operator has to supply, and
@@ -234,7 +233,7 @@ class VideoDialog(QDialog):
 
         if not self._internet_available:
             self.group_combo.setEnabled(False)
-            self.target_call_field.setEnabled(False)
+            self.callsign_combo.setEnabled(False)
             self.title_field.setEnabled(False)
             self.url_field.setEnabled(False)
 
@@ -269,12 +268,6 @@ class VideoDialog(QDialog):
     # Config / DB
     # =========================================================================
 
-    def _populate_groups(self) -> None:
-        all_groups = self._get_all_groups_from_db()
-        self.group_combo.addItem("")
-        for group in all_groups:
-            self.group_combo.addItem(group)
-
     def _get_all_groups_from_db(self) -> list:
         try:
             with db_connect() as conn:
@@ -285,20 +278,8 @@ class VideoDialog(QDialog):
             print(f"Error reading groups from database: {e}")
         return []
 
-    def _on_group_changed(self, group: str) -> None:
-        if group:
-            self.target_call_field.blockSignals(True)
-            self.target_call_field.clear()
-            self.target_call_field.blockSignals(False)
-
-    def _on_target_callsign_changed(self, text: str) -> None:
-        if text:
-            self.group_combo.blockSignals(True)
-            self.group_combo.setCurrentIndex(0)
-            self.group_combo.blockSignals(False)
-
     def _get_target(self) -> str:
-        call_target = self.target_call_field.text().strip().upper()
+        call_target = self.callsign_combo.currentText().strip().upper()
         if call_target:
             return call_target
         group = self.group_combo.currentText()
@@ -469,6 +450,7 @@ class VideoDialog(QDialog):
                 "Switch to Online mode to transmit via the Internet."
             )
             return
+        mark_callsign_favorite(self.callsign_combo.currentText())
         callsign, title, url = result
         self._pending_save_data = self._capture_save_data(callsign, title, url)
         self._submit_to_commsrvr()
