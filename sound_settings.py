@@ -4,7 +4,7 @@
 """
 sound_settings.py - Sound Settings dialog.
 
-Three fixed rows (Alerts / Messages / Status Reports), each with a Play
+Four fixed rows (Alerts / Messages / RFI Messages / Status Reports), each with a Play
 button, a sound-file picker (combo of .wav files in SOUNDS_DIR), and an
 Enabled checkbox. Selections persist to config.ini and take effect
 immediately via SoundPlayer.reload(event).
@@ -35,13 +35,14 @@ _COL_PLAY  = "#17a2b8"
 _COL_CLOSE = "#555555"
 
 _WIN_W = 640
-_WIN_H = 320
+_WIN_H = 360
 
 _TABLE_COLS = ["Play", "Event", "Sound", "Enabled"]
 
 _ROWS = [
     ("alert",   "Alerts"),
     ("message", "Messages"),
+    ("rfi",     "RFI Messages"),
     ("statrep", "Status Reports"),
 ]
 

@@ -1191,6 +1191,7 @@ class ConfigManager:
             'unchecked_groups': '',
             'sound_alert_enabled': True,   'sound_alert_file':   sound['alert'],
             'sound_message_enabled': True, 'sound_message_file': sound['message'],
+            'sound_rfi_enabled': True,     'sound_rfi_file':     sound['rfi'],
             'sound_statrep_enabled': True, 'sound_statrep_file': sound['statrep'],
             'weather_radar': False,
             'weather_radar_refresh': 5,
@@ -1237,13 +1238,13 @@ class ConfigManager:
         config = read_config(self.config_path)   # never raises: a bad file means defaults
 
         # An old single-toggle `notification_sounds` key, if still in the file, seeds
-        # the three per-event sound enable flags once (they default to True otherwise).
+        # the per-event sound enable flags once (they default to True otherwise).
         try:
             legacy = config.getboolean("DIRECTEDCONFIG", "notification_sounds", fallback=None)
         except ValueError:
             legacy = None
         if legacy is not None:
-            for event in ("alert", "message", "statrep"):
+            for event in ("alert", "message", "rfi", "statrep"):
                 defaults[f"sound_{event}_enabled"] = legacy
 
         self.directed_config = {
@@ -1270,6 +1271,7 @@ class ConfigManager:
         return {
             'alert':   pick('alarm', 'alert'),
             'message': pick('bell', 'ding'),
+            'rfi':     pick('marimbic', 'glass', 'ding'),
             'statrep': pick('ping', 'triple', 'dit'),
         }
 
@@ -2962,7 +2964,7 @@ class _PersistentCheckMenu(_MenuBarMenu):
 
 class SoundPlayer:
     """
-    Plays short notification sounds for inbound StatRep / Message / Alert events.
+    Plays short notification sounds for inbound StatRep / Message / RFI / Alert events.
 
     Per-event filename and enable flag live in ConfigManager; the dialog can
     call reload(event) to swap files at runtime without restarting the app.
@@ -2970,7 +2972,7 @@ class SoundPlayer:
     doesn't get GC'd mid-play. Missing files are tolerated silently.
     """
 
-    EVENTS = ("statrep", "message", "alert")
+    EVENTS = ("statrep", "message", "rfi", "alert")
     VOLUME = 0.8
 
     def __init__(self, config: "ConfigManager", sounds_dir: str = SOUNDS_DIR):
@@ -6293,10 +6295,12 @@ class MainWindow(QtWidgets.QMainWindow):
                 conn.commit()
             self._insert_state.last_row_id = new_row_id
             print(f"{ConsoleColors.SUCCESS}[{rig_name}] Added {msg_type.upper()} {data.get(id_field, '')}{extra_info} from: {from_callsign} (Global ID: {data.get('global_id', 0)}){ConsoleColors.RESET}")
+            # An RFI message (rfi=1) gets its own sound; everything else uses msg_type.
+            sound_type = "rfi" if msg_type == "message" and data.get('rfi') == 1 else msg_type
             QtCore.QMetaObject.invokeMethod(
                 self, "_queue_notification_sound",
                 QtCore.Qt.QueuedConnection,
-                QtCore.Q_ARG(str, msg_type),
+                QtCore.Q_ARG(str, sound_type),
             )
             # A "message" row whose target isn't an @GROUP is always a
             # direct message to one of our own callsigns (every insert path

@@ -14,7 +14,7 @@ from typing import Dict
 # Application Identity
 # =============================================================================
 
-VERSION = "5.2a"
+VERSION = "5.3"
 
 # Identifies CommStat in outbound HTTP requests (User-Agent) and the QRZ XML "agent" field.
 USER_AGENT = f"CommStat/{VERSION}"
