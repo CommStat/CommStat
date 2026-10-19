@@ -67,8 +67,8 @@ _WIN_H          = 514  # room for the RFI note below the checkbox
 # Shown below the RFI checkbox while it is checked (same idea as the Incident
 # dialog's type description).
 _RFI_NOTE = (
-    "RFIs are for emergencies only: a grid-down station requesting information\n"
-    "it cannot obtain itself, such as severe weather, floods, evacuation routes, or wellness checks."
+    "RFIs may request information on any topic. Some groups, including AmRRON and MAGNET,\n"
+    "use RFIs for emergencies only. In their traffic, please follow the group's suggested uses."
 )
 
 # ── Help content ──────────────────────────────────────────────────────────────
@@ -78,28 +78,21 @@ _HELP_HTML = """
 <div style="font-family: Roboto; font-size: 13px; color: #333333;">
 
 <h3 style="color:#555555;">What Is an RFI?</h3>
-<p>A <b>Request for Information (RFI)</b> is a CommStat emergency message.
-It is sent on behalf of a <b>grid-down</b> operator who needs information
-they cannot obtain themselves. Checking the <b>RFI</b> box marks the message
-as an RFI and makes it highly visible, so emergency communicators can see
-at a glance that someone needs information or communications help.</p>
+<p>A <b>Request for Information (RFI)</b> is a CommStat message that asks
+other operators for information. Checking the <b>RFI</b> box marks the message
+as an RFI and makes it highly visible, so other operators can see at a glance
+that someone is asking for information.</p>
 
 <h3 style="color:#555555;">When to Use It</h3>
-<p>RFIs are reserved for <b>emergency situations</b>, such as a regional
-communications outage, severe weather, or another grid-down event. In these
-situations an operator may still have radio contact but no Internet, cellular
-service, or other normal sources of information. Typical requests include:</p>
-<ul>
-<li>Severe weather reports and forecasts</li>
-<li>Flood and road conditions</li>
-<li>Evacuation routes and shelter locations</li>
-<li>Wellness checks on family or others outside the affected area</li>
-</ul>
-<p>Please do not use the RFI checkbox for routine traffic. Keeping RFIs for
-real emergencies ensures they get immediate attention.</p>
+<p>RFIs can be used for any purpose. You can request information on any
+topic.</p>
+<p>However, some groups, including <b>AmRRON</b> and <b>MAGNET</b>, have
+chosen to use RFIs for <b>emergencies only</b>, such as a regional
+communications outage, severe weather, or another grid-down event. If you are
+participating in their traffic, please follow the group's suggested uses.</p>
 
 <h3 style="color:#555555;">How an RFI Moves</h3>
-<p>The grid-down operator sends a request over radio to an
+<p>In an emergency, a grid-down operator may send a request over radio to an
 <b>RFI Relay Operator</b>, who enters it into CommStat as an RFI. Grid-up
 operators monitoring CommStat see the request, gather the information from
 available resources, and reply through CommStat. The relay operator then

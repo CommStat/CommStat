@@ -1185,7 +1185,7 @@ class ConfigManager:
             'hide_heartbeat': False, 'show_every_group': False,
             'show_alerts': False,
             'hide_internet_feed': False, 'hide_live_feed': False,
-            'save_all_alerts': False, 'save_all_messages': False, 'save_all_videos': False,
+            'save_all_alerts': False, 'save_all_videos': False,
             'selected_rss_feed': list(DEFAULT_RSS_FEEDS.keys())[0],
             'apply_text_normalization': True,
             'unchecked_groups': '',
@@ -1333,12 +1333,6 @@ class ConfigManager:
 
     def set_save_all_alerts(self, value: bool) -> None:
         self._save_setting('save_all_alerts', value)
-
-    def get_save_all_messages(self) -> bool:
-        return self.directed_config.get('save_all_messages', False)
-
-    def set_save_all_messages(self, value: bool) -> None:
-        self._save_setting('save_all_messages', value)
 
     def get_save_all_videos(self) -> bool:
         return self.directed_config.get('save_all_videos', False)
@@ -1885,51 +1879,74 @@ class DatabaseManager:
         groups: List[str],
         start: str,
         end: str = '',
-        show_all: bool = False
+        show_all: bool = False,
+        exclude_groups: List[str] = None,
+        user_callsign: str = ""
     ) -> List[Tuple]:
         """
-        Fetch message data from database.
+        Fetch message data from database. Same group filtering as get_statrep_data.
 
         Args:
-            groups: List of checked group names
-            start: Start date filter (required)
+            groups: List of checked group names (empty list returns no data unless show_all)
+            start: Start date filter (empty string means no lower limit)
             end: End date filter (optional, empty string means no upper limit)
-            show_all: If True, return all messages regardless of group
+            show_all: If True, return all messages (subject to exclude_groups)
+            exclude_groups: When show_all=True, exclude records from these groups
+            user_callsign: User's own callsign; also returns messages addressed to
+                or sent from it
 
         Returns:
             List of tuples containing message records
         """
+        if not groups and not show_all and not user_callsign:
+            return []
+
         try:
             with self._connect() as connection:
                 cursor = connection.cursor()
 
-                # Build date condition based on whether end date is provided
-                if end:
+                # Build date condition based on which dates are provided
+                if start and end:
                     date_condition = "datetime BETWEEN ? AND ?"
                     date_params = [start, end]
-                else:
+                elif start:
                     date_condition = "datetime >= ?"
                     date_params = [start]
+                else:
+                    date_condition = "1 = 1"
+                    date_params = []
+
+                select = ("SELECT db, datetime, freq, from_callsign, target, global_id, "
+                          "msg_id, message, source, delivered, id, rfi FROM messages")
 
                 if show_all:
-                    # Show all messages regardless of group
-                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id, rfi
-                               FROM messages
-                               WHERE {date_condition}
-                               ORDER BY datetime DESC"""
-                    params = date_params
-                elif groups:
-                    # Filter by checked groups (add @ prefix for matching)
-                    groups_with_at = ["@" + g for g in groups]
-                    placeholders = ",".join("?" * len(groups_with_at))
-                    query = f"""SELECT db, datetime, freq, from_callsign, target, global_id, msg_id, message, source, delivered, id, rfi
-                               FROM messages
-                               WHERE target IN ({placeholders}) AND {date_condition}
-                               ORDER BY datetime DESC"""
-                    params = groups_with_at + date_params
+                    if exclude_groups:
+                        excl_with_at = ["@" + g for g in exclude_groups]
+                        placeholders = ",".join("?" * len(excl_with_at))
+                        query = f"""{select}
+                                   WHERE target NOT IN ({placeholders}) AND {date_condition}
+                                   ORDER BY datetime DESC"""
+                        params = excl_with_at + date_params
+                    else:
+                        query = f"""{select}
+                                   WHERE {date_condition}
+                                   ORDER BY datetime DESC"""
+                        params = date_params
                 else:
-                    # No groups and not show_all - return empty
-                    return []
+                    # Checked groups, plus messages addressed to or sent by the user
+                    target_list = ["@" + g for g in groups]
+                    callsign_clause = ""
+                    callsign_params = []
+                    if user_callsign:
+                        target_list.append(user_callsign.upper())
+                        callsign_clause = " OR from_callsign = ?"
+                        callsign_params = [user_callsign.upper()]
+                    placeholders = ",".join("?" * len(target_list))
+                    query = f"""{select}
+                               WHERE (target IN ({placeholders}){callsign_clause})
+                                 AND {date_condition}
+                               ORDER BY datetime DESC"""
+                    params = target_list + callsign_params + date_params
 
                 cursor.execute(query, params)
                 return cursor.fetchall()
@@ -3905,12 +3922,6 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_all_alerts_action.triggered.connect(self._on_toggle_save_all_alerts)
         self.menu.addAction(self.save_all_alerts_action)
 
-        self.save_all_messages_action = QtWidgets.QAction("Save all Messages", self)
-        self.save_all_messages_action.setCheckable(True)
-        self.save_all_messages_action.setChecked(self.config.get_save_all_messages())
-        self.save_all_messages_action.triggered.connect(self._on_toggle_save_all_messages)
-        self.menu.addAction(self.save_all_messages_action)
-
         self.save_all_videos_action = QtWidgets.QAction("Save all Videos", self)
         self.save_all_videos_action.setCheckable(True)
         self.save_all_videos_action.setChecked(self.config.get_save_all_videos())
@@ -4012,7 +4023,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.filter_menu.addAction(self.hide_live_feed_action)
 
         # STATREP & MESSAGES section
-        statrep_messages_label = QtWidgets.QAction("Status Reports", self)
+        statrep_messages_label = QtWidgets.QAction("Status Reports & Messages", self)
         statrep_messages_label.setEnabled(False)  # Disabled as a section title
         self.filter_menu.addAction(statrep_messages_label)
 
@@ -7474,13 +7485,26 @@ class MainWindow(QtWidgets.QMainWindow):
                 QtWidgets.QApplication.clipboard().setText(text)
 
     def _load_message_data(self) -> None:
-        """Load message data from database into the table."""
+        """Load message data from database into the table.
+
+        Uses the Filter menu's group checkboxes, Show Other Groups and Hide
+        Internet Feed, same as the StatRep table (no date range)."""
+        groups, exclude_groups, show_all = self._get_filtered_groups()
+        user_callsign = next((cs for cs in self.rig_callsigns.values() if cs), "") or ""
+        if not user_callsign:
+            user_callsign, _, __ = self.db.get_user_settings()
+
         data = self.db.get_message_data(
-            groups=[],
+            groups=groups,
             start='',
             end='',
-            show_all=True
+            show_all=show_all,
+            exclude_groups=exclude_groups,
+            user_callsign=base_callsign(user_callsign) if user_callsign else ""
         )
+
+        if self._hide_internet_statrep:
+            data = [row for row in data if row[8] == 1]  # row[8] = source (1 = Radio)
 
         self._populate_table(self.message_table, data)
 
@@ -9557,10 +9581,11 @@ window.commstatBouncePin = function(srid) {
         self._load_live_feed()
 
     def _on_toggle_hide_internet_statrep(self, checked: bool) -> None:
-        """Show only RF-sourced (source=1) statreps in table and map."""
+        """Show only RF-sourced (source=1) statreps and messages in tables and map."""
         self._hide_internet_statrep = checked
         self.config.set_hide_internet_feed(checked)
         self._load_statrep_data()
+        self._load_message_data()
         self._save_map_position(callback=self._load_map)
 
     def _on_map_filter_help(self) -> None:
@@ -9825,16 +9850,13 @@ window.commstatBouncePin = function(srid) {
         """Save all incoming group alerts, not just those for groups in the local table."""
         self.config.set_save_all_alerts(checked)
 
-    def _on_toggle_save_all_messages(self, checked: bool) -> None:
-        """Save all incoming group messages, not just those for groups in the local table."""
-        self.config.set_save_all_messages(checked)
-
     def _on_toggle_save_all_videos(self, checked: bool) -> None:
         """Save all incoming YouTube video shares. Behavior TBD."""
         self.config.set_save_all_videos(checked)
 
     def _on_alerts_messages_help(self) -> None:
-        """Explain the 'Save all Alerts' / 'Save all Messages' checkboxes."""
+        """Explain the Save all Alerts / Videos checkboxes and how Status
+        Reports and Messages are saved and filtered."""
         show = self._resolve_dialog_class("help", "show_alerts_messages_help")
         show(self, **self._help_theme_colors())
 
@@ -10174,7 +10196,7 @@ window.commstatBouncePin = function(srid) {
         self._refresh_all_data()
 
     def _on_toggle_group_filter(self, group_name: str, checked: bool) -> None:
-        """Toggle a single group's visibility in the StatRep display."""
+        """Toggle a single group's visibility in the StatRep and Message displays."""
         unchecked = self.config.get_unchecked_groups()
         if not checked and group_name not in unchecked:
             unchecked.append(group_name)
@@ -10595,9 +10617,8 @@ window.commstatBouncePin = function(srid) {
                 else:
                     # Bare conversational group/direct message (no MSG keyword) —
                     # Radio only. e.g. "KG4AQH: @AMRRON  ANYBODY NEED THE AIB...".
-                    # Routed straight to _parse_group_message (not through the
-                    # _process_directed_message membership gate) so "Save all
-                    # Messages" can capture groups we are not a member of.
+                    # Routed straight to _parse_group_message, which saves
+                    # group traffic for any group (like StatReps).
                     _pp = self._preprocess_message_value(value, from_call)
                     # Callsign keeps its suffix (see _parse_commstat_message)
                     _from_base = from_call.strip().upper() if from_call else ""
@@ -11402,19 +11423,9 @@ window.commstatBouncePin = function(srid) {
         if not msg_id:
             msg_id = generated_msg_id
 
-        # Check if message is to a group we're in or to one of our callsigns
-        if msg_target.startswith("@"):
-            # Group message - only save if we're a member of that group, unless
-            # "Save all Messages" is enabled, which imports every group message,
-            # or the target is the always-accepted network-wide group.
-            group_name = msg_target[1:].upper()  # Remove @ and normalize
-            if (not self.config.get_save_all_messages()
-                    and group_name != _ALWAYS_SAVE_GROUP):
-                all_groups = self.db.get_all_groups()
-                if group_name not in all_groups:
-                    # Skip messages to groups we're not in
-                    return ("", None)
-        elif source != 2:
+        # Group messages (@GROUP) are always saved for any group, like StatReps;
+        # display filtering is handled by the Filter menu.
+        if not msg_target.startswith("@") and source != 2:
             # Direct message over Radio - only save if to one of our callsigns.
             # (Commsrvr already pre-filters direct messages to our own callsign
             # before we ever see them, so no local check is needed for source 2.)
@@ -11468,8 +11479,7 @@ window.commstatBouncePin = function(srid) {
         Final-fallback parser for Radio (TCP) traffic that matched none of the
         earlier patterns. Captures bare conversational net check-ins of the form:
 
-            [CALLSIGN: ]@GROUP <text>      -> save if group is in the groups table
-                                              or "Save all Messages" is enabled
+            [CALLSIGN: ]@GROUP <text>      -> save (any group, like StatReps)
             [CALLSIGN: ]YOURCALL <text>    -> save (directed to one of our callsigns)
 
         where <text> (after the target token, leading whitespace stripped) is
@@ -11488,9 +11498,8 @@ window.commstatBouncePin = function(srid) {
 
         # Give _parse_message first crack — it recognizes structured MESSAGE
         # traffic (including the no-"MSG"-keyword variant), and this function
-        # is sometimes called directly (RX.ACTIVITY's bare fallback, and the
-        # non-member "Save all Messages" exception) without _parse_message
-        # having been tried yet. Only genuine bare conversational text should
+        # is sometimes called directly (RX.ACTIVITY's bare fallback) without
+        # _parse_message having been tried yet. Only genuine bare conversational text should
         # reach the guard/length-gate logic below.
         structured_result = self._parse_message(
             rig_name, message_value, from_callsign, target, freq, snr, utc, source
@@ -11517,16 +11526,9 @@ window.commstatBouncePin = function(srid) {
         if len(rest) <= 17:
             return ("", None)
 
-        # Save criteria — same policy as _parse_message
-        if msg_target.startswith("@"):
-            # Group message — save if we're a member, unless "Save all Messages"
-            # is on or the target is the always-accepted network-wide group
-            group_name = msg_target[1:].upper()
-            if (not self.config.get_save_all_messages()
-                    and group_name != _ALWAYS_SAVE_GROUP):
-                if group_name not in self.db.get_all_groups():
-                    return ("", None)
-        else:
+        # Save criteria — same policy as _parse_message: any @GROUP is saved
+        # (like StatReps); a bare callsign target only if it's ours.
+        if not msg_target.startswith("@"):
             # Bare callsign target — only save if it's one of our callsigns.
             # Base-callsign compare so a /P operator still receives their own traffic.
             user_callsigns = [base_callsign(c) for c in self.rig_callsigns.values() if c]
@@ -11780,10 +11782,10 @@ window.commstatBouncePin = function(srid) {
         is_to_user = base_callsign(to_call) == base_callsign(user_callsign) if user_callsign else False
 
         # Group check: any @GROUP is accepted here so its traffic reaches the
-        # per-type parsers below. Alerts/messages/videos still apply their own
+        # per-type parsers below. Alerts/videos still apply their own
         # membership-or-"Save all"-toggle gate inside their own parsers.
-        # STATREPs and Group Incidents have no such gate, so they're always saved
-        # for any group — display filtering is handled by the Filter menu.
+        # STATREPs, Group Incidents and messages have no such gate, so they're
+        # always saved for any group — display filtering is handled by the Filter menu.
         is_to_group = to_call.startswith("@")
 
         # Only process if to our group OR to our callsign.

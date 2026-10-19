@@ -97,34 +97,54 @@ class HelpDialog(QtWidgets.QDialog):
 
 _ALERTS_MESSAGES_HTML = """
 <div style="font-family: Roboto; font-size: 13px;">
-<p>By default, CommStat saves <b>alerts</b>, <b>messages</b>, and <b>videos</b>
-addressed to your callsign, as well as those addressed to any group listed under
+<h3>Alerts &amp; Videos</h3>
+<p>By default, CommStat saves <b>alerts</b> and <b>videos</b> addressed to
+your callsign, as well as those addressed to any group listed under
 <b>Settings &rarr; Manage Groups</b>.</p>
 
-<p>Checking <b>Save all Alerts</b>, <b>Save all Messages</b>, or
-<b>Save all Videos</b> tells CommStat to <i>also</i> save that type of traffic
-when sent to <b>any</b> group.</p>
+<p>Checking <b>Save all Alerts</b> or <b>Save all Videos</b> tells CommStat to
+<i>also</i> save that type of traffic when sent to <b>any</b> group. These
+options only affect group traffic. They never save alerts or videos addressed
+to other callsigns.</p>
 
-<p>These options only affect group traffic. They never let you see alerts,
-messages, or videos that are addressed to other callsigns.</p>
+<hr>
 
-<p><b>Status Reports are different:</b> CommStat always saves a StatRep sent
-to <b>any</b> group, whether or not it's in your list under <b>Settings &rarr; Manage Groups</b> — there is no
-"Save all" toggle for them, because that's simply how they're captured.</p>
+<h3>Status Reports &amp; Messages</h3>
+<p><b>Saving.</b> CommStat always saves Status Reports and Messages sent to
+<b>any</b> group, whether or not that group is in your list under
+<b>Settings &rarr; Manage Groups</b>. A status report or message sent to a
+single station is saved only when it is addressed to <b>your</b> callsign.</p>
 
-<p>What you <i>see</i> in the StatRep table is controlled separately, from the
-<b>Filter</b> menu's <b>Status Reports</b> section: check or uncheck any of
-your own groups to show or hide its reports, and use <b>Show Other Groups</b>
-to reveal (or hide) StatReps sent to groups you haven't added.</p>
+<p><b>Showing.</b> Saving everything does not mean seeing everything. What
+appears in the StatRep and Message tables is controlled from the
+<b>Filter</b> menu's <b>Status Reports &amp; Messages</b> section:</p>
+<ul>
+<li><b>Group checkboxes</b> &mdash; one for each of your groups. Uncheck a
+    group to hide its Status Reports and Messages; check it to show them
+    again.</li>
+<li><b>Show Other Groups</b> &mdash; shows traffic sent to groups you have
+    <i>not</i> added. Because that traffic is always saved, checking this box
+    reveals it right away, including traffic that arrived earlier.</li>
+<li><b>Hide Internet Feed</b> &mdash; shows only traffic received over radio,
+    in both tables.</li>
+<li><b>Hide Green Pins</b> and <b>Hide All Pins</b> &mdash; affect Status
+    Reports only.</li>
+</ul>
+
+<p>Messages addressed to your callsign, and Messages you sent, are always
+shown in the Message table, whatever the group checkboxes say.</p>
+
+<p>The Filter menu's <b>date range</b> applies to Status Reports only. The
+Message table shows messages of any date.</p>
 </div>
 """
 
 
 def show_alerts_messages_help(parent=None, **colors) -> None:
-    """Explain the Save all Alerts / Messages / Videos checkboxes and how
-    Status Reports are saved and filtered."""
+    """Explain the Save all Alerts / Videos checkboxes and how Status Reports
+    and Messages are saved and filtered."""
     show_help_dialog(parent, "Alerts, Messages & Videos",
-                     _ALERTS_MESSAGES_HTML, width=470, height=430, **colors)
+                     _ALERTS_MESSAGES_HTML, width=520, height=700, **colors)
 
 
 # ── Map ▸ Filter dropdown ▸ Help ───────────────────────────────────────────────
