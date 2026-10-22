@@ -17,6 +17,7 @@ import datetime
 import io
 import os
 import sqlite3
+import sys
 import tempfile
 import threading
 import time
@@ -28,7 +29,7 @@ from typing import Callable, Dict, Optional, Tuple
 
 import folium
 import maidenhead as mh
-from PyQt5.QtCore import QBuffer, QByteArray, QObject, QSize, Qt, QThread, QUrl, pyqtSignal
+from PyQt5.QtCore import QBuffer, QByteArray, QObject, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt5.QtGui import QColor, QCursor, QFont, QMovie, QPainter, QPixmap
 from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
 from PyQt5.QtWidgets import (
@@ -3226,7 +3227,42 @@ class NewMessagePopupDialog(QDialog):
         apply_standard_dialog_chrome(self, "New Message")
         self.setModal(True)
         self._callsign = (callsign or "").strip().upper()
+        # Whatever the user was working in when the popup appeared (possibly
+        # another app on another monitor), so "Close" can hand focus back to it
+        # instead of letting the OS activate the CommStat main window.
+        self._prev_foreground = self._get_foreground_window()
         self._setup_ui()
+
+    @staticmethod
+    def _get_foreground_window() -> int:
+        """Return the Windows foreground window handle, or 0 elsewhere/on failure."""
+        if sys.platform != "win32":
+            return 0
+        try:
+            import ctypes
+            return ctypes.windll.user32.GetForegroundWindow() or 0
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _restore_foreground_window(hwnd: int) -> None:
+        """Re-activate the window that was in front before the popup appeared."""
+        if not hwnd:
+            return
+        try:
+            import ctypes
+            user32 = ctypes.windll.user32
+            if user32.IsWindow(hwnd):
+                user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
+
+    def _on_close_clicked(self) -> None:
+        hwnd = self._prev_foreground
+        self.accept()
+        # Windows activates the owner (the main window) as the dialog hides;
+        # switch back once that has settled.
+        QTimer.singleShot(0, lambda: self._restore_foreground_window(hwnd))
 
     def _setup_ui(self) -> None:
         bg_pixmap = QPixmap(self._BG_IMAGE)
@@ -3257,7 +3293,7 @@ class NewMessagePopupDialog(QDialog):
 
         self.btn_close = make_button("Close", _COL_CANCEL)
         self.btn_close.setParent(self)
-        self.btn_close.clicked.connect(self.accept)
+        self.btn_close.clicked.connect(self._on_close_clicked)
         self.btn_close.adjustSize()
         self.btn_close.move(w - self.btn_close.width() - 12, h - self.btn_close.height() - 12)
         self.btn_close.raise_()

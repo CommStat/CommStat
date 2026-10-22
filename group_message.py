@@ -100,6 +100,16 @@ transmits the answer back over radio to the operator who asked.</p>
 <p>In this way, CommStat serves as an information bridge between an isolated
 area and operators who still have access to outside resources.</p>
 
+<h3 style="color:#555555;">RFI Tracking</h3>
+<p>You don't need to type any tracking information. When you transmit,
+CommStat automatically adds the correct label and the message's TID
+to the beginning of the message, so requests and their
+replies can be matched up.</p>
+<p>For example, a new RFI is sent as <b>RFI Y21 - &lt;your message&gt;</b>,
+and a reply to it is sent as <b>RFI Y21 Reply - &lt;your reply&gt;</b>. The
+TID is captured from the original RFI as soon as you start a reply, so it is
+kept even if you delete the quoted text.</p>
+
 </div>
 """
 
@@ -146,6 +156,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         self._pending_message: str   = ""
         self._pending_save_data: Optional[dict] = None
         self._is_rfi_reply: bool = False
+        self._rfi_reply_tag: str = ""   # e.g. "RFI Y21", captured from the replied-to body
 
 
         apply_standard_dialog_chrome(self, "Group Message", _WIN_W, _WIN_H)
@@ -171,9 +182,12 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         to the same group) and disables the RFI checkbox (a reply is never itself an
         RFI). When is_rfi_reply is set (the replied-to message has rfi=1), the
         transmitted marker gets a trailing "-" (see _build_message) identifying it
-        as an RFI Reply on the wire.
+        as an RFI Reply on the wire. The "RFI <msg id>" tag is captured from the
+        body now, since the user may delete the body before transmitting.
         """
         self._is_rfi_reply = is_rfi_reply
+        tag_match = re.search(r"\bRFI [A-Y]\d{2}\b", body or "")
+        self._rfi_reply_tag = tag_match.group(0) if tag_match else ""
         group_name = (group_name or "").strip().lstrip("@").upper()
         if group_name:
             idx = self.group_combo.findText(group_name)
@@ -484,14 +498,13 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         return re.sub(r"[^ -~]+", " ", text)
 
     def _apply_rfi_text(self, message: str) -> str:
-        """For an RFI, prefix "RFI - " and append the "||" newline marker, UTC date, and message id.
-        For a group reply, prefix "RFI REPLY - "."""
+        """For an RFI, prefix "RFI <msg id> - ". For a group reply, prefix "RFI <msg id> Reply - "
+        using the tag captured in set_group_reply_context()."""
         if self._is_rfi_reply:
-            return f"RFI REPLY - {message}"
+            return f"{self._rfi_reply_tag or 'RFI'} Reply - {message}"
         if not self.rfi_checkbox.isChecked():
             return message
-        date = QDateTime.currentDateTimeUtc().toString("yyyy-MM-dd")
-        return f"RFI - {message}||{date} {self.msg_id}"
+        return f"RFI {self.msg_id} - {message}"
 
     def _build_message(self, message: str) -> str:
         group  = "@" + self.group_combo.currentText()
