@@ -8,13 +8,16 @@ The styled widget factories (make_button, make_input, make_combobox,
 make_checkbox_cell, UpperCaseLineEdit), the shared dialog scaffolding
 (apply_standard_dialog_chrome, make_title_strip, DIALOG_TABLE_QSS, wrap_fixed),
 the message boxes (show_error, show_info, confirm, confirm_delete_record,
-prompt_text), the help dialogs (make_help_dialog, show_help_dialog) and the
-Off-Grid-aware link opener (open_external_url).
+prompt_text), the help dialogs (make_help_dialog, show_help_dialog), the
+popup focus helpers (get_foreground_window, restore_foreground_window,
+accept_and_restore_foreground) and the Off-Grid-aware link opener
+(open_external_url).
 """
 
 import os
 import re
 import sqlite3
+import sys
 from typing import Tuple
 
 from PyQt5 import QtGui
@@ -124,6 +127,45 @@ def get_internet_user_settings() -> Tuple[str, str, str]:
     except sqlite3.Error:
         pass
     return ("", "", "")
+
+
+# ── Popup focus helpers (Windows) ─────────────────────────────────────────────
+# Unsolicited popups (delivery confirmation, new message, update prompt, late
+# delivery failure) can appear while the user is working in another app,
+# possibly on another monitor. Each popup records the foreground window when it
+# opens so "Close" can hand focus back to it, instead of letting the OS
+# activate the CommStat main window.
+
+def get_foreground_window() -> int:
+    """Return the Windows foreground window handle, or 0 elsewhere/on failure."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        import ctypes
+        return ctypes.windll.user32.GetForegroundWindow() or 0
+    except Exception:
+        return 0
+
+
+def restore_foreground_window(hwnd: int) -> None:
+    """Re-activate the window that was in front before the popup appeared."""
+    if not hwnd:
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        if user32.IsWindow(hwnd):
+            user32.SetForegroundWindow(hwnd)
+    except Exception:
+        pass
+
+
+def accept_and_restore_foreground(dialog: QDialog, hwnd: int) -> None:
+    """Accept the dialog, then give focus back to hwnd."""
+    dialog.accept()
+    # Windows activates the owner (the main window) as the dialog hides;
+    # switch back once that has settled.
+    QTimer.singleShot(0, lambda: restore_foreground_window(hwnd))
 
 
 # ── Confirmation dialog ───────────────────────────────────────────────────────

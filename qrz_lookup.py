@@ -53,6 +53,7 @@ from ssl_utils import create_verified_ssl_context
 from ui_helpers import (
     apply_standard_dialog_chrome, connect_single, make_button, make_input, make_title_strip,
     show_help_dialog, open_external_url, make_callsign_combo, mark_callsign_favorite,
+    get_foreground_window, accept_and_restore_foreground,
 )
 
 _COMMSRVR_URL  = COMMSRVR_URL
@@ -2936,6 +2937,9 @@ class InternetDeliveryFailureDialog(QDialog):
         apply_standard_dialog_chrome(self, "Internet Delivery Failure")
         self.setModal(True)
         self.setFixedWidth(420)
+        # Opens when a background send fails, possibly after the user has moved
+        # to another app — see "Popup focus helpers" in ui_helpers.py.
+        self._prev_foreground = get_foreground_window()
 
         self.setStyleSheet(f"QDialog {{ background-color:{_PANEL_BG}; }}")
 
@@ -2957,9 +2961,12 @@ class InternetDeliveryFailureDialog(QDialog):
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         btn = make_button("Close", _COL_CANCEL)
-        btn.clicked.connect(self.accept)
+        btn.clicked.connect(self._on_close_clicked)
         btn_row.addWidget(btn)
         main.addLayout(btn_row)
+
+    def _on_close_clicked(self) -> None:
+        accept_and_restore_foreground(self, self._prev_foreground)
 
 
 # ── Dialog: Delivery Confirmation popup (commsrvr ::DELIVERED::) ──────────
@@ -3000,8 +3007,13 @@ class DeliveryConfirmationDialog(QDialog):
         self._img_loader: Optional[_ImageLoader] = None
         self._gif_movie: Optional[QMovie] = None
         self._qrz_thread: Optional[_QRZThread] = None
+        # See "Popup focus helpers" in ui_helpers.py.
+        self._prev_foreground = get_foreground_window()
         self._setup_ui()
         self._populate_qrz()
+
+    def _on_close_clicked(self) -> None:
+        accept_and_restore_foreground(self, self._prev_foreground)
 
     def _setup_ui(self) -> None:
         self.setStyleSheet(
@@ -3085,7 +3097,7 @@ class DeliveryConfirmationDialog(QDialog):
         btn_row.setSpacing(8)
         btn_row.addStretch()
         self.btn_close = make_button("Close", _COL_CANCEL)
-        self.btn_close.clicked.connect(self.accept)
+        self.btn_close.clicked.connect(self._on_close_clicked)
         btn_row.addWidget(self.btn_close)
         main.addLayout(btn_row)
 
@@ -3230,39 +3242,11 @@ class NewMessagePopupDialog(QDialog):
         # Whatever the user was working in when the popup appeared (possibly
         # another app on another monitor), so "Close" can hand focus back to it
         # instead of letting the OS activate the CommStat main window.
-        self._prev_foreground = self._get_foreground_window()
+        self._prev_foreground = get_foreground_window()
         self._setup_ui()
 
-    @staticmethod
-    def _get_foreground_window() -> int:
-        """Return the Windows foreground window handle, or 0 elsewhere/on failure."""
-        if sys.platform != "win32":
-            return 0
-        try:
-            import ctypes
-            return ctypes.windll.user32.GetForegroundWindow() or 0
-        except Exception:
-            return 0
-
-    @staticmethod
-    def _restore_foreground_window(hwnd: int) -> None:
-        """Re-activate the window that was in front before the popup appeared."""
-        if not hwnd:
-            return
-        try:
-            import ctypes
-            user32 = ctypes.windll.user32
-            if user32.IsWindow(hwnd):
-                user32.SetForegroundWindow(hwnd)
-        except Exception:
-            pass
-
     def _on_close_clicked(self) -> None:
-        hwnd = self._prev_foreground
-        self.accept()
-        # Windows activates the owner (the main window) as the dialog hides;
-        # switch back once that has settled.
-        QTimer.singleShot(0, lambda: self._restore_foreground_window(hwnd))
+        accept_and_restore_foreground(self, self._prev_foreground)
 
     def _setup_ui(self) -> None:
         bg_pixmap = QPixmap(self._BG_IMAGE)

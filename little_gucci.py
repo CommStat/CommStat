@@ -6795,7 +6795,10 @@ class MainWindow(QtWidgets.QMainWindow):
     @QtCore.pyqtSlot(int)
     def _show_program_update_notification(self, new_build: int) -> None:
         """Show notification prompting user to restart (called from main thread)."""
-        from ui_helpers import confirm
+        from ui_helpers import confirm, get_foreground_window, restore_foreground_window
+        # This prompt fires unprompted (heartbeat download), so on "No" hand
+        # focus back to whatever the user was working in.
+        prev_foreground = get_foreground_window()
         if confirm(
             self,
             "Update Available",
@@ -6809,6 +6812,8 @@ class MainWindow(QtWidgets.QMainWindow):
             # disconnects TCP connections and saves state
             # commstat.py will apply the update on next launch
             self.close()
+        else:
+            QTimer.singleShot(0, lambda: restore_foreground_window(prev_foreground))
 
     def _load_slideshow_images(self) -> None:
         """Load images with priority: my_images > images > 00-default.png."""
@@ -7066,11 +7071,12 @@ class MainWindow(QtWidgets.QMainWindow):
         ])
 
         # Per-column filter boxes, mirroring the contacts table's filter row.
-        # No box for Date Time, Freq, GID, or TID (not useful to free-text
-        # filter), nor for the blank SNR-color column (col 0, which never
-        # has text). Created once and kept for the life of the table; the
-        # header shows and hides them with the filter toggle.
-        _EXCLUDED_COLS = {0, 1, 2, 5, 6}  # "", Date Time, Freq, GID, TID
+        # No box for Date Time (not useful to free-text filter), nor for the
+        # blank SNR-color column (col 0, which never has text). Freq matches
+        # its displayed MHz text (e.g. "7.110"). Created once and kept for
+        # the life of the table; the header shows and hides them with the
+        # filter toggle.
+        _EXCLUDED_COLS = {0, 1}  # "", Date Time
         filter_font = QtGui.QFont("Kode Mono", -1)
         filter_font.setPixelSize(13)
         filter_style = (
