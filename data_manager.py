@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
     QHeaderView, QMessageBox, QAbstractItemView,
 )
 
-from constants import DEFAULT_COLORS, COLOR_BTN_GREEN, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER
+from constants import DEFAULT_COLORS, COLOR_BTN_GREEN, COLOR_BTN_RED, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER
 from ui_helpers import (
     make_button, make_combobox, make_title_strip, confirm, apply_standard_dialog_chrome,
     DIALOG_TABLE_QSS,
@@ -32,6 +32,7 @@ _PANEL_FG = DEFAULT_COLORS.get("module_foreground",    "#000000")
 
 _COL_RUN   = COLOR_BTN_GREEN
 _COL_CLOSE = "#555555"
+_COL_DELETE_RFI = COLOR_BTN_RED
 
 _WIN_W = 560
 _WIN_H = 340
@@ -138,6 +139,9 @@ class DataManagerDialog(QDialog):
 
         # ── Close ─────────────────────────────────────────────────────────────
         close_row = QHBoxLayout()
+        self.btn_delete_rfi = make_button("Delete RFI Messages", _COL_DELETE_RFI)
+        self.btn_delete_rfi.clicked.connect(self._on_delete_rfi)
+        close_row.addWidget(self.btn_delete_rfi)
         close_row.addStretch()
         self.btn_close = make_button("Close", _COL_CLOSE, 80)
         self.btn_close.clicked.connect(self.accept)
@@ -186,6 +190,23 @@ class DataManagerDialog(QDialog):
         deleted = self.db.delete_rows_older_than(table_key, days)
         QMessageBox.information(self, "Data Manager", f"Deleted {deleted} record(s).")
         self._load_summary()
+
+    def _on_delete_rfi(self) -> None:
+        if not confirm(
+            self, "Data Manager",
+            "Are you sure you want to delete all RFI messages? This cannot be undone.",
+            no_label="Cancel"
+        ):
+            return
+
+        deleted = self.db.delete_rfi_messages()
+        QMessageBox.information(self, "Data Manager", f"Deleted {deleted} RFI message(s).")
+        self._load_summary()
+
+        # Refresh the main window's Messages table so the deleted rows disappear.
+        main = self.parent()
+        if main is not None and hasattr(main, "_load_message_data"):
+            main._load_message_data()
 
 
 if __name__ == "__main__":

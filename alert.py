@@ -32,7 +32,8 @@ from transmit_base import RigDialogMixin
 from ui_helpers import (show_error, get_internet_user_settings, make_button, label_font, apply_standard_dialog_chrome, connect_single,
                         make_title_strip, make_combobox, make_input,
                         make_group_combo, make_callsign_combo, link_group_and_callsign,
-                        make_or_label, mark_callsign_favorite, show_help_dialog)
+                        make_or_label, mark_callsign_favorite, show_help_dialog,
+                        set_group_or_callsign)
 from commsrvr_client import submit_to_commsrvr
 
 if TYPE_CHECKING:
@@ -64,6 +65,14 @@ _COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT 
 
 _HELP_HTML = """
 <div style="font-family: Roboto; font-size: 13px; color: #333333;">
+
+<h3 style="color:#555555;">Save First, Then Transmit</h3>
+<p>Click <b>Save Only</b> to store the alert without sending it, so you can
+preview it before it goes out. The saved alert appears in the alert panel,
+showing how it will look. Move the mouse over the panel and click
+<b>Transmit</b> beside Delete. The alert opens again with your entries filled
+in, so you can make changes before you click <b>Transmit</b> to send it. It
+goes out as a new alert, and the saved copy is deleted.</p>
 
 <h3 style="color:#555555;">Group or Callsign</h3>
 <p>Send the alert to a <b>Group</b> or to a single station's
@@ -134,7 +143,6 @@ class AlertDialog(RigDialogMixin, QDialog):
         apply_standard_dialog_chrome(self, "Alerts", _WIN_W, _WIN_H)
 
         self._setup_ui()
-        self._generate_alert_id()
         self._load_rigs()
 
         self.rig_combo.currentTextChanged.connect(self._on_rig_changed)
@@ -434,6 +442,16 @@ class AlertDialog(RigDialogMixin, QDialog):
 
         return (call, color_value, title, message)
 
+    def prefill_saved(self, target: str, color: int, title: str, message: str) -> None:
+        """Pre-populate the dialog from a Save Only alert so it can be transmitted.
+        It goes out as a new record with an alert ID generated at Transmit."""
+        set_group_or_callsign(self.group_combo, self.callsign_combo, target)
+        idx = self.color_combo.findData(color)
+        if idx >= 0:
+            self.color_combo.setCurrentIndex(idx)
+        self.title_field.setText(title or "")
+        self.message_field.setPlainText((message or "").replace(NEWLINE_PLACEHOLDER, "\n"))
+
     def _generate_alert_id(self) -> None:
         self.alert_id = generate_time_based_id()
 
@@ -453,12 +471,13 @@ class AlertDialog(RigDialogMixin, QDialog):
             self.on_alert_saved()
 
     def _save_to_database(self, callsign: str, color: int, title: str, message: str,
-                          frequency: int = 0, db: int = 30) -> None:
+                          frequency: int = 0, db: int = 30, source: Optional[int] = None) -> None:
         now          = QDateTime.currentDateTime()
         datetime_str = now.toUTC().toString("yyyy-MM-dd HH:mm:ss")
         date_only    = now.toUTC().toString("yyyy-MM-dd")
         target       = self._get_target()
-        source       = 3 if self.rig_combo.currentText() == INTERNET_RIG else 1
+        if source is None:
+            source = 3 if self.rig_combo.currentText() == INTERNET_RIG else 1
 
         with db_connect() as conn:
             conn.execute(
@@ -476,6 +495,7 @@ class AlertDialog(RigDialogMixin, QDialog):
                 submit_to_commsrvr(self, frequency, callsign, alert_data, datetime_str)
 
     def _save_only(self) -> None:
+        self._generate_alert_id()
         if self.rig_combo.currentText() == INTERNET_RIG:
             callsign, grid, state = get_internet_user_settings()
             if not callsign or not grid or not state:
@@ -497,12 +517,14 @@ class AlertDialog(RigDialogMixin, QDialog):
         if result is None:
             return
         callsign, color, title, message = result
-        self._save_to_database(callsign, color, title, message)
+        # source 0 marks a record that was saved locally and never transmitted
+        self._save_to_database(callsign, color, title, message, source=0)
         self.accept()
         if self.on_alert_saved:
             self.on_alert_saved()
 
     def _transmit(self) -> None:
+        self._generate_alert_id()
         result = self._validate_input(validate_callsign=False)
         if result is None:
             return

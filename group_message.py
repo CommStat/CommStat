@@ -17,7 +17,6 @@ from PyQt5.QtCore import QDateTime, Qt
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout,
     QLabel, QPlainTextEdit,
-    QCheckBox,
 )
 
 from constants import (
@@ -25,7 +24,6 @@ from constants import (
     COMMSRVR_URL,
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
     COLOR_BTN_CYAN, COLOR_BTN_BLUE, COLOR_BTN_RED, COLOR_BTN_HELP,
-    COLOR_BTN_GREEN, COLOR_DISABLED_BG, COLOR_DISABLED_TEXT,
     RIG_FETCH_DELAY_MS,
 )
 from db_utils import db_connect
@@ -62,14 +60,7 @@ _COL_CANCEL = "#555555"
 _COL_COUNTER = "#444444"  # muted but legible counter text (COLOR_DISABLED_TEXT is too light here)
 
 _WIN_W          = 700  # matches the Incident dialog
-_WIN_H          = 514  # room for the RFI note below the checkbox
-
-# Shown below the RFI checkbox while it is checked (same idea as the Incident
-# dialog's type description).
-_RFI_NOTE = (
-    "RFIs may request information on any topic. Some groups, including AmRRON and MAGNET,\n"
-    "use RFIs for emergencies only. In their traffic, please follow the group's suggested uses."
-)
+_WIN_H          = 430
 
 # ── Help content ──────────────────────────────────────────────────────────────
 # Beside the feature it documents. Chrome comes from ui_helpers.
@@ -77,38 +68,13 @@ _RFI_NOTE = (
 _HELP_HTML = """
 <div style="font-family: Roboto; font-size: 13px; color: #333333;">
 
-<h3 style="color:#555555;">What Is an RFI?</h3>
-<p>A <b>Request for Information (RFI)</b> is a CommStat message that asks
-other operators for information. Checking the <b>RFI</b> box marks the message
-as an RFI and makes it highly visible, so other operators can see at a glance
-that someone is asking for information.</p>
-
-<h3 style="color:#555555;">When to Use It</h3>
-<p>RFIs can be used for any purpose. You can request information on any
-topic.</p>
-<p>However, some groups, including <b>AmRRON</b> and <b>MAGNET</b>, have
-chosen to use RFIs for <b>emergencies only</b>, such as a regional
-communications outage, severe weather, or another grid-down event. If you are
-participating in their traffic, please follow the group's suggested uses.</p>
-
-<h3 style="color:#555555;">How an RFI Moves</h3>
-<p>In an emergency, a grid-down operator may send a request over radio to an
-<b>RFI Relay Operator</b>, who enters it into CommStat as an RFI. Grid-up
-operators monitoring CommStat see the request, gather the information from
-available resources, and reply through CommStat. The relay operator then
-transmits the answer back over radio to the operator who asked.</p>
-<p>In this way, CommStat serves as an information bridge between an isolated
-area and operators who still have access to outside resources.</p>
-
-<h3 style="color:#555555;">RFI Tracking</h3>
-<p>You don't need to type any tracking information. When you transmit,
-CommStat automatically adds the correct label and the message's TID
-to the beginning of the message, so requests and their
-replies can be matched up.</p>
-<p>For example, a new RFI is sent as <b>RFI Y21 - &lt;your message&gt;</b>,
-and a reply to it is sent as <b>RFI Y21 Reply - &lt;your reply&gt;</b>. The
-TID is captured from the original RFI as soon as you start a reply, so it is
-kept even if you delete the quoted text.</p>
+<h3 style="color:#555555;">Save First, Then Transmit</h3>
+<p>Click <b>Save Only</b> to store the message without sending it, so you can
+preview it before it goes out. The saved message appears in the Messages
+table. Click it to see how it will look, then click <b>Transmit</b> in that
+window. The message opens again with your text filled in, so you can make
+changes before you click <b>Transmit</b> to send it. It goes out as a new
+message, and the saved copy is deleted.</p>
 
 </div>
 """
@@ -155,8 +121,6 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         self.msg_id: str         = ""
         self._pending_message: str   = ""
         self._pending_save_data: Optional[dict] = None
-        self._is_rfi_reply: bool = False
-        self._rfi_reply_tag: str = ""   # e.g. "RFI Y21", captured from the replied-to body
 
 
         apply_standard_dialog_chrome(self, "Group Message", _WIN_W, _WIN_H)
@@ -170,24 +134,15 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         )
 
         self._setup_ui()
-        self._generate_msg_id()
         self._load_config()
         self._load_rigs()
 
-    def set_group_reply_context(self, group_name: str, body: str = "",
-                                is_rfi_reply: bool = False) -> None:
+    def set_group_reply_context(self, group_name: str, body: str = "") -> None:
         """Pre-populate the dialog when opened via 'GRP Reply' from a Message detail view.
 
         Locks the Group selector to the replied-to group (a reply must go back
-        to the same group) and disables the RFI checkbox (a reply is never itself an
-        RFI). When is_rfi_reply is set (the replied-to message has rfi=1), the
-        transmitted marker gets a trailing "-" (see _build_message) identifying it
-        as an RFI Reply on the wire. The "RFI <msg id>" tag is captured from the
-        body now, since the user may delete the body before transmitting.
+        to the same group). Replies to an RFI go through rfi.py instead.
         """
-        self._is_rfi_reply = is_rfi_reply
-        tag_match = re.search(r"\bRFI [A-Y]\d{2}\b", body or "")
-        self._rfi_reply_tag = tag_match.group(0) if tag_match else ""
         group_name = (group_name or "").strip().lstrip("@").upper()
         if group_name:
             idx = self.group_combo.findText(group_name)
@@ -196,21 +151,24 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
                 idx = self.group_combo.findText(group_name)
             self.group_combo.setCurrentIndex(idx)
         self.group_combo.setEnabled(False)
-        self.rfi_checkbox.setChecked(False)
-        self.rfi_checkbox.setEnabled(False)
         if body:
             self.message_edit.setPlainText(body)
 
-    def set_relay_context(self, body: str) -> None:
-        """Pre-populate the dialog when opened via 'Relay' from a Message detail view.
+    def set_saved_context(self, target: str, message: str) -> None:
+        """Pre-populate the dialog from a Save Only message so it can be transmitted.
 
-        Unlike set_group_reply_context(), the Group selector and RFI checkbox
-        stay editable, and the original message text is copied in as-is
-        (no reply separator) since this is a rebroadcast, not a reply.
+        The message goes out as a new record with a new msg_id and timestamp.
+        Saved RFIs go through rfi.py instead.
         """
-        self.rfi_checkbox.setChecked(True)
-        if body:
-            self.message_edit.setPlainText(body)
+        body = (message or "").replace(NEWLINE_PLACEHOLDER, "\n")
+        group_name = (target or "").strip().lstrip("@").upper()
+        if group_name:
+            idx = self.group_combo.findText(group_name, Qt.MatchFixedString)  # case-insensitive
+            if idx < 0:
+                self.group_combo.addItem(group_name)
+                idx = self.group_combo.count() - 1
+            self.group_combo.setCurrentIndex(idx)
+        self.message_edit.setPlainText(body)
 
     # -------------------------------------------------------------------------
     # UI construction
@@ -262,38 +220,6 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         group_row.addStretch()
 
         body.addLayout(group_row)
-
-        # RFI row
-        rfi_row = QHBoxLayout()
-        self.rfi_checkbox = QCheckBox("Request for Information")
-        self.rfi_checkbox.setStyleSheet(
-            "QCheckBox { font-family:Roboto; font-size:13px; font-weight:bold;"
-            f" color:{_PANEL_FG}; }}"
-            f"QCheckBox::indicator {{ width:16px; height:16px; background-color:white;"
-            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:3px; }}"
-            f"QCheckBox::indicator:checked {{ background-color:{COLOR_BTN_GREEN};"
-            f" border:1px solid {COLOR_BTN_GREEN}; }}"
-            f"QCheckBox::indicator:disabled {{ background-color:{COLOR_DISABLED_BG};"
-            f" border:1px solid {COLOR_INPUT_BORDER}; }}"
-            f"QCheckBox::indicator:checked:disabled {{ background-color:{COLOR_DISABLED_TEXT};"
-            f" border:1px solid {COLOR_DISABLED_TEXT}; }}"
-        )
-        rfi_row.addWidget(self.rfi_checkbox)
-        rfi_row.addStretch()
-
-        body.addLayout(rfi_row)
-
-        # RFI note, shown directly below the checkbox while it is checked
-        self.rfi_note = QLabel("")
-        self.rfi_note.setMinimumHeight(48)  # Two-line note height; keeps layout stable while blank
-        self.rfi_note.setAlignment(Qt.AlignCenter)
-        self.rfi_note.setWordWrap(True)
-        self.rfi_note.setStyleSheet(
-            f"QLabel {{ color:{_PANEL_FG}; background-color:transparent;"
-            f" font-family:Roboto; font-size:15px; padding:2px 10px 4px 10px; }}"
-        )
-        body.addWidget(self.rfi_note)
-        self.rfi_checkbox.toggled.connect(self._on_rfi_toggled)
 
         # Message label + inputs
         msg_row = QHBoxLayout()
@@ -365,11 +291,8 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
     # -------------------------------------------------------------------------
 
     def _on_help_clicked(self) -> None:
-        """Explain the Request for Information (RFI) checkbox."""
+        """Explain Save Only / Transmit."""
         show_help_dialog(self, "Group Message Help", _HELP_HTML, width=520)
-
-    def _on_rfi_toggled(self, checked: bool) -> None:
-        self.rfi_note.setText(_RFI_NOTE if checked else "")
 
     def _on_rig_changed(self, rig_name: str) -> None:
         if not rig_name:
@@ -482,13 +405,14 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             self.group_combo.setFocus()
             return None
 
-        message = self._clean_message(self.message_edit.toPlainText())
+        # Drop leading/trailing blank lines and spaces the user typed
+        message = self._clean_message(self.message_edit.toPlainText().strip()).strip()
 
         if len(message) < MIN_MESSAGE_LENGTH:
             show_error(self, "Message too short")
             return None
 
-        return (self.callsign.upper(), self._apply_rfi_text(message))
+        return (self.callsign.upper(), message)
 
     @staticmethod
     def _clean_message(text: str) -> str:
@@ -497,22 +421,9 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         text = text.replace('\r\n', NEWLINE_PLACEHOLDER).replace('\n', NEWLINE_PLACEHOLDER).replace('\r', NEWLINE_PLACEHOLDER)
         return re.sub(r"[^ -~]+", " ", text)
 
-    def _apply_rfi_text(self, message: str) -> str:
-        """For an RFI, prefix "RFI <msg id> - ". For a group reply, prefix "RFI <msg id> Reply - "
-        using the tag captured in set_group_reply_context()."""
-        if self._is_rfi_reply:
-            return f"{self._rfi_reply_tag or 'RFI'} Reply - {message}"
-        if not self.rfi_checkbox.isChecked():
-            return message
-        return f"RFI {self.msg_id} - {message}"
-
     def _build_message(self, message: str) -> str:
         group  = "@" + self.group_combo.currentText()
         marker = "{^%3}" if self.rig_combo.currentText() == INTERNET_RIG else "{^%}"
-        if self.rfi_checkbox.isChecked():
-            marker += "+"
-        if self._is_rfi_reply:
-            marker += "-"
         return f"{group} MSG ,{self.msg_id},{message},{marker}"
 
     # -------------------------------------------------------------------------
@@ -531,7 +442,6 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             'source': 3 if self.rig_combo.currentText() == INTERNET_RIG else 1,
             'target': "@" + self.group_combo.currentText(),
             'msg_id': self.msg_id,
-            'rfi': 2 if self._is_rfi_reply else (1 if self.rfi_checkbox.isChecked() else 0),
         }
 
     def _save_to_database(self, saved_data: dict, global_id: int = 0) -> None:
@@ -544,11 +454,11 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         with db_connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO messages "
-                "(global_id, datetime, date, freq, db, source, msg_id, from_callsign, target, message, rfi) "
-                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "(global_id, datetime, date, freq, db, source, msg_id, from_callsign, target, message) "
+                "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (global_id, saved_data['datetime_str'], saved_data['date_only'], saved_data['frequency'], 30,
                  saved_data['source'], saved_data['msg_id'], saved_data['callsign'],
-                 saved_data['target'], saved_data['message'], saved_data['rfi'])
+                 saved_data['target'], saved_data['message'])
             )
             conn.commit()
 
@@ -562,6 +472,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
     # -------------------------------------------------------------------------
 
     def _save_only(self) -> None:
+        self._generate_msg_id()
         rig_name = self.rig_combo.currentText()
         if rig_name == INTERNET_RIG:
             self.callsign = get_internet_user_settings()[0]
@@ -593,6 +504,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         self.accept()
 
     def _transmit(self) -> None:
+        self._generate_msg_id()
         rig_name = self.rig_combo.currentText()
 
         if rig_name == INTERNET_RIG:
@@ -620,11 +532,9 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
             self._pending_message  = self._build_message(message)
             self._pending_save_data = self._capture_save_data(callsign, message, 0)
             now = QDateTime.currentDateTimeUtc().toString("yyyy-MM-dd HH:mm:ss")
-            rfi_suffix = "+" if self.rfi_checkbox.isChecked() else ""
-            grp_reply_suffix = "-" if self._is_rfi_reply else ""
             message_data = (
                 f"{callsign}: @{self.group_combo.currentText()}"
-                f" MSG ,{self.msg_id},{message},{{^%3}}{rfi_suffix}{grp_reply_suffix}"
+                f" MSG ,{self.msg_id},{message},{{^%3}}"
             )
 
             def _on_internet_commsrvr_complete(global_id: int) -> None:
@@ -655,7 +565,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
         try:
             client.send_tx_message(self._pending_message)
 
-            message = self._apply_rfi_text(self._clean_message(self.message_edit.toPlainText()))
+            message = self._clean_message(self.message_edit.toPlainText().strip()).strip()
 
             self._pending_save_data = self._capture_save_data(self.callsign, message, frequency)
 
@@ -665,9 +575,7 @@ class GroupMessageDialog(RigDialogMixin, QDialog):
                 self._refresh_and_close()
             else:
                 group = "@" + self.group_combo.currentText()
-                rfi_suffix = "+" if self.rfi_checkbox.isChecked() else ""
-                grp_reply_suffix = "-" if self._is_rfi_reply else ""
-                message_data = f"{self.callsign}: {group} MSG ,{self.msg_id},{message},{{^%}}{rfi_suffix}{grp_reply_suffix}"
+                message_data = f"{self.callsign}: {group} MSG ,{self.msg_id},{message},{{^%}}"
 
                 def _on_radio_commsrvr_complete(global_id: int) -> None:
                     self._save_to_database(self._pending_save_data, global_id)

@@ -546,6 +546,21 @@ def link_group_and_callsign(group_combo: QComboBox, callsign_combo: QComboBox) -
     callsign_combo.lineEdit().textChanged.connect(_on_callsign)
 
 
+def set_group_or_callsign(group_combo: QComboBox, callsign_combo: QComboBox, target: str) -> None:
+    """Fill the Group/Callsign pair from a stored target: "@GROUP" selects the
+    group (added if it is no longer in the list), anything else is a callsign."""
+    target = (target or "").strip().upper()
+    if target.startswith("@"):
+        group = target.lstrip("@")
+        idx = group_combo.findText(group, Qt.MatchFixedString)  # case-insensitive
+        if idx < 0:
+            group_combo.addItem(group)
+            idx = group_combo.count() - 1
+        group_combo.setCurrentIndex(idx)
+    elif target:
+        callsign_combo.setEditText(target)
+
+
 def make_or_label() -> QLabel:
     """The small "or" between the Group and Callsign boxes."""
     lbl = QLabel("or")

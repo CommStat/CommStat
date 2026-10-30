@@ -2838,24 +2838,25 @@ class DatabaseManager:
             return cursor.rowcount > 0
         return self._execute(op, False)
 
-    def get_alert_at_offset(self, offset: int) -> Optional[Tuple[str, str, int, str, str, str, int]]:
+    def get_alert_at_offset(self, offset: int) -> Optional[Tuple[str, str, int, str, str, str, int, int]]:
         """Get an alert at the specified offset from most recent.
 
         Args:
             offset: 0 for most recent, 1 for second most recent, etc.
 
         Returns:
-            Tuple of (title, message, color, datetime, from_callsign, group, id) or None.
+            Tuple of (title, message, color, datetime, from_callsign, group, id, source) or None.
         """
         def op(cursor, conn):
             cursor.execute(
-                "SELECT title, message, color, datetime, from_callsign, target, id "
+                "SELECT title, message, color, datetime, from_callsign, target, id, source "
                 "FROM alerts ORDER BY datetime DESC, id DESC LIMIT 1 OFFSET ?",
                 (offset,)
             )
             result = cursor.fetchone()
             if result:
-                return (result[0], result[1], result[2], result[3], result[4] or "", result[5] or "", result[6])
+                return (result[0], result[1], result[2], result[3], result[4] or "", result[5] or "", result[6],
+                        result[7])
             return None
         return self._execute(op, None)
 
@@ -2937,6 +2938,14 @@ class DatabaseManager:
         threshold = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
         def op(cursor, conn):
             cursor.execute(f"DELETE FROM {table} WHERE datetime < ?", (threshold,))
+            conn.commit()
+            return cursor.rowcount
+        return self._execute(op, 0)
+
+    def delete_rfi_messages(self) -> int:
+        """Delete all messages flagged as RFI (rfi > 0). Returns rows deleted."""
+        def op(cursor, conn):
+            cursor.execute("DELETE FROM messages WHERE rfi > 0")
             conn.commit()
             return cursor.rowcount
         return self._execute(op, 0)
@@ -3946,6 +3955,7 @@ class MainWindow(QtWidgets.QMainWindow):
         for name, text, handler in [
             ("statrep",      "Status Report",        self._on_statrep),
             ("send_message", "Message",               self._on_send_message),
+            ("rfi",          "RFI",                   self._on_rfi),
             ("group_alert",  "Alert",                 self._on_group_alert),
             ("group_incident", "Incident",            self._on_group_incident),
         ]:
@@ -5136,13 +5146,25 @@ class MainWindow(QtWidgets.QMainWindow):
         )
         self.alert_delete_btn.clicked.connect(self._alert_delete)
 
+        # Transmit sits beside Delete, only for a Save Only alert (source 0).
+        self.alert_transmit_btn = QtWidgets.QPushButton("Transmit", self.alert_display)
+        self.alert_transmit_btn.setStyleSheet(
+            "QPushButton { background-color: rgba(0,123,255,0.85); color: white; font-family: Roboto; font-size: 13px; font-weight: bold; border: none; border-radius: 4px; padding: 4px 12px; }"
+            "QPushButton:hover { background-color: rgba(0,105,217,0.9); }"
+            "QPushButton:pressed { background-color: rgba(0,98,204,0.95); }"
+        )
+        self.alert_transmit_btn.clicked.connect(self._alert_transmit_saved)
+
         # Prev/Next/Delete only show while the mouse is over the frame -
         # mirrors the video player's body:hover behavior.
         self._alert_hovering = False
         self._alert_has_alert = False
+        self._alert_is_saved_only = False
+        self._alert_shown = None
         self.alert_prev_btn.hide()
         self.alert_next_btn.hide()
         self.alert_delete_btn.hide()
+        self.alert_transmit_btn.hide()
 
         self.alert_display.installEventFilter(self)
 
@@ -5168,8 +5190,17 @@ class MainWindow(QtWidgets.QMainWindow):
                                   h - self.alert_next_btn.height() - margin)
         del_size = self.alert_delete_btn.sizeHint()
         self.alert_delete_btn.resize(del_size)
-        self.alert_delete_btn.move((w - del_size.width()) // 2, h - del_size.height() - margin)
-        for btn in (self.alert_prev_btn, self.alert_next_btn, self.alert_delete_btn):
+        tx_size = self.alert_transmit_btn.sizeHint()
+        self.alert_transmit_btn.resize(tx_size)
+        if self._alert_is_saved_only:
+            # Center the Delete + Transmit pair
+            gap = 8
+            left = (w - del_size.width() - gap - tx_size.width()) // 2
+            self.alert_delete_btn.move(left, h - del_size.height() - margin)
+            self.alert_transmit_btn.move(left + del_size.width() + gap, h - tx_size.height() - margin)
+        else:
+            self.alert_delete_btn.move((w - del_size.width()) // 2, h - del_size.height() - margin)
+        for btn in (self.alert_prev_btn, self.alert_next_btn, self.alert_delete_btn, self.alert_transmit_btn):
             btn.raise_()
 
     def _update_alert_nav_visibility(self) -> None:
@@ -5179,6 +5210,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.alert_prev_btn.setVisible(hovering)
         self.alert_next_btn.setVisible(hovering)
         self.alert_delete_btn.setVisible(hovering and self._alert_has_alert)
+        self.alert_transmit_btn.setVisible(hovering and self._alert_is_saved_only)
 
     def _reposition_message_filter_btn(self) -> None:
         """Pin the Filter toggle to the message table's title bar, all the
@@ -5519,6 +5551,7 @@ class MainWindow(QtWidgets.QMainWindow):
         alert_count = self.db.get_alert_count()
         alert = self.db.get_alert_at_offset(self.alert_index)
         self._alert_shown_id = alert[6] if alert else None   # delete by this id, never by position
+        self._alert_shown = alert
         scale = self._alert_font_scale()
 
         # Update navigation button states
@@ -5526,7 +5559,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.alert_next_btn.setEnabled(self.alert_index > 0)
 
         if alert:
-            title, message, color, date_received, from_callsign, group, _alert_id = alert
+            title, message, color, date_received, from_callsign, group, _alert_id, _source = alert
 
             # Set colors based on alert color - all alerts use red
             color_map = {
@@ -5601,6 +5634,7 @@ class MainWindow(QtWidgets.QMainWindow):
             self.alert_date_label.setText("")
 
         self._alert_has_alert = alert is not None
+        self._alert_is_saved_only = alert is not None and alert[7] == 0
         self._update_alert_nav_visibility()
         self.map_stack.setCurrentWidget(self.alert_display)
         self._reposition_alert_nav_buttons()
@@ -5614,6 +5648,29 @@ class MainWindow(QtWidgets.QMainWindow):
         elif direction > 0 and new_index < self.db.get_alert_count():
             self.alert_index = new_index
             self._show_alert_display()
+
+    def _alert_transmit_saved(self) -> None:
+        """Open the Alert dialog pre-filled from the displayed Save Only alert.
+        Transmitting creates a new record (new ID and timestamp) that replaces the saved one."""
+        alert = self._alert_shown
+        if not alert or alert[7] != 0:
+            return
+        title, message, color, _date, _from, target, saved_id, _source = alert
+        Cls = self._resolve_dialog_class("alert", "AlertDialog")
+        dialog = Cls(self.tcp_pool, self.connector_manager, self._show_newest_alert, parent=self)
+        dialog.prefill_saved(target, color, title, message)
+        # Accepted = Transmit (or Save Only again) added a new record.
+        added = dialog.exec_() == QtWidgets.QDialog.Accepted
+        dialog.deleteLater()
+        if added:
+            # The new record is saved, so the saved copy is no longer needed.
+            self.db.delete_alert_by_id(saved_id)
+            self._show_newest_alert()
+
+    def _show_newest_alert(self) -> None:
+        """Jump the alert display to the most recent alert (the one just added)."""
+        self.alert_index = 0
+        self._show_alert_display()
 
     def _alert_delete(self) -> None:
         """Delete the currently displayed alert and refresh the view."""
@@ -7071,12 +7128,13 @@ class MainWindow(QtWidgets.QMainWindow):
         ])
 
         # Per-column filter boxes, mirroring the contacts table's filter row.
-        # No box for Date Time (not useful to free-text filter), nor for the
-        # blank SNR-color column (col 0, which never has text). Freq matches
-        # its displayed MHz text (e.g. "7.110"). Created once and kept for
-        # the life of the table; the header shows and hides them with the
-        # filter toggle.
-        _EXCLUDED_COLS = {0, 1}  # "", Date Time
+        # No box for the blank SNR-color column (col 0, which never has
+        # text). Date Time matches its displayed text, so "Oct-25" shows
+        # every record from that day regardless of time. Freq matches its
+        # displayed MHz text (e.g. "7.110"). Created once and kept for the
+        # life of the table; the header shows and hides them with the filter
+        # toggle.
+        _EXCLUDED_COLS = {0}  # ""
         filter_font = QtGui.QFont("Kode Mono", -1)
         filter_font.setPixelSize(13)
         filter_style = (
@@ -8823,6 +8881,7 @@ window.commstatBouncePin = function(srid) {
         dlg.pin_changed.connect(lambda _: self._save_map_position(callback=self._load_map))
         dlg.record_deleted.connect(self._load_statrep_data)
         dlg.record_deleted.connect(lambda: self._save_map_position(callback=self._load_map))
+        dlg.record_transmitted.connect(lambda: self._save_map_position(callback=self._load_map))
         accepted = dlg.exec_() == 1
         dlg.deleteLater()
         return accepted
@@ -9529,6 +9588,13 @@ window.commstatBouncePin = function(srid) {
         """Open Send Message window."""
         Cls = self._resolve_dialog_class("group_message", "GroupMessageDialog")
         dialog = Cls(self.tcp_pool, self.connector_manager, self._load_message_data, parent=self)
+        dialog.exec_()
+        dialog.deleteLater()  # parented to the main window; free it once closed
+
+    def _on_rfi(self) -> None:
+        """Open Request for Information window (Internet only)."""
+        Cls = self._resolve_dialog_class("rfi", "RFIDialog")
+        dialog = Cls(refresh_callback=self._load_message_data, parent=self)
         dialog.exec_()
         dialog.deleteLater()  # parented to the main window; free it once closed
 

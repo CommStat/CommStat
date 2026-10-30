@@ -388,6 +388,18 @@ class GroupIncidentDialog(RigDialogMixin, QDialog):
             elif self._forwarder_callsign:
                 self._update_forward_message_field(self._forwarder_callsign)
 
+    def prefill_saved(self, data: dict) -> None:
+        """Pre-populate fields from a Save Only Incident so it can be transmitted.
+
+        Unlike forwarding, everything stays editable and the Incident goes out
+        as a new record: no sr_id is carried over, so Transmit generates a
+        fresh ID and timestamp."""
+        self.prefill({k: v for k, v in data.items() if k not in ("sr_id", "origin_callsign")})
+        group = (data.get("target") or "").strip().lstrip("@").upper()
+        idx = self.to_combo.findText(group, Qt.MatchFixedString) if group else -1  # case-insensitive
+        if idx >= 0:
+            self.to_combo.setCurrentIndex(idx)
+
     def _lock_for_forward_mode(self) -> None:
         """Lock Incident structure fields when forwarding.
 

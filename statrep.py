@@ -30,7 +30,7 @@ from transmit_base import RigDialogMixin
 from ui_helpers import (show_error, show_info, get_internet_user_settings, make_title_strip, make_button, label_font, mono_font, apply_standard_dialog_chrome,
                         connect_single, show_help_dialog, make_combobox, make_input,
                         make_group_combo, make_callsign_combo, link_group_and_callsign,
-                        make_or_label, mark_callsign_favorite)
+                        make_or_label, mark_callsign_favorite, set_group_or_callsign)
 from commsrvr_client import submit_to_commsrvr
 
 if TYPE_CHECKING:
@@ -94,6 +94,14 @@ STATUS_COLORS = {
 
 _HELP_HTML = f"""
 <div style="font-family: Roboto; font-size: 13px; color: #333333;">
+
+<h3 style="color:#555555;">Save First, Then Transmit</h3>
+<p>Click <b>Save Only</b> to store the report without sending it, so you can
+preview it before it goes out. The saved report appears in the StatRep table.
+Click it to see how it will look, then click <b>Transmit</b> in that window.
+The report opens again with your entries filled in, so you can make changes
+before you click <b>Transmit</b> to send it. It goes out as a new report, and
+the saved copy is deleted.</p>
 
 <h3 style="color:#555555;">Mode</h3>
 <table cellspacing="2" cellpadding="2">
@@ -228,6 +236,7 @@ class StatRepDialog(RigDialogMixin, QDialog):
         self._pending_frequency = 0  # For storing frequency during transmit
         self._forwarder_callsign = ""       # Forwarder's callsign in forward mode
         self._forward_original_remarks = "" # Original remarks before "Forwarded By:" is appended
+        self._saved_draft = False           # Re-sending a Save Only report: keep its grid/remarks
 
         # Status combo boxes
         self.status_combos: Dict[str, QComboBox] = {}
@@ -336,14 +345,14 @@ class StatRepDialog(RigDialogMixin, QDialog):
     def _on_rig_changed(self, rig_name: str) -> None:
         """Handle rig selection change - fetch callsign and grid from JS8Call."""
         # Re-arm auto-population for the newly selected rig's fetch.
-        self._grid_user_edited = False
+        self._grid_user_edited = self._saved_draft
         if not rig_name:
             if not getattr(self, '_forward_origin', None):
                 self.callsign = ""
                 self.grid = ""
                 if hasattr(self, 'from_field'):
                     self.from_field.setText("")
-            if hasattr(self, 'grid_field'):
+            if hasattr(self, 'grid_field') and not self._saved_draft:
                 self._grid_auto_populating = True
                 self.grid_field.setText("")
                 self._grid_auto_populating = False
@@ -368,20 +377,21 @@ class StatRepDialog(RigDialogMixin, QDialog):
                 self._forwarder_callsign = callsign
                 self._update_forward_remarks_field(callsign)
             else:
-                self.grid = grid
                 self.callsign = callsign
                 if hasattr(self, 'from_field'):
                     self.from_field.setText(callsign)
-                if hasattr(self, 'grid_field'):
-                    self._grid_auto_populating = True
-                    self.grid_field.setText(grid)
-                    self._grid_auto_populating = False
+                if not self._saved_draft:
+                    self.grid = grid
+                    if hasattr(self, 'grid_field'):
+                        self._grid_auto_populating = True
+                        self.grid_field.setText(grid)
+                        self._grid_auto_populating = False
             if hasattr(self, 'freq_field'):
                 self.freq_field.setText("")
             if hasattr(self, 'mode_combo'):
                 self.mode_combo.setEnabled(False)
                 self.mode_combo.setCurrentIndex(-1)
-            if state and not getattr(self, '_forward_origin', None):
+            if state and not getattr(self, '_forward_origin', None) and not self._saved_draft:
                 self._set_remarks_text(state)
             return
 
@@ -393,7 +403,7 @@ class StatRepDialog(RigDialogMixin, QDialog):
 
         # Update remarks with state from connector (skip if forwarding - preserve forwarded remarks)
         state = get_state_from_connector(self.connector_manager, rig_name)
-        if state and not getattr(self, '_forward_origin', None):
+        if state and not getattr(self, '_forward_origin', None) and not self._saved_draft:
             self._set_remarks_text(state)
 
         if not self.tcp_pool:
@@ -847,6 +857,19 @@ class StatRepDialog(RigDialogMixin, QDialog):
                     self._update_forward_remarks_field(callsign)
             elif self._forwarder_callsign:
                 self._update_forward_remarks_field(self._forwarder_callsign)
+
+    def prefill_saved(self, data: dict) -> None:
+        """Pre-populate fields from a Save Only report so it can be transmitted.
+
+        Unlike forwarding, everything stays editable and the report goes out as
+        a new record: no sr_id is carried over, so Transmit generates a fresh
+        ID and timestamp. The saved grid and remarks are kept even when the
+        rig changes."""
+        self._saved_draft = True
+        self._grid_user_edited = True
+        self.prefill({k: v for k, v in data.items() if k not in ("sr_id", "origin_callsign")})
+        self.remarks_edit.setPlainText(self.remarks_edit.toPlainText().rstrip())
+        set_group_or_callsign(self.group_combo, self.callsign_combo, data.get("target", ""))
 
     def _lock_for_forward_mode(self) -> None:
         """Lock all StatRep structure fields when forwarding.

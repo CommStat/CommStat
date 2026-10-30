@@ -327,6 +327,22 @@ class _RemoteDeleteThread(QThread):
             self.done_with.emit("")
 
 
+def _delete_saved_record(table: str, record_id) -> bool:
+    """Delete a Save Only row (source 0) once its transmitted copy has been saved.
+
+    table is "statrep" or "messages". Returns True if a row was deleted."""
+    if record_id is None:
+        return False
+    try:
+        with db_connect() as conn:
+            cur = conn.execute(f"DELETE FROM {table} WHERE id = ? AND source = 0", (record_id,))
+            conn.commit()
+            return cur.rowcount > 0
+    except sqlite3.Error as e:
+        print(f"Could not delete saved {table} record {record_id}: {e}")
+        return False
+
+
 def _delete_everywhere(parent: QDialog, url: str) -> bool:
     """Delete a record from all CommStat users. The window stays responsive while the
     request runs. On failure, ask whether to delete only the local copy; returns True
@@ -1307,6 +1323,9 @@ class _DetailDialogBase(QDialog):
                  tcp_pool, connector_manager, refresh_callback, min_size: tuple, parent):
         super().__init__(parent)
         apply_standard_dialog_chrome(self, title)
+        # Detail views are read while working in other programs; stay-on-top keeps
+        # them above every desktop window on Linux. Parenting keeps them above CommStat.
+        self.setWindowFlag(Qt.WindowStaysOnTopHint, False)
         self.setModal(True)
         self.setMinimumSize(*min_size)
         self.resize(*min_size)
@@ -1448,6 +1467,7 @@ class StatRepDetailDialog(_DetailDialogBase):
 
     pin_changed = pyqtSignal(bool)
     record_deleted = pyqtSignal()
+    record_transmitted = pyqtSignal()
 
     def __init__(self, record_id: str, callsign: str,
                  internet_available: bool = True,
@@ -1600,9 +1620,15 @@ class StatRepDetailDialog(_DetailDialogBase):
         btn_brevity.clicked.connect(self._on_brevity)
         btn_row.addWidget(btn_brevity)
 
-        btn_forward = make_button("Forward", COLOR_BTN_CYAN)
-        btn_forward.clicked.connect(self._on_forward)
-        btn_row.addWidget(btn_forward)
+        self.btn_forward = make_button("Forward", COLOR_BTN_CYAN)
+        self.btn_forward.clicked.connect(self._on_forward)
+        btn_row.addWidget(self.btn_forward)
+
+        # Shown in place of Forward for a Save Only record (source 0)
+        self.btn_transmit = make_button("Transmit", COLOR_BTN_BLUE)
+        self.btn_transmit.clicked.connect(self._on_transmit_saved)
+        self.btn_transmit.hide()
+        btn_row.addWidget(self.btn_transmit)
 
         btn_print = make_button("Print", COLOR_BTN_GREEN)
         btn_print.clicked.connect(self._on_print)
@@ -1644,8 +1670,16 @@ class StatRepDetailDialog(_DetailDialogBase):
             "comments": row["comments"], "grid": row["grid"],
             "sr_id": row["sr_id"],
             "scope": row["scope"],
+            "target": row["target"],
             "origin_callsign": self.callsign,
         })
+
+        try:
+            is_saved_only = int(row["source"]) == 0
+        except (TypeError, ValueError):
+            is_saved_only = False
+        self.btn_forward.setVisible(not is_saved_only)
+        self.btn_transmit.setVisible(is_saved_only)
 
         global_id = row["global_id"] or 0
         self._global_id = global_id
@@ -1837,6 +1871,37 @@ class StatRepDetailDialog(_DetailDialogBase):
         dlg.prefill(self._row_data)
         dlg.exec_()
         dlg.deleteLater()
+
+    def _on_transmit_saved(self) -> None:
+        """Open the composer pre-filled from this Save Only record. Transmitting
+        creates a new record (new ID and timestamp) that replaces the saved one."""
+        if not self._tcp_pool or not self._connector_manager or not self._row_data:
+            return
+
+        scope = (self._row_data.get("scope") or "").strip().upper()
+        if scope in ("EVENT", "ATTACK"):
+            from group_incident import GroupIncidentDialog
+            dlg = GroupIncidentDialog(
+                self._tcp_pool, self._connector_manager, self,
+                module_background=self._module_bg,
+            )
+            dlg.prefill_saved({**self._row_data, "pinned": self.pin_toggle.isChecked()})
+        else:
+            from statrep import StatRepDialog
+            dlg = StatRepDialog(
+                self._tcp_pool, self._connector_manager, self,
+                module_background=self._module_bg,
+            )
+            dlg.prefill_saved(self._row_data)
+        # Accepted = Transmit (or Save Only again) added a new record.
+        added = dlg.exec_() == QDialog.Accepted
+        dlg.deleteLater()
+        if added:
+            # The new record is saved, so the saved copy is no longer needed.
+            _delete_saved_record("statrep", self._record_id)
+            # Closing as accepted makes the main window reload its StatRep table.
+            self.record_transmitted.emit()
+            self.accept()
 
     def _font_data_uri(self, ttf_path: str) -> str:
         """Read a .ttf file and return a base64 data URI for @font-face embedding."""
@@ -2472,8 +2537,8 @@ originally requested the information.</p>
 <h3 style="color:#555555;">The Forward Button</h3>
 <p>The <b>Forward</b> button is used exclusively to forward messages marked
 as a <b>Request for Information</b> on to other CommStat users. Clicking it
-opens the Group Message dialog with the original message copied in as-is
-and the <b>RFI</b> checkbox already checked.</p>
+opens the Request for Information dialog with the original message copied
+in. It is sent by Internet as a new RFI with its own Global ID.</p>
 <p>The button is only active when the message's <b>RFI Status</b> is
 <b>RFI Request</b>&mdash;the initial request, not a reply&mdash;and it was
 <b>received via RF only</b>. This is the situation where a relay operator
@@ -2597,6 +2662,12 @@ class MessageDetailDialog(_DetailDialogBase):
         self.btn_relay.clicked.connect(self._on_relay_clicked)
         btn_row.addWidget(self.btn_relay)
 
+        # Shown in place of Forward for a Save Only message (source 0)
+        self.btn_transmit = make_button("Transmit", COLOR_BTN_BLUE)
+        self.btn_transmit.clicked.connect(self._on_transmit_saved)
+        self.btn_transmit.hide()
+        btn_row.addWidget(self.btn_transmit)
+
         self.btn_close = make_button("Close", _COL_CANCEL)
         self.btn_close.clicked.connect(self._on_close_clicked)
         btn_row.addWidget(self.btn_close)
@@ -2612,18 +2683,24 @@ class MessageDetailDialog(_DetailDialogBase):
         self._reply_with_js8("\n\n----------\n" + original)
 
     def _on_grp_reply_clicked(self) -> None:
-        """Reply to this message via a new Group Message, seeded with the original body."""
-        from group_message import GroupMessageDialog
+        """Reply to this message via a new Group Message (or an RFI Reply when this
+        is an RFI), seeded with the original body."""
         original = self.message_text.replace("||", "\n")
         prefill = "\n\n----------\n" + original
-        dlg = GroupMessageDialog(
-            tcp_pool=self._tcp_pool,
-            connector_manager=self._connector_manager,
-            refresh_callback=self._refresh_callback,
-            internet_available=self.internet_available,
-            parent=self,
-        )
-        dlg.set_group_reply_context(self._target, prefill, is_rfi_reply=self._rfi == 1)
+        if self._rfi == 1:
+            from rfi import RFIDialog
+            dlg = RFIDialog(refresh_callback=self._refresh_callback, parent=self)
+            dlg.set_reply_context(self._target, prefill, self._global_id)
+        else:
+            from group_message import GroupMessageDialog
+            dlg = GroupMessageDialog(
+                tcp_pool=self._tcp_pool,
+                connector_manager=self._connector_manager,
+                refresh_callback=self._refresh_callback,
+                internet_available=self.internet_available,
+                parent=self,
+            )
+            dlg.set_group_reply_context(self._target, prefill)
         dlg.exec_()
         dlg.deleteLater()
 
@@ -2631,20 +2708,42 @@ class MessageDetailDialog(_DetailDialogBase):
         show_help_dialog(self, "Message Details Help", _MSG_DETAIL_HELP_HTML, width=520)
 
     def _on_relay_clicked(self) -> None:
-        """Rebroadcast this RFI via a new Group Message, seeded with the original
-        body as-is and the RFI checkbox pre-checked."""
-        from group_message import GroupMessageDialog
+        """Rebroadcast this RFI via a new Request for Information, seeded with the
+        original body."""
+        from rfi import RFIDialog
         original = self.message_text.replace("||", "\n")
-        dlg = GroupMessageDialog(
-            tcp_pool=self._tcp_pool,
-            connector_manager=self._connector_manager,
-            refresh_callback=self._refresh_callback,
-            internet_available=self.internet_available,
-            parent=self,
-        )
-        dlg.set_relay_context(original)
+        dlg = RFIDialog(refresh_callback=self._refresh_callback, parent=self)
+        dlg.set_forward_context(self._target, original)
         dlg.exec_()
         dlg.deleteLater()
+
+    def _on_transmit_saved(self) -> None:
+        """Open a Group Message (or Request for Information, for a saved RFI)
+        pre-filled from this Save Only message. Transmitting creates a new record
+        (new ID and timestamp) that replaces the saved one."""
+        if self._rfi in (1, 2):
+            from rfi import RFIDialog
+            dlg = RFIDialog(refresh_callback=self._refresh_callback, parent=self)
+            dlg.set_saved_context(self._target, self.message_text, self._rfi)
+        else:
+            from group_message import GroupMessageDialog
+            dlg = GroupMessageDialog(
+                tcp_pool=self._tcp_pool,
+                connector_manager=self._connector_manager,
+                refresh_callback=self._refresh_callback,
+                internet_available=self.internet_available,
+                parent=self,
+            )
+            dlg.set_saved_context(self._target, self.message_text)
+        # Accepted = Transmit (or Save Only again) added a new record.
+        added = dlg.exec_() == QDialog.Accepted
+        dlg.deleteLater()
+        if added:
+            # The new record is saved, so the saved copy is no longer needed.
+            if _delete_saved_record("messages", self._record_id):
+                self._deleted_any = True
+                self.record_deleted.emit()
+            self.accept()
 
     def _on_close_clicked(self) -> None:
         if self._deleted_any:
@@ -2687,6 +2786,8 @@ class MessageDetailDialog(_DetailDialogBase):
         except (TypeError, ValueError):
             self._source = None
         self.btn_relay.setEnabled(self._source == 1 and self._rfi == 1)
+        self.btn_relay.setVisible(self._source != 0)
+        self.btn_transmit.setVisible(self._source == 0)
         _rfi_status_map = {1: "RFI Request", 2: "RFI Reply"}
         self.qrz_info.lbl_msg_rfi.setText(
             f'<span style="{_k}">RFI Status:</span>  {_rfi_status_map.get(self._rfi, "N/A")}'
