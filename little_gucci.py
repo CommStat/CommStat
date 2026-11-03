@@ -12040,7 +12040,6 @@ def main() -> None:
     _tile_scheme = QWebEngineUrlScheme(b'tiles')
     _tile_scheme.setFlags(
         QWebEngineUrlScheme.SecureScheme |
-        QWebEngineUrlScheme.LocalScheme |
         QWebEngineUrlScheme.CorsEnabled
     )
     QWebEngineUrlScheme.registerScheme(_tile_scheme)
