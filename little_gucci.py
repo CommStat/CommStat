@@ -3399,6 +3399,14 @@ class MainWindow(QtWidgets.QMainWindow):
             self._handle_copy_shortcut
         )
 
+        # Double-tap R refreshes StatReps, messages, and the map. Text inputs
+        # claim plain letter keys via ShortcutOverride, so typing "r" in a
+        # filter box still types instead of firing this.
+        self._last_r_press = 0.0
+        refresh_shortcut = QtWidgets.QShortcut(QtGui.QKeySequence("R"), self)
+        refresh_shortcut.setAutoRepeat(False)
+        refresh_shortcut.activated.connect(self._handle_refresh_shortcut)
+
         # Populate the filter menu group checkboxes
         self._populate_filter_groups_menu()
         self._populate_watchlist_pins_menu()
@@ -4208,6 +4216,10 @@ class MainWindow(QtWidgets.QMainWindow):
         create_action(self.tools_menu, "Data Manager", "data_manager", self._on_data_manager)
         create_action(self.tools_menu, "Video Manager", "video_manager", self._on_video_manager)
         create_action(self.tools_menu, "Maintenance", "maintenance", self._on_maintenance)
+
+        # Optional add-on: only listed when rfi_watch_floor.py sits next to this file.
+        if os.path.isfile(self._rfi_watch_floor_path()):
+            create_action(self.tools_menu, "RFI Watch Floor", "rfi_watch_floor", self._on_rfi_watch_floor)
 
         self._fix_plain_menu_indent(self.tools_menu)
 
@@ -7522,6 +7534,15 @@ class MainWindow(QtWidgets.QMainWindow):
         elif focused in (self.message_table, self.message_table.viewport()):
             self._copy_table_current_cell(self.message_table)
 
+    def _handle_refresh_shortcut(self) -> None:
+        """Refresh all data views when R is pressed twice within 500 ms."""
+        now = time.monotonic()
+        if now - self._last_r_press <= 0.5:
+            self._last_r_press = 0.0
+            self._refresh_all_data()
+        else:
+            self._last_r_press = now
+
     def _show_table_copy_menu(self, table: QtWidgets.QTableWidget, pos) -> None:
         """Show a right-click Copy context menu for any table cell."""
         item = table.itemAt(pos)
@@ -10313,6 +10334,28 @@ window.commstatBouncePin = function(srid) {
         dialog = Cls(self)
         dialog.exec_()
         dialog.release()  # frees the dialog, but only after its worker thread has finished
+
+    @staticmethod
+    def _rfi_watch_floor_path() -> str:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)), "rfi_watch_floor.py")
+
+    def _on_rfi_watch_floor(self) -> None:
+        """Launch the standalone RFI Watch Floor (tkinter) as its own process."""
+        path = self._rfi_watch_floor_path()
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, path],
+                cwd=os.path.dirname(path),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                # No stray console window on Windows when CommStat runs under pythonw.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except OSError as e:
+            QtWidgets.QMessageBox.warning(self, "RFI Watch Floor", f"Could not start RFI Watch Floor:\n{e}")
+            return
+        # Reap the process when it exits so it doesn't linger as a zombie.
+        threading.Thread(target=proc.wait, daemon=True).start()
 
     def _populate_filter_groups_menu(self) -> None:
         """Populate filter menu with per-group checkboxes above 'Show Other Groups'."""
