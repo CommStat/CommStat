@@ -163,7 +163,10 @@ COMMON_PACKAGES = [
     # numpy>=2.4 wheels default to an x86-64-v2 CPU baseline and crash on
     # older/virtualized CPUs (RuntimeError: "doesn't support: (X86_V2)").
     # Pin below that until numpy restores a broader default baseline.
-    "numpy<2.4",
+    # Exception: Windows on Python 3.15+ has no prebuilt numpy<2.4 wheel, so the
+    # pin cannot be met (pip would compile a broken numpy from source or fail).
+    # Use the newest numpy there; on a very old CPU, use Python 3.13/3.14 instead.
+    "numpy" if (sys.platform == "win32" and sys.version_info >= (3, 15)) else "numpy<2.4",
     "pandas",
     "maidenhead",
     "certifi",

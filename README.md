@@ -129,6 +129,8 @@ CommStat checks for new versions automatically via the backbone, so operators al
 ### Cross-Platform
 First-class support for **Windows, macOS, and Linux** — including Raspberry Pi.
 
+**Python version note (Windows):** Python 3.13 or 3.14 is the safest choice. Python 3.15 works with the latest `install.py`, but if you see a numpy CPU error (`X86_V2`) or `install.py` stops at numpy, install Python 3.13 or 3.14 and run `python install.py` again.
+
 ---
 
 ## A Growing Community
