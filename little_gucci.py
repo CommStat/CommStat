@@ -5455,7 +5455,7 @@ class MainWindow(QtWidgets.QMainWindow):
             else:
                 QTimer.singleShot(0, lambda: self._set_map_view_mode("contacts"))
 
-    def _unlock_map_pane(self, min_w: int = 626, min_h: int = 352) -> None:
+    def _unlock_map_pane(self, min_w: int = 654, min_h: int = 368) -> None:
         """Make the lower-left pane splitter-resizable with the given minimum."""
         self.map_stack.setMinimumSize(min_w, min_h)
         self.map_stack.setMaximumSize(16777215, 16777215)

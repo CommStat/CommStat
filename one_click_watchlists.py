@@ -59,6 +59,7 @@ _CATALOG = [
     ("US Strategic Dams",       33, 3, "Major U.S. dams of strategic significance"),
     ("Top 25 US Refineries",    34, 4, "The 25 largest U.S. petroleum refineries by capacity"),
     ("Top 40 US Airports",      35, 5, "The 40 busiest U.S. airports by passenger traffic"),
+    ("All 50 State Capitals",   36, 6, "The capital city of each of the 50 U.S. states"),
 ]
 
 # QThreads started for an install are parked here so closing the dialog
