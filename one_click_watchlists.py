@@ -41,7 +41,7 @@ _DATA_FG  = DEFAULT_COLORS.get("data_foreground",      "#000000")
 _COL_INSTALL = "#28a745"
 _COL_CLOSE   = "#555555"
 
-_WIN_W = 640
+_WIN_W = 820
 _WIN_H = 380
 
 _COMMSRVR = COMMSRVR_URL

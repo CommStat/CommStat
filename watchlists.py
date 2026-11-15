@@ -46,7 +46,7 @@ _COL_SAVE    = "#28a745"
 _COL_CANCEL  = "#555555"
 _COL_HELP    = COLOR_BTN_HELP
 
-_WIN_W = 810
+_WIN_W = 900
 _WIN_H = 400
 
 _TABLE_COLS = ["Watchlist Name", "Members", "Active", "Object Color", "Object Shape", "Comment"]
@@ -271,7 +271,9 @@ class WatchlistsDialog(QDialog):
             max_len=80,
         )
 
-        _name_w  = 136
+        # Name input fills whatever width the column auto-fit to (long preset
+        # names), never less than 136.
+        _name_w  = max(136, self.table.columnWidth(_COL_NAME) + 16)
         _color_w = 136
         _shape_w = 128
 
