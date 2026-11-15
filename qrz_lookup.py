@@ -45,6 +45,7 @@ from constants import (
     COMMSRVR_URL, DATAFEED_URL,
     DEFAULT_COLORS, COLOR_INPUT_TEXT, COLOR_INPUT_BORDER,
     COLOR_BTN_RED, COLOR_BTN_GRAY, COLOR_BTN_BLUE, COLOR_BTN_CYAN, COLOR_BTN_GREEN, COLOR_BTN_HELP,
+    USER_AGENT,
 )
 from db_utils import db_connect
 # Single source of truth for mouse-wheel zoom dampening — see little_gucci.py
@@ -266,7 +267,9 @@ class _ImageLoader(QThread):
         if urllib.parse.urlparse(self.url).scheme.lower() not in ("http", "https"):
             return
         try:
-            with urllib.request.urlopen(self.url, timeout=10, context=create_verified_ssl_context()) as resp:
+            # cdn-xml.qrz.com (Cloudflare) returns 403 for the default Python-urllib User-Agent.
+            req = urllib.request.Request(self.url, headers={"User-Agent": USER_AGENT})
+            with urllib.request.urlopen(req, timeout=10, context=create_verified_ssl_context()) as resp:
                 data = resp.read(_MAX_IMAGE_BYTES + 1)
             if len(data) > _MAX_IMAGE_BYTES:
                 return
@@ -286,8 +289,8 @@ class _ImageLoader(QThread):
                         target_h = 166 if px.height() * 2.0 > px.width() else 126
                     scaled = px.scaledToHeight(target_h, Qt.SmoothTransformation)
                 self.image_loaded.emit(scaled)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[QRZ] Image load failed for {self.url}: {e}")
 
 
 def _get_local_callsign() -> str:

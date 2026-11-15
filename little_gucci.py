@@ -23,6 +23,7 @@ import io
 import re
 import csv
 import json
+import html as html_module
 import faulthandler
 import socket
 import ssl
@@ -917,6 +918,9 @@ def _extract_youtube_id(url: str) -> Optional[str]:
 # than the 16:9 box and shifted up 95px within it so YouTube's edge-anchored
 # chrome (paused-state share / "More videos" / "Watch on YouTube" row at the
 # bottom, title bar at the top) sits outside the visible 16:9 area.
+# #sharedBy (top center, hover-only, same look as the YouTube button) shows
+# "Shared by {callsign} on {date}"; it ignores clicks so the tap overlay
+# still toggles play/pause underneath it.
 _VIDEO_PLAYER_HTML = """<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <style>
@@ -950,11 +954,16 @@ display:flex;opacity:0;pointer-events:none;transition:opacity .15s ease;}
 border-radius:4px;padding:4px 12px;font-family:Roboto, sans-serif;font-size:13px;cursor:pointer;
 margin-right:8px;}
 #youtube:hover{background:rgba(40,167,69,0.85);}
+#sharedBy{position:absolute;top:8px;left:50%;transform:translateX(-50%);z-index:10;
+opacity:0;pointer-events:none;transition:opacity .15s ease;white-space:nowrap;
+background:rgba(0,0,0,0.65);color:#fff;border:1px solid #999;
+border-radius:4px;padding:4px 12px;font-family:Roboto, sans-serif;font-size:13px;}
 #delete{background:rgba(220,53,69,0.85);color:#fff;font-family:Roboto, sans-serif;
 font-size:13px;font-weight:bold;border:none;border-radius:4px;padding:4px 12px;cursor:pointer;}
 #delete:hover{background:rgba(200,35,51,0.9);}
 #delete:active{background:rgba(189,33,48,0.95);}
 body:hover #prev,body:hover #next,body:hover #bottomCenter{opacity:1;pointer-events:auto;}
+body:hover #sharedBy{opacity:1;}
 </style></head>
 <body>
 <div id="player"></div>
@@ -962,6 +971,7 @@ body:hover #prev,body:hover #next,body:hover #bottomCenter{opacity:1;pointer-eve
 <div id="tap"></div>
 <button id="prev" onclick="window.location='commstat://video-prev';">&#9664; Prev</button>
 <button id="next" onclick="window.location='commstat://video-next';">Next &#9654;</button>
+<div id="sharedBy">__SHARED_BY__</div>
 <div id="bottomCenter">
 <button id="youtube" onclick="window.location='commstat://video-youtube/__VIDEO_ID__';">YouTube</button>
 <button id="delete" onclick="window.location='commstat://video-delete';">Delete</button>
@@ -8669,7 +8679,12 @@ window.commstatBouncePin = function(srid) {
         if not video_id:
             self._set_map_view_mode(getattr(self, '_last_map_region', 'us'))
             return
-        self._play_video(video_id)
+        shared_by = ""
+        if row[4] or row[3]:
+            shared_by = f"Shared by {row[4] or 'unknown'}"
+            if row[3]:
+                shared_by += f" on {row[3][:10]}"
+        self._play_video(video_id, shared_by)
         self.db.mark_video_played(video_row_id)
         self._update_video_button_indicator()
         # Instagram POC kept for reference — embed loads but playback fails:
@@ -8704,13 +8719,16 @@ window.commstatBouncePin = function(srid) {
         self._update_video_button_indicator()
         self._play_video_at_index()
 
-    def _play_video(self, video_id: str) -> None:
+    def _play_video(self, video_id: str, shared_by: str = "") -> None:
         """Play a YouTube video in the map pane; the map returns when it ends."""
         # Make sure the web view is the visible pane in the map stack
         if self.map_stack.currentWidget() is not self.map_widget:
             self._set_map_view_mode(getattr(self, '_last_map_region', 'us'))
 
-        html = _VIDEO_PLAYER_HTML.replace("__VIDEO_ID__", video_id)
+        html = (_VIDEO_PLAYER_HTML.replace("__VIDEO_ID__", video_id)
+                .replace("__SHARED_BY__", html_module.escape(shared_by)))
+        if not shared_by:
+            html = html.replace('<div id="sharedBy">', '<div id="sharedBy" style="display:none">')
         self.map_widget.setHtml(html, QUrl("http://localhost/"))
 
     def _play_instagram(self, reel_url: str) -> None:

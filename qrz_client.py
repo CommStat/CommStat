@@ -10,6 +10,8 @@ to minimize API calls.
 
 import sqlite3
 import sys
+import threading
+import time
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -30,6 +32,28 @@ CACHE_DAYS = 30  # How long to cache callsign data
 def qrz_log(msg: str) -> None:
     """Always print a QRZ console log line."""
     print(f"[QRZ] {msg}")
+
+
+# One dialog open reads the cache several times (fresh check, stale fallback,
+# then QRZClient.lookup on the worker thread). Print a given cache-status line
+# once per burst instead of once per read.
+_CACHE_LOG_WINDOW_S = 5.0
+_cache_log_lock = threading.Lock()
+_cache_log_last: Dict[str, float] = {}
+
+
+def _qrz_log_cache_status(msg: str) -> None:
+    now = time.monotonic()
+    with _cache_log_lock:
+        last = _cache_log_last.get(msg)
+        if last is not None and now - last < _CACHE_LOG_WINDOW_S:
+            return
+        _cache_log_last[msg] = now
+        if len(_cache_log_last) > 200:
+            for k, t in list(_cache_log_last.items()):
+                if now - t >= _CACHE_LOG_WINDOW_S:
+                    del _cache_log_last[k]
+    qrz_log(msg)
 
 
 # Session-wide XML subscription status, learned from the SubExp element of the
@@ -135,11 +159,11 @@ def read_qrz_cache(callsign: str) -> Tuple[Optional[Dict], bool]:
                 cached_date = cached_date.replace(tzinfo=timezone.utc)
             age_days = (datetime.now(timezone.utc) - cached_date).days
             if age_days < CACHE_DAYS:
-                qrz_log(f"Cache hit for {cs} (age: {age_days} days)")
+                _qrz_log_cache_status(f"Cache hit for {cs} (age: {age_days} days)")
                 return dict(row), True
             # What happens next (API refresh vs. local data) is decided and
             # logged by QRZClient.lookup().
-            qrz_log(f"Cache expired for {cs} (age: {age_days} days)")
+            _qrz_log_cache_status(f"Cache expired for {cs} (age: {age_days} days)")
             return dict(row), False
     except (sqlite3.Error, ValueError, TypeError) as e:
         qrz_log(f"Could not read the local qrz table for {cs}: {e}")

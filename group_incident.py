@@ -84,8 +84,15 @@ attention.</p>
 
 <p>An Attack is a deliberate hostile act that has occurred, or is in
 progress, at a particular location&mdash;for example an armed assault,
-bombing, arson, sabotage of infrastructure, or other act of violence
-against people or property.</p>
+bombing, arson, vehicle ramming, drone attack, kidnapping or hostage-taking,
+sabotage of infrastructure, chemical, biological, or radiological release
+(including deliberate contamination of a water or food supply), or other
+act of violence against people or property.</p>
+
+<p>Radio or GPS jamming is also an Attack, as is a cyber attack such as
+ransomware or hacking that disrupts a hospital, utility, government office,
+or other organization. For jamming or a cyber attack, use the grid square
+of the affected area.</p>
 
 <p>Attacks follow the same rules as Events: they must have a Maidenhead grid
 square and may be pinned to the map. Attacks are shown on the map and in the
@@ -134,7 +141,7 @@ INCIDENT_TYPES = {
     "Attack": (
         STATUS_ATTACK, "ATTACK",
         "An Attack is a deliberate hostile act that has occurred or is in "
-        "progress,\nsuch as an armed assault, bombing, arson, or sabotage.",
+        "progress,\nsuch as an armed assault, bombing, arson, sabotage, or cyber attack.",
     ),
 }
 
