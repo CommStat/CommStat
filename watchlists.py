@@ -46,7 +46,7 @@ _COL_SAVE    = "#28a745"
 _COL_CANCEL  = "#555555"
 _COL_HELP    = COLOR_BTN_HELP
 
-_WIN_W = 760
+_WIN_W = 810
 _WIN_H = 400
 
 _TABLE_COLS = ["Watchlist Name", "Members", "Active", "Object Color", "Object Shape", "Comment"]
@@ -248,9 +248,9 @@ class WatchlistsDialog(QDialog):
             self._edit_name = name_val
 
         self._iw_name = make_input(
-            placeholder="Watchlist name (max 15 chars)",
+            placeholder="Watchlist name (max 40 chars)",
             default=name_val,
-            max_len=15,
+            max_len=40,
             widget=UpperCaseLineEdit(),
         )
         self._iw_name.textChanged.connect(lambda _: self._on_inline_changed())
@@ -272,7 +272,7 @@ class WatchlistsDialog(QDialog):
         )
 
         _name_w  = 136
-        _color_w = 112
+        _color_w = 136
         _shape_w = 128
 
         # Cols 0/2/3 are ResizeToContents and would clamp back to data width,

@@ -14,7 +14,7 @@ from typing import Dict
 # Application Identity
 # =============================================================================
 
-VERSION = "5.6b"
+VERSION = "5.7"
 
 # Identifies CommStat in outbound HTTP requests (User-Agent) and the QRZ XML "agent" field.
 USER_AGENT = f"CommStat/{VERSION}"
@@ -131,12 +131,14 @@ DEFAULT_COLORS: Dict[str, str] = {
 WATCHLIST_OBJECT_COLORS: Dict[str, str] = {
     'BLACK':  '#000000',
     'BLUE':   '#0000FF',
+    'CYAN':   '#00FFFF',
     'GRAY':   '#808080',
     'GREEN':  '#00FF00',
     'ORANGE': '#f07800',
     'PINK':   '#ff66ff',
     'PURPLE': '#8000ff',
     'RED':    '#FF0000',
+    'TEAL':   '#008080',
     'WHITE':  '#FFFFFF',
     'YELLOW': '#ffff00',
 }

@@ -42,7 +42,7 @@ _COL_INSTALL = "#28a745"
 _COL_CLOSE   = "#555555"
 
 _WIN_W = 640
-_WIN_H = 340
+_WIN_H = 380
 
 _COMMSRVR = COMMSRVR_URL
 _WATCHLIST_URL = _COMMSRVR + "/watchlist-808585.php"
@@ -57,6 +57,8 @@ _COL_NAME, _COL_STATUS, _COL_DESC = range(3)
 _CATALOG = [
     ("US Nuclear Power Plants", 32, 2, "All operating U.S. commercial nuclear power plants"),
     ("US Strategic Dams",       33, 3, "Major U.S. dams of strategic significance"),
+    ("Top 25 US Refineries",    34, 4, "The 25 largest U.S. petroleum refineries by capacity"),
+    ("Top 40 US Airports",      35, 5, "The 40 busiest U.S. airports by passenger traffic"),
 ]
 
 # QThreads started for an install are parked here so closing the dialog
