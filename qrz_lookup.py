@@ -449,7 +449,7 @@ class _QRZThread(QThread):
 # ── Clickable image label ──────────────────────────────────────────────────
 
 class _ClickableImageLabel(QLabel):
-    """QLabel that opens a URL in the browser when clicked (if one is set)."""
+    """QLabel that opens its image URL in the browser when clicked (if one is set)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -822,14 +822,16 @@ class _QRZInfoSection(QWidget):
         self.lbl_lat.setText(f'<span style="{_k}">Lat:</span> {_esc(d["lat"])}' if d["lat"] else "")
         self.lbl_lon.setText(f'<span style="{_k}">Lon:</span> {_esc(d["lon"])}' if d["lon"] else "")
 
-        profile_url = f"https://www.qrz.com/db/{d['call']}" if d["call"] else ""
+        # Clicking the photo opens the image itself (not the QRZ profile page).
+        # Only web URLs - the record's image field could hold any scheme.
+        image_url = d["image"] if urllib.parse.urlparse(d["image"]).scheme.lower() in ("http", "https") else ""
 
         self.lbl_moddate.setText(
             f"QRZ profile last modified: {d['moddate'].split()[0]}" if d["moddate"] else ""
         )
 
         self.lbl_image.clear()
-        self.lbl_image.set_url(profile_url)
+        self.lbl_image.set_url(image_url)
         _detach_loader(self._img_loader)
         self._img_loader = None
         if d["image"]:

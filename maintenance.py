@@ -75,6 +75,16 @@ _PRESET_CODES = [
      "If you missed this version, use this code to retrieve it again.<br><br>"
      "<b><span style='color:#CC0000;'>Note:</span></b> The download trigger "
      "may take up to three minutes to complete."),
+    ("DY4088", "Remove All 1-click Watchlists",
+     "Removes every <b>1-click Watchlist</b> you have installed, along with "
+     "its members and contacts (the 1-click data spans three tables in the "
+     "local database). Watchlists you created yourself are not affected.<br><br>"
+     "On <b>November 18, 2026</b>, photos were added to every 1-click "
+     "Watchlist, and the watchlists that were missing addresses now have "
+     "them. To get the updated data, run this code, then reinstall the "
+     "watchlists you want from <b>Manage Watchlists</b> → <b>Presets</b>.<br><br>"
+     "<b><span style='color:#CC0000;'>Note:</span></b> This update runs "
+     "instantly — there is no waiting period."),
 ]
 
 
