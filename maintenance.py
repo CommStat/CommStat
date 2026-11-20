@@ -97,9 +97,10 @@ class _MaintenanceWorker(QThread):
     """
     result_ready = pyqtSignal(str, str, dict)  # (status, message, config_updates) — status in {"success","invalid","error"}
 
-    def __init__(self, code: str):
+    def __init__(self, code: str, callsign: str = ""):
         super().__init__()
         self.code = code
+        self.callsign = callsign
 
     def run(self) -> None:
         import netguard
@@ -108,7 +109,8 @@ class _MaintenanceWorker(QThread):
             return
 
         try:
-            url = f"{_MAINTENANCE_URL}?code={urllib.parse.quote(self.code)}"
+            url = _MAINTENANCE_URL + "?" + urllib.parse.urlencode(
+                {"code": self.code, "cs": self.callsign}, quote_via=urllib.parse.quote)
             with urllib.request.urlopen(url, timeout=10, context=create_verified_ssl_context()) as resp:
                 content = resp.read().decode("utf-8").strip()
         except Exception as e:
@@ -153,8 +155,9 @@ class _MaintenanceWorker(QThread):
 class MaintenanceDialog(QDialog):
     """Small dialog: enter a code, click Run, apply whatever the server returns."""
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, callsign: str = ""):
         super().__init__(parent)
+        self._callsign = callsign
         apply_standard_dialog_chrome(self, "Maintenance", _WIN_W, _WIN_H)
         self.setStyleSheet(f"QDialog {{ background-color: {_PANEL_BG}; }}")
 
@@ -261,7 +264,7 @@ class MaintenanceDialog(QDialog):
         self.btn_run.setEnabled(False)
         self.lbl_status.setText("Checking…")
 
-        self._worker = _MaintenanceWorker(code)
+        self._worker = _MaintenanceWorker(code, self._callsign)
         self._worker.result_ready.connect(self._on_worker_result)
         self._worker.start()
 

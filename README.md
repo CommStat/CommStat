@@ -129,6 +129,22 @@ CommStat checks for new versions automatically via the backbone, so operators al
 ### Cross-Platform
 First-class support for **Windows, macOS, and Linux** — including Raspberry Pi.
 
+---
+
+## Installation
+
+Download or clone this repository, open a terminal in the CommStat folder, and run the installer for your operating system. You don't need to run `install.py` yourself on macOS or Linux; the scripts below run it for you.
+
+| OS | Run | What it does |
+|----|-----|--------------|
+| **macOS** | `./macinstall.sh` | Installs Python 3 and Enchant via Homebrew (if missing), runs `install.py` for the Python packages, and adds a `CommStat.app` to `/Applications` (Finder, Launchpad, Spotlight). Requires [Homebrew](https://brew.sh). |
+| **Linux / Raspberry Pi** | `./linuxinstall.sh` | Installs the system packages (Qt WebEngine, Multimedia, etc.) with `apt`, then runs `install.py`. Debian/Ubuntu-based systems. |
+| **Windows** | `python install.py` | Installs the Python packages with pip. Install [Python](https://www.python.org/downloads/) first and tick "Add Python to PATH". |
+
+Then start CommStat with `python3 commstat.py` (`python commstat.py` on Windows), or use the CommStat app on macOS.
+
+If you later upgrade Python, packages don't carry over to the new version. Run the installer again (or `python3 install.py`) and you'll be back up and running. A `ModuleNotFoundError` on startup, such as `No module named 'folium'`, means this step is needed.
+
 **Python version note (Windows):** Python 3.13 or 3.14 is the safest choice. Python 3.15 works with the latest `install.py`, but if you see a numpy CPU error (`X86_V2`) or `install.py` stops at numpy, install Python 3.13 or 3.14 and run `python install.py` again.
 
 ---

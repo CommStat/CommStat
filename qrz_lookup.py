@@ -49,7 +49,7 @@ from constants import (
 )
 from db_utils import db_connect
 # Single source of truth for mouse-wheel zoom dampening — see little_gucci.py
-from little_gucci import MAP_WHEEL_PX_PER_ZOOM
+from little_gucci import MAP_WHEEL_PX_PER_ZOOM, _LINK_COLOR
 from ssl_utils import create_verified_ssl_context
 from ui_helpers import (
     apply_standard_dialog_chrome, connect_single, make_button, make_input, make_title_strip,
@@ -551,8 +551,20 @@ class _QRZInfoSection(QWidget):
         self._hdr_bg = hdr_bg
         self._hdr_fg = hdr_fg
         self._skip_last_seen = skip_last_seen
+        self._watchlist_mode = False
         self._last_seen_call: str = ""
         self._build()
+
+    def set_watchlist_mode(self, on: bool) -> None:
+        """Watchlist records (qrz.type > 1) show just the callsign in the
+        banner and no Last Seen line - they are not contacts."""
+        self._watchlist_mode = on
+        self.lbl_last_seen.setVisible(not on)
+
+    def _hdr_text(self, call: str = "") -> str:
+        if self._watchlist_mode:
+            return call
+        return f"QRZ API Lookup For: {call}" if call else "QRZ API Lookup For:"
 
     def _build(self) -> None:
         self._main_layout = QVBoxLayout(self)
@@ -584,6 +596,11 @@ class _QRZInfoSection(QWidget):
         self.lbl_addr2   = QLabel(); self.lbl_addr2.setFont(_mono_font())
         self.lbl_county  = QLabel(); self.lbl_county.setFont(_mono_font())
         self.lbl_country = QLabel(); self.lbl_country.setFont(_mono_font())
+        # "Google Map" link under Country; opened in the system browser (no API key needed).
+        self.lbl_map = QLabel(); self.lbl_map.setFont(_mono_font())
+        self.lbl_map.setTextFormat(Qt.RichText)
+        self.lbl_map.setTextInteractionFlags(Qt.LinksAccessibleByMouse)
+        self.lbl_map.linkActivated.connect(self._open_map_link)
         self.lbl_last_seen = QLabel(); self.lbl_last_seen.setFont(_mono_font())
         self.lbl_license    = QLabel(); self.lbl_license.setFont(_mono_font())
         self.lbl_grid    = QLabel(); self.lbl_grid.setFont(_mono_font())
@@ -614,7 +631,8 @@ class _QRZInfoSection(QWidget):
         grid.addWidget(self.lbl_lat,          6, 1)
         grid.addWidget(self.lbl_country,      7, 0)
         grid.addWidget(self.lbl_lon,          7, 1)
-        grid.setRowStretch(8, 1)
+        grid.addWidget(self.lbl_map,          8, 0)
+        grid.setRowStretch(9, 1)
         outer.addLayout(grid, 2)
 
         # ── Column 3 (1/3): image + photo status + moddate ───────────────
@@ -787,11 +805,17 @@ class _QRZInfoSection(QWidget):
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
         self.lbl_last_seen.setText(f'<span style="{_k}">Last Seen:</span> {_esc(value)}')
 
+    @staticmethod
+    def _open_map_link(url: str) -> None:
+        import netguard
+        if netguard.guard("Google Map link"):
+            webbrowser.open(url)
+
     def update_data(self, data: dict) -> None:
         """Populate all labels from raw QRZ data (API or cached format)."""
         d = _normalize_qrz(data)
 
-        self.hdr.setText(f"QRZ API Lookup For: {d['call']}")
+        self.hdr.setText(self._hdr_text(d['call']))
         self.lbl_call.setText("")
         self.lbl_name.setText(f"<b>{_esc(d['name'])}</b>" if d["name"] else "")
 
@@ -801,11 +825,26 @@ class _QRZInfoSection(QWidget):
             city_state = (city_state + " " + d["zip"]).strip()
         self.lbl_addr2.setText(city_state)
 
+        parts = [d["addr1"], d["addr2"], d["state"], d["zip"], d["country"]]
+        if d["addr1"] or d["addr2"]:
+            q = urllib.parse.quote(", ".join(x.strip() for x in parts if x and x.strip()))
+            import netguard
+            if netguard.is_network_enabled():
+                self.lbl_map.setText(
+                    f'<a href="https://www.google.com/maps/search/?api=1&amp;query={q}" '
+                    f'style="color:{_LINK_COLOR};">Google Map</a>')
+            else:
+                # Off-Grid: show the words but not as a link.
+                self.lbl_map.setText("Google Map")
+        else:
+            self.lbl_map.clear()
+
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
         self.lbl_county.setText(f'<span style="{_k}">County:</span> {_esc(d["county"])}' if d["county"] else "")
         self.lbl_country.setText(f'<span style="{_k}">Country:</span> {_esc(d["country"])}' if d["country"] else "")
 
-        if d["call"] and not self._skip_last_seen and d["call"] != self._last_seen_call:
+        if d["call"] and not self._skip_last_seen and not self._watchlist_mode \
+                and d["call"] != self._last_seen_call:
             self._last_seen_call = d["call"]
             self.lbl_last_seen.setText(f'<span style="{_k}">Last Seen:</span> —')
             self._fetch_last_seen(d["call"])
@@ -884,16 +923,17 @@ class _QRZInfoSection(QWidget):
         if self._gif_movie:
             self._gif_movie.stop()
             self._gif_movie = None
-        self.hdr.setText("QRZ API Lookup For:")
+        self.hdr.setText(self._hdr_text())
         self.lbl_call.clear()
         self.lbl_name.clear()
         self.lbl_addr1.clear()
         self.lbl_addr2.clear()
+        self.lbl_map.clear()
         self.lbl_moddate.clear()
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
         self.lbl_county.setText(f"<span style='{_k}'>County:</span>")
         self.lbl_country.setText(f"<span style='{_k}'>Country:</span>")
-        if not self._skip_last_seen:
+        if not self._skip_last_seen and not self._watchlist_mode:
             self.lbl_last_seen.setText(f"<span style='{_k}'>Last Seen:</span>")
         else:
             self.lbl_last_seen.clear()
@@ -910,10 +950,10 @@ class _QRZInfoSection(QWidget):
         if self._gif_movie:
             self._gif_movie.stop()
             self._gif_movie = None
-        self.hdr.setText("QRZ API Lookup For:")
+        self.hdr.setText(self._hdr_text())
         self.clear_qrz_status()
         for w in (self.lbl_call, self.lbl_name, self.lbl_addr1, self.lbl_addr2,
-                  self.lbl_county, self.lbl_country, self.lbl_last_seen, self.lbl_license,
+                  self.lbl_county, self.lbl_country, self.lbl_map, self.lbl_last_seen, self.lbl_license,
                   self.lbl_grid, self.lbl_lat, self.lbl_lon,
                   self.lbl_image, self.lbl_moddate):
             w.clear()
@@ -1001,6 +1041,7 @@ class QRZLookupDialog(QDialog):
         self._internet_available = bool(self.parent() and getattr(self.parent(), '_internet_available', True))
         self._pending_dm = None
         self._send_result.connect(self._on_send_result)
+        self._watchlist_mode = False
         self._setup_ui()
 
         cs = initial_callsign.strip().upper()
@@ -1029,7 +1070,8 @@ class QRZLookupDialog(QDialog):
         main.setSpacing(10)
 
         # Title
-        main.addWidget(make_title_strip(self._title, self._program_bg, self._program_fg))
+        self.title_strip = make_title_strip(self._title, self._program_bg, self._program_fg)
+        main.addWidget(self.title_strip)
 
         row = QHBoxLayout()
         # Callsign box: favorites dropdown ("CALLSIGN, Name, Address, City,
@@ -1098,7 +1140,7 @@ class QRZLookupDialog(QDialog):
         self.btn_close_lookup.clicked.connect(self.reject)
 
         if not self._internet_available:
-            no_inet = QLabel("No Internet Connection  ·  Direct Messaging Unavailable")
+            no_inet = self.lbl_no_inet = QLabel("No Internet Connection  ·  Direct Messaging Unavailable")
             no_inet.setAlignment(Qt.AlignCenter)
             no_inet.setStyleSheet(
                 f"QLabel {{ color:{self._module_fg}; background-color:transparent;"
@@ -1122,6 +1164,48 @@ class QRZLookupDialog(QDialog):
     def _adjust_for_image_width(self, img_width: int) -> None:
         if img_width > 275:
             self.resize(self.width() + (img_width - 275), self.height())
+
+    # ── Watchlist mode (qrz.type > 1) ────────────────────────────────────────
+
+    @staticmethod
+    def _is_watchlist(row) -> bool:
+        try:
+            return int((row or {}).get("type") or 1) > 1
+        except (TypeError, ValueError):
+            return False
+
+    def _apply_mode(self, row) -> None:
+        """Switch between the contact layout and the trimmed watchlist layout
+        based on the record's type. Called on every search outcome; row is
+        None when nothing was found (contact layout)."""
+        on = self._is_watchlist(row)
+        if on == self._watchlist_mode:
+            return
+        self._watchlist_mode = on
+        text = "Watchlist Lookup" if on else self._title
+        self.title_strip.setText(text)
+        self.setWindowTitle(text)
+        self.qrz_info.set_watchlist_mode(on)
+        # Watchlist members are not contacts: no direct-message input.
+        self.msg_edit.setVisible(not on)
+        if hasattr(self, "lbl_no_inet"):
+            self.lbl_no_inet.setVisible(not on)
+        if on:
+            self.btn_clear_msg.setVisible(False)
+            self.btn_send.setVisible(False)
+        else:
+            self._on_msg_changed()
+        extra = self.msg_edit.maximumHeight() + 10  # fixed input height plus layout spacing
+        if on:
+            self.setMinimumSize(825, 500 - extra)
+            self.resize(self.width(), self.height() - extra)
+        else:
+            self.setMinimumSize(825, 500)
+            self.resize(self.width(), self.height() + extra)
+
+    def _focus_after_search(self) -> None:
+        if not self._watchlist_mode:
+            self.msg_edit.setFocus()
 
     def _on_help_clicked(self) -> None:
         show_help_dialog(self, f"{self._title} Help", _QRZ_LOOKUP_HELP_HTML, width=860, height=480)
@@ -1147,6 +1231,7 @@ class QRZLookupDialog(QDialog):
             self.lbl_status.setText(
                 f"QRZ Subscription not configured — {cs} {found_str} in local database"
             )
+            self._apply_mode(cached_any)
             if cached_any:
                 self.qrz_info.update_data(cached_any)
                 self.memo_edit.blockSignals(True)
@@ -1154,7 +1239,7 @@ class QRZLookupDialog(QDialog):
                 self.memo_edit.blockSignals(False)
             else:
                 self.qrz_info.show_no_data_placeholder()
-            self.msg_edit.setFocus()
+            self._focus_after_search()
             return
 
         if not is_active:
@@ -1162,6 +1247,7 @@ class QRZLookupDialog(QDialog):
             self.lbl_status.setText(
                 f"QRZ Subscription not enabled — {cs} {found_str} in local database"
             )
+            self._apply_mode(cached_any)
             if cached_any:
                 self.qrz_info.update_data(cached_any)
                 self.memo_edit.blockSignals(True)
@@ -1169,16 +1255,17 @@ class QRZLookupDialog(QDialog):
                 self.memo_edit.blockSignals(False)
             else:
                 self.qrz_info.show_no_data_placeholder()
-            self.msg_edit.setFocus()
+            self._focus_after_search()
             return
 
         if cached_fresh:
             self.lbl_status.setText("")
+            self._apply_mode(cached_fresh)
             self.qrz_info.update_data(cached_fresh)
             self.memo_edit.blockSignals(True)
             self.memo_edit.setText(cached_fresh.get("memo") or "")
             self.memo_edit.blockSignals(False)
-            self.msg_edit.setFocus()
+            self._focus_after_search()
             return
 
         self.lbl_status.setText(f"Looking up {cs}…")
@@ -1192,14 +1279,18 @@ class QRZLookupDialog(QDialog):
         self.btn_search.setEnabled(True)
         if result:
             self.lbl_status.setText("")
+            # The API result may lack the local type column; read it from the cache row.
+            self._apply_mode(result if "type" in result else get_qrz_cached(
+                str(result.get("call") or result.get("callsign") or ""), include_stale=True))
             self.qrz_info.update_data(result)
             self.memo_edit.blockSignals(True)
             self.memo_edit.setText(result.get("memo") or "")
             self.memo_edit.blockSignals(False)
         else:
             self.lbl_status.setText("No results found.")
+            self._apply_mode(None)
             self.qrz_info.show_no_data_placeholder()
-        self.msg_edit.setFocus()
+        self._focus_after_search()
 
     def _save_memo(self) -> None:
         """Save memo text to the qrz table on focus-out."""

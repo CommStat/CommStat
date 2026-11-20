@@ -5704,6 +5704,13 @@ class MainWindow(QtWidgets.QMainWindow):
             self.alert_index = max(0, count - 1)
         self._show_alert_display()
 
+    def _current_callsign(self) -> str:
+        """Callsign sent to commsrvr: first active JS8 connector callsign, else user settings."""
+        callsign = next((cs for cs in self.rig_callsigns.values() if cs), None)
+        if not callsign:
+            callsign, _, __ = self.db.get_user_settings()
+        return callsign or "UNKNOWN"
+
     def _fetch_commsrvr_content(self) -> Optional[str]:
         """Fetch and extract content from commsrvr server.
 
@@ -5711,12 +5718,7 @@ class MainWindow(QtWidgets.QMainWindow):
             Extracted content string, or None on error.
         """
         try:
-            # Get callsign: prefer first active JS8 connector callsign, fall back to user settings
-            callsign = next((cs for cs in self.rig_callsigns.values() if cs), None)
-            if not callsign:
-                callsign, _, __ = self.db.get_user_settings()
-            if not callsign:
-                callsign = "UNKNOWN"
+            callsign = self._current_callsign()
 
             # Get db_version, build_number, data_id, msg_id, and qrz_id from controls table
             db_version = 0
@@ -10349,7 +10351,7 @@ window.commstatBouncePin = function(srid) {
     def _on_maintenance(self) -> None:
         """Open Maintenance window."""
         Cls = self._resolve_dialog_class("maintenance", "MaintenanceDialog")
-        dialog = Cls(self)
+        dialog = Cls(self, callsign=self._current_callsign())
         dialog.exec_()
         dialog.release()  # frees the dialog, but only after its worker thread has finished
 
