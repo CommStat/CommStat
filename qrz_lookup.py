@@ -30,7 +30,7 @@ from typing import Callable, Dict, Optional, Tuple
 import folium
 import maidenhead as mh
 from PyQt5.QtCore import QBuffer, QByteArray, QObject, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt5.QtGui import QColor, QCursor, QFont, QMovie, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QMovie, QPainter, QPixmap
 from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
 from PyQt5.QtWidgets import (
     QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -489,6 +489,58 @@ class _GrowPlainTextEdit(QPlainTextEdit):
         return QSize(super().minimumSizeHint().width(), self.minimumHeight() or 34)
 
 
+class _WrappingMemoEdit(QPlainTextEdit):
+    """Word-wrapping contact-note box sized to show several lines at once.
+
+    Mirrors the QLineEdit API the callers use (text / setText /
+    editingFinished) so it is a drop-in replacement for the one-line memo
+    input. The memo is still stored as a single line — other dialogs show it
+    in a QLineEdit — so Enter commits instead of inserting a newline, and
+    pasted line breaks become spaces.
+    """
+    editingFinished = pyqtSignal()
+
+    def __init__(self, placeholder: str = "", visible_lines: int = 2, parent=None):
+        super().__init__(parent)
+        self.setPlaceholderText(placeholder)
+        self.setTabChangesFocus(True)
+        self.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        font = _mono_font()
+        font.setPixelSize(13)  # match the stylesheet so the metrics below are right
+        self.setFont(font)
+        self.setStyleSheet(
+            f"QPlainTextEdit {{ background-color:white; color:{COLOR_INPUT_TEXT};"
+            f" border:1px solid {COLOR_INPUT_BORDER}; border-radius:4px; padding:2px 6px;"
+            f" font-family:'Kode Mono'; font-size:13px; }}"
+            f"QPlainTextEdit:focus {{ border:1px solid {COLOR_BTN_BLUE}; }}"
+        )
+        # lines of text + document margins (2 × 4) + padding (2 × 2) + border (2 × 1)
+        # + a few px of slack so the last line never trips the scrollbar
+        fm = QFontMetrics(font)
+        self.setFixedHeight(fm.lineSpacing() * visible_lines + 8 + 4 + 2 + 6)
+
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, text: str) -> None:
+        self.setPlainText(text)
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.editingFinished.emit()
+            return
+        super().keyPressEvent(event)
+
+    def insertFromMimeData(self, source) -> None:
+        if source.hasText():
+            self.insertPlainText(" ".join(source.text().splitlines()))
+
+    def focusOutEvent(self, event) -> None:
+        super().focusOutEvent(event)
+        self.editingFinished.emit()
+
+
 class _ToggleSwitch(QWidget):
     """iOS-style toggle switch that emits toggled(bool) on state change."""
     toggled = pyqtSignal(bool)
@@ -556,14 +608,16 @@ class _QRZInfoSection(QWidget):
         self._build()
 
     def set_watchlist_mode(self, on: bool) -> None:
-        """Watchlist records (qrz.type > 1) show just the callsign in the
+        """Watchlist records (qrz.type > 1) show just the record's name in the
         banner and no Last Seen line - they are not contacts."""
         self._watchlist_mode = on
         self.lbl_last_seen.setVisible(not on)
 
-    def _hdr_text(self, call: str = "") -> str:
+    def _hdr_text(self, call: str = "", name: str = "") -> str:
         if self._watchlist_mode:
-            return call
+            # Watchlist entries are places/things, so the name reads better
+            # than the synthetic callsign; fall back to the callsign if unnamed.
+            return name or call
         return f"QRZ API Lookup For: {call}" if call else "QRZ API Lookup For:"
 
     def _build(self) -> None:
@@ -658,6 +712,16 @@ class _QRZInfoSection(QWidget):
     def add_memo_row(self, trailing_space: int = 12) -> QLineEdit:
         """Add a contact-note label, input, and separator spanning all three columns."""
         return self._add_note_input("Add a contact note…", trailing_space=trailing_space)
+
+    def add_wrapping_memo_row(self, visible_lines: int = 2,
+                              trailing_space: int = 12) -> "_WrappingMemoEdit":
+        """Like add_memo_row, but the note box wraps and shows visible_lines lines."""
+        self._main_layout.addSpacing(10)
+        memo_input = _WrappingMemoEdit("Add a contact note…", visible_lines)
+        self._main_layout.addWidget(memo_input)
+        if trailing_space:
+            self._main_layout.addSpacing(trailing_space)
+        return memo_input
 
     def add_statrep_memo_row(self) -> QPlainTextEdit:
         """Add a multi-line status-report-note input that grows to fill extra vertical space."""
@@ -815,7 +879,7 @@ class _QRZInfoSection(QWidget):
         """Populate all labels from raw QRZ data (API or cached format)."""
         d = _normalize_qrz(data)
 
-        self.hdr.setText(self._hdr_text(d['call']))
+        self.hdr.setText(self._hdr_text(d['call'], d['name']))
         self.lbl_call.setText("")
         self.lbl_name.setText(f"<b>{_esc(d['name'])}</b>" if d["name"] else "")
 
@@ -1109,9 +1173,16 @@ class QRZLookupDialog(QDialog):
         self.qrz_info = _QRZInfoSection(hdr_bg=self._program_bg, hdr_fg=self._program_fg, parent=self)
         self.qrz_info.image_width_ready.connect(self._adjust_for_image_width)
         self.qrz_info.show_no_data_placeholder()
-        self.memo_edit = self.qrz_info.add_memo_row()
+        self.memo_edit = self.qrz_info.add_wrapping_memo_row(visible_lines=2)
         self.memo_edit.editingFinished.connect(self._save_memo)
         main.addWidget(self.qrz_info)
+        # The dialog's base height was tuned for the old 34px one-line memo;
+        # grow it by the extra height of the 2-line box (applies to both the
+        # contact and the watchlist layout - see _apply_mode).
+        memo_extra = max(0, self.memo_edit.maximumHeight() - 34)
+        self._base_min_h = 500 + memo_extra
+        self.setMinimumSize(825, self._base_min_h)
+        self.resize(902, 580 + memo_extra)
 
         self.msg_edit = QPlainTextEdit()
         self.msg_edit.setFont(_mono_font())
@@ -1197,10 +1268,10 @@ class QRZLookupDialog(QDialog):
             self._on_msg_changed()
         extra = self.msg_edit.maximumHeight() + 10  # fixed input height plus layout spacing
         if on:
-            self.setMinimumSize(825, 500 - extra)
+            self.setMinimumSize(825, self._base_min_h - extra)
             self.resize(self.width(), self.height() - extra)
         else:
-            self.setMinimumSize(825, 500)
+            self.setMinimumSize(825, self._base_min_h)
             self.resize(self.width(), self.height() + extra)
 
     def _focus_after_search(self) -> None:
