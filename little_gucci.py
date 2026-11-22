@@ -5711,14 +5711,21 @@ class MainWindow(QtWidgets.QMainWindow):
             callsign, _, __ = self.db.get_user_settings()
         return callsign or "UNKNOWN"
 
-    def _fetch_commsrvr_content(self) -> Optional[str]:
-        """Fetch and extract content from commsrvr server.
+    def _fetch_commsrvr_content(self, rig_callsign: Optional[str],
+                                rig_connected: bool) -> Optional[str]:
+        """Fetch and extract content from commsrvr server (worker thread).
+
+        rig_callsign / rig_connected are snapshotted on the GUI thread by
+        _check_commsrvr so this never touches GUI-thread state.
 
         Returns:
             Extracted content string, or None on error.
         """
         try:
-            callsign = self._current_callsign()
+            callsign = rig_callsign
+            if not callsign:
+                callsign, _, __ = self.db.get_user_settings()
+            callsign = callsign or "UNKNOWN"
 
             # Get db_version, build_number, data_id, msg_id, and qrz_id from controls table
             db_version = 0
@@ -5747,7 +5754,7 @@ class MainWindow(QtWidgets.QMainWindow):
                 print(f"Error reading controls table for heartbeat: {type(e).__name__}: {e}")
 
             # Only report qrz_id when at least one JS8 connector is in "Connected" status
-            qrz_value = qrz_id if self.tcp_pool.get_connected_rig_names() else 0
+            qrz_value = qrz_id if rig_connected else 0
 
             # Build heartbeat URL with callsign, data_id, msg_id, qrz_id, db_version, and build_number parameters
             # urlencode: a callsign from JS8Call can contain spaces, "&" or non-ASCII
@@ -6207,7 +6214,15 @@ class MainWindow(QtWidgets.QMainWindow):
             try:
                 callsign = self._grid_queue.get(timeout=30)
             except queue.Empty:
-                return                   # idle: the thread ends and is started again when needed
+                # Idle: decide to exit under _grid_lock, re-checking the queue, so
+                # _defer_grid_upgrade can't enqueue just as this thread leaves and
+                # see it as still alive. Clearing _grid_thread tells it to start a
+                # new worker.
+                with self._grid_lock:
+                    if not self._grid_queue.empty():
+                        continue
+                    self._grid_thread = None
+                return
             try:
                 qrz_grid = self._lookup_grid_for_callsign(callsign, network=True)
                 with self._grid_lock:
@@ -7019,10 +7034,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.image_prev_btn.setVisible(hovering)
         self.image_next_btn.setVisible(hovering)
 
-    def _check_commsrvr_content_async(self) -> None:
+    def _check_commsrvr_content_async(self, rig_callsign: Optional[str],
+                                      rig_connected: bool) -> None:
         """Background thread to check commsrvr for updates."""
         try:
-            content = self._fetch_commsrvr_content()
+            content = self._fetch_commsrvr_content(rig_callsign, rig_connected)
             if not content:
                 return
 
@@ -9291,9 +9307,19 @@ window.commstatBouncePin = function(srid) {
             print("[COMMSRVR] The previous check is still running; skipping this one")
             return
 
+        # Snapshot GUI-thread state here: the worker must not walk rig_callsigns
+        # (mutated on connector changes) or call QTcpSocket.state() on sockets
+        # owned by the GUI thread.
+        try:
+            rig_callsign = next((cs for cs in self.rig_callsigns.values() if cs), None)
+            rig_connected = bool(self.tcp_pool.get_connected_rig_names())
+        except Exception:
+            self._commsrvr_lock.release()
+            raise
+
         def run() -> None:
             try:
-                self._check_commsrvr_content_async()
+                self._check_commsrvr_content_async(rig_callsign, rig_connected)
             finally:
                 self._commsrvr_lock.release()
 
@@ -9415,9 +9441,12 @@ window.commstatBouncePin = function(srid) {
 
     def _on_rss_fetched(self) -> None:
         """Called when RSS fetch completes (from background thread)."""
-        # Use QTimer to safely update UI from main thread
-        QTimer.singleShot(0, self._update_headlines_from_fetch)
+        # A QTimer.singleShot started on a thread with no event loop may never
+        # fire; a queued invokeMethod always runs on the main window's thread.
+        QtCore.QMetaObject.invokeMethod(
+            self, "_update_headlines_from_fetch", QtCore.Qt.QueuedConnection)
 
+    @QtCore.pyqtSlot()
     def _update_headlines_from_fetch(self) -> None:
         """Update headlines list and start display (called on main thread)."""
         feed_name = self.config.get_selected_rss_feed()
@@ -12058,11 +12087,17 @@ window.commstatBouncePin = function(srid) {
             """Poll for fetch completion and update dialog."""
             if closed['flag']:
                 return          # dialog was closed before the download finished
-            if fetch_result['data']:
+            # 'is not None', not truthiness: an empty 200 body is b'' and is a
+            # finished (failed) download, not "still loading".
+            if fetch_result['data'] is not None:
                 pixmap = QtGui.QPixmap()
-                pixmap.loadFromData(fetch_result['data'])
-                image_label.setPixmap(pixmap)
-                dialog.adjustSize()
+                if fetch_result['data'] and pixmap.loadFromData(fetch_result['data']):
+                    image_label.setPixmap(pixmap)
+                    dialog.adjustSize()
+                elif fetch_result['data']:
+                    image_label.setText(f"{error_prefix}: the server did not return a valid image")
+                else:
+                    image_label.setText(f"{error_prefix}: the server returned an empty response")
             elif fetch_result['error']:
                 image_label.setText(f"{error_prefix}: {fetch_result['error']}")
             else:

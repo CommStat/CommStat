@@ -60,6 +60,7 @@ _CATALOG = [
     ("Top 25 US Refineries",    34, 4, "The 25 largest U.S. petroleum refineries by capacity"),
     ("Top 40 US Airports",      35, 5, "The 40 busiest U.S. airports by passenger traffic"),
     ("All 50 State Capitals",   36, 6, "The capital city of each of the 50 U.S. states"),
+    ("32 NFL Teams/Stadiums",   37, 7, "The home stadium of each of the 32 NFL teams"),
 ]
 
 # QThreads started for an install are parked here so closing the dialog
@@ -116,8 +117,19 @@ class _InstallThread(QThread):
         if not content.startswith("db_update"):
             # The server replies "0" (heartbeat convention) when the preset
             # has no dataset yet.
-            err = ("This watchlist is not yet available on the server"
-                   if content == "0" else "Unexpected server response")
+            if content == "0":
+                err = "This watchlist is not yet available on the server"
+            else:
+                # Echo the server's reply to the terminal so server-side
+                # SQL/PHP errors are visible to fix. Truncated (an HTML error
+                # or captive-portal page can be huge) and guarded so a console
+                # encoding failure can't kill the thread before install_done.
+                try:
+                    print(f"[1-click Watchlists] request {self._request} "
+                          f"reply: {content[:500]!r}")
+                except Exception:
+                    pass
+                err = "Unexpected server response"
             self.install_done.emit(self._request, False, err)
             return
 

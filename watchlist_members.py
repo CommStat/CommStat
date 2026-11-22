@@ -77,16 +77,26 @@ class _BulkLookupThread(QThread):
         self._use_api = use_api
 
     def run(self) -> None:
-        client = QRZClient(self._username, self._password) if self._use_api else None
         resolved, failed, fetched = [], [], []
+        try:
+            client = QRZClient(self._username, self._password) if self._use_api else None
+        except Exception as e:
+            print(f"[Bulk Add] QRZ client init failed: {e}")
+            client = None
         total = len(self._callsigns)
         for done, cs in enumerate(self._callsigns, 1):
-            self.progress.emit(done, total, cs)
-            row = get_qrz_cached(cs, include_stale=True)
-            if row is None and client is not None:
-                if client.lookup(cs):
-                    fetched.append(cs)
-                    row = get_qrz_cached(cs, include_stale=True)
+            # An exception escaping QThread.run aborts the app, and lookup_done
+            # must always fire or the dialog stays stuck mid-lookup.
+            try:
+                self.progress.emit(done, total, cs)
+                row = get_qrz_cached(cs, include_stale=True)
+                if row is None and client is not None:
+                    if client.lookup(cs):
+                        fetched.append(cs)
+                        row = get_qrz_cached(cs, include_stale=True)
+            except Exception as e:
+                print(f"[Bulk Add] Lookup failed for {cs}: {e}")
+                row = None
             if row:
                 resolved.append(cs)
             else:

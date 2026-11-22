@@ -8,6 +8,7 @@ Provides callsign lookups via QRZ.com with local database caching
 to minimize API calls.
 """
 
+import http.client
 import sqlite3
 import sys
 import threading
@@ -298,6 +299,11 @@ class QRZClient:
         except ET.ParseError as e:
             qrz_log(f"Response parse error: {e}")
             return None
+        except (OSError, http.client.HTTPException, UnicodeDecodeError) as e:
+            # Read timeouts and dropped connections surface as TimeoutError /
+            # ConnectionResetError / RemoteDisconnected, not URLError.
+            qrz_log(f"Connection failed: {e}")
+            return None
 
     def login(self, username: str = None, password: str = None) -> bool:
         """
@@ -463,7 +469,10 @@ class QRZClient:
                     else:
                         qrz_log("Session expired, re-authenticating...")
                         if self.login():
-                            return self.lookup(callsign, use_cache=False, _retried=True)
+                            # The retry skips the cache, so it has no stale row of
+                            # its own: fall back to this attempt's local row.
+                            retry = self.lookup(callsign, use_cache=False, _retried=True)
+                            return retry or stale_data
                 else:
                     qrz_log(f"Lookup error for {callsign}: {error.text}")
                 return stale_data

@@ -30,7 +30,7 @@ from typing import Callable, Dict, Optional, Tuple
 import folium
 import maidenhead as mh
 from PyQt5.QtCore import QBuffer, QByteArray, QObject, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
-from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QMovie, QPainter, QPixmap
+from PyQt5.QtGui import QColor, QCursor, QFont, QFontMetrics, QImage, QMovie, QPainter, QPixmap
 from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
 from PyQt5.QtWidgets import (
     QDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -223,6 +223,17 @@ def _start_worker(thread: QThread) -> QThread:
     return thread
 
 
+def _emit_if_alive(signal, *args) -> None:
+    """Emit from a worker thread to a dialog that may have been closed meanwhile.
+    A sip.isdeleted() check before emitting is racy (the dialog can be destroyed
+    between check and emit), so attempt the emit and ignore the RuntimeError
+    raised for a deleted C++ object."""
+    try:
+        signal.emit(*args)
+    except RuntimeError:
+        pass
+
+
 def _detach_loader(loader) -> None:
     """Stop a replaced image loader from delivering a late image into the dialog.
     The thread itself keeps running to completion (see _start_worker)."""
@@ -249,7 +260,9 @@ class _ImageLoader(QThread):
     Otherwise, if `target_height` is provided the image is scaled to that exact
     height; with neither set the height is auto-selected (166 for tall, 126 for wide).
     """
-    image_loaded = pyqtSignal(QPixmap)
+    # QImage, not QPixmap: QPixmap must only be created on the GUI thread.
+    # The slots convert with QPixmap.fromImage.
+    image_loaded = pyqtSignal(QImage)
     gif_loaded   = pyqtSignal(bytes)
 
     def __init__(self, url: str, target_height: Optional[int] = None,
@@ -276,7 +289,7 @@ class _ImageLoader(QThread):
             if self.url.lower().split("?")[0].endswith(".gif"):
                 self.gif_loaded.emit(data)
                 return
-            px = QPixmap()
+            px = QImage()
             px.loadFromData(data)
             if not px.isNull():
                 if self.max_size is not None:
@@ -840,30 +853,23 @@ class _QRZInfoSection(QWidget):
         threading.Thread(target=self._last_seen_thread, args=(target,), daemon=True).start()
 
     def _last_seen_thread(self, target: str) -> None:
-        import sip
         import netguard
         if not netguard.guard("Last-seen check"):
-            if not sip.isdeleted(self):
-                self.last_seen_updated.emit("—")
+            _emit_if_alive(self.last_seen_updated, "—")
             return
+        result = ""
         try:
             my_cs = _get_local_callsign()
-            if not my_cs:
-                if not sip.isdeleted(self):
-                    self.last_seen_updated.emit("—")
-                return
-            url = (
-                f"{_COMMSRVR_URL}/get-last-seen-808585.php"
-                f"?cs={urllib.parse.quote(my_cs)}&lookup={urllib.parse.quote(target)}"
-            )
-            with urllib.request.urlopen(url, timeout=8, context=create_verified_ssl_context()) as resp:
-                result = resp.read().decode("utf-8").strip()
-            if not sip.isdeleted(self):
-                self.last_seen_updated.emit(result if result else "—")
+            if my_cs:
+                url = (
+                    f"{_COMMSRVR_URL}/get-last-seen-808585.php"
+                    f"?cs={urllib.parse.quote(my_cs)}&lookup={urllib.parse.quote(target)}"
+                )
+                with urllib.request.urlopen(url, timeout=8, context=create_verified_ssl_context()) as resp:
+                    result = resp.read().decode("utf-8").strip()
         except Exception as e:
             print(f"[QRZInfoSection] last-seen error: {e}")
-            if not sip.isdeleted(self):
-                self.last_seen_updated.emit("—")
+        _emit_if_alive(self.last_seen_updated, result if result else "—")
 
     def _on_last_seen_updated(self, value: str) -> None:
         _k = "font-family:Roboto; font-weight:bold; font-size:13px;"
@@ -945,7 +951,8 @@ class _QRZInfoSection(QWidget):
         else:
             self._load_default_image()
 
-    def _on_image_loaded(self, px: QPixmap) -> None:
+    def _on_image_loaded(self, img: QImage) -> None:
+        px = QPixmap.fromImage(img)
         self.lbl_image.setPixmap(px)
         self.image_width_ready.emit(px.width())
 
@@ -1079,8 +1086,6 @@ is used no matter how old it is.</p>
 class QRZLookupDialog(QDialog):
     """QRZ callsign lookup and Internet direct message (QRZ menu, Transmit > Internet Tools)."""
 
-    _send_result = pyqtSignal(str)
-
     def __init__(self, module_background: str = "#f5f5f5",
                  module_foreground: str = "#333333",
                  program_background: str = "",
@@ -1103,8 +1108,6 @@ class QRZLookupDialog(QDialog):
         self._thread: Optional[_QRZThread] = None
         self._refresh_callback = refresh_callback
         self._internet_available = bool(self.parent() and getattr(self.parent(), '_internet_available', True))
-        self._pending_dm = None
-        self._send_result.connect(self._on_send_result)
         self._watchlist_mode = False
         self._setup_ui()
 
@@ -1400,16 +1403,37 @@ class QRZLookupDialog(QDialog):
         if not my_cs:
             QMessageBox.warning(self, "Send Failed", "No operator callsign configured in Settings.")
             return
+        import netguard
+        if not netguard.is_network_enabled():
+            InternetDeliveryFailureDialog(
+                "Off-Grid Mode is enabled — switch back to ONLINE to send.", parent=self).exec_()
+            return
         now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         msg_id = generate_time_based_id()
         message_data = f"{my_cs}: {cs} MSG ,{msg_id},{text},{{^%3}}"
-        data_string  = f"{now}\t0\t0\t30\t{message_data}"
-        self._pending_dm = (my_cs, cs, text, msg_id, now)
-        threading.Thread(
-            target=self._submit_internet, args=(my_cs, data_string), daemon=True
-        ).start()
 
-    def _save_to_local_messages(self, from_cs: str, target_cs: str,
+        # Everything on_complete needs is captured here: it runs on the main
+        # thread after the server replies, even if this dialog was closed
+        # meanwhile, so the sent message is always saved locally.
+        refresh_callback = self._refresh_callback
+
+        def on_complete(global_id: int) -> None:
+            if not global_id:
+                return          # submit_to_commsrvr shows the failure popup
+            self._save_to_local_messages(my_cs, cs, text, msg_id, now, global_id=global_id)
+            if refresh_callback:
+                refresh_callback()
+            from PyQt5 import sip
+            if not sip.isdeleted(self) and self.isVisible():
+                self.accept()
+
+        from commsrvr_client import submit_to_commsrvr
+        # Same datafeed line as before: "{now}\t0\t0\t30\t{message_data}".
+        submit_to_commsrvr(self, 0, my_cs, message_data, now=now, snr=30,
+                           on_complete=on_complete)
+
+    @staticmethod
+    def _save_to_local_messages(from_cs: str, target_cs: str,
                                 message: str, msg_id: str, now: str,
                                 global_id: int = 0) -> None:
         """Insert a just-sent internet direct message into the local messages
@@ -1435,43 +1459,6 @@ class QRZLookupDialog(QDialog):
                 conn.commit()
         except sqlite3.Error as e:
             print(f"[QRZLookupDialog] failed to save sent message to local table: {e}")
-
-    def _submit_internet(self, callsign: str, data_string: str) -> None:
-        import netguard
-        if not netguard.guard("Internet direct message"):
-            self._send_result.emit("ERR::Off-Grid Mode is enabled — switch back to ONLINE to send.")
-            return
-        try:
-            post = urllib.parse.urlencode({'cs': callsign, 'data': data_string}).encode()
-            req  = urllib.request.Request(_DATAFEED_URL, data=post, method='POST')
-            with urllib.request.urlopen(req, timeout=5, context=create_verified_ssl_context()) as resp:
-                result = resp.read().decode().strip()
-            if result.isdigit():
-                print(f"[Commsrvr] Direct message submitted successfully (global_id={result})")
-            else:
-                print(f"[Commsrvr] Direct message submission failed — server returned: {result}")
-            self._send_result.emit(result)
-        except Exception as e:
-            reason = getattr(e, 'reason', e)
-            if isinstance(reason, TimeoutError):
-                err = "ERR::Server timeout — the server did not respond in time."
-            else:
-                err = f"ERR::Connection error — {e}"
-            print(f"[Commsrvr] Direct message submission failed — {err[5:]}")
-            self._send_result.emit(err)
-
-    def _on_send_result(self, result: str) -> None:
-        if result.isdigit():
-            if self._pending_dm:
-                self._save_to_local_messages(*self._pending_dm, global_id=int(result))
-                self._pending_dm = None
-                if self._refresh_callback:
-                    self._refresh_callback()
-            self.accept()
-            return
-        # Anything that is not a bare integer is a failure (datafeed contract)
-        message = result[5:] if result.startswith("ERR::") else (result or "Unknown server error")
-        InternetDeliveryFailureDialog(message, parent=self).exec_()
 
 
 # ── Shared base of the two detail dialogs ──────────────────────────────────
@@ -3447,7 +3434,8 @@ class DeliveryConfirmationDialog(QDialog):
         else:
             self.lbl_image.clear()
 
-    def _on_image_loaded(self, px: QPixmap) -> None:
+    def _on_image_loaded(self, img: QImage) -> None:
+        px = QPixmap.fromImage(img)
         self.lbl_image.setPixmap(px)
         # Defer the dialog-grow check so the layout has resolved column widths.
         from PyQt5.QtCore import QTimer
