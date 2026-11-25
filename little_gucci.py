@@ -3312,6 +3312,12 @@ class MainWindow(QtWidgets.QMainWindow):
         if hasattr(self, 'commsrvr_timer'):
             self.commsrvr_timer.stop()
 
+        # The RFI Watch Floor is a standalone window (not owned by this one, so it
+        # can sit in the background); close it with CommStat.
+        watch_floor = getattr(self, '_rfi_watch_floor_window', None)
+        if watch_floor is not None and watch_floor.isVisible():
+            watch_floor.close()     # also saves its size and position
+
         # Disconnect all TCP connections gracefully
         if hasattr(self, 'tcp_pool'):
             print("Closing TCP connections...")
@@ -4338,10 +4344,6 @@ class MainWindow(QtWidgets.QMainWindow):
             btn.clicked.connect(getattr(self, setter_name))
             self.statusbar.addWidget(btn)
             setattr(self, attr_name, btn)
-
-        # Add "Rig Status:" label (no sunken effect, permanent on right)
-        rig_status_header = QtWidgets.QLabel(" Rig Status: ")
-        self.statusbar.addPermanentWidget(rig_status_header)
 
         # Dictionary to hold status widgets for each rig
         self.rig_status_widgets: Dict[str, Tuple[QtWidgets.QLabel, QtWidgets.QLabel]] = {}
@@ -8018,23 +8020,32 @@ class MainWindow(QtWidgets.QMainWindow):
 
     @staticmethod
     def _watchlist_pin_icon(color: str, shape: str) -> "folium.DivIcon":
-        """Build an 8x8 halo icon for a watchlist pin: translucent fill only,
-        no outline, as inline SVG so shapes need no plugin and render offline.
+        """Build a halo icon for a watchlist pin: translucent fill only, no
+        outline, as inline SVG so shapes need no plugin and render offline.
+        8x8, except the star at 12x12 (its thin points read too small at 8).
         Unknown colors/shapes fall back to the pink circle."""
         hex_color = WATCHLIST_OBJECT_COLORS.get(
             (color or "").upper(), WATCHLIST_OBJECT_COLORS[DEFAULT_OBJECT_COLOR])
         shape = (shape or "").upper()
+        size = 8
         if shape == "SQUARE":
             svg_shape = '<rect x="0" y="0" width="8" height="8"'
         elif shape == "TRIANGLE":
             svg_shape = '<polygon points="4,0 8,8 0,8"'
+        elif shape == "STAR":
+            # Five-point star (same ★ the RFI Watch Floor uses for its roster).
+            size = 12
+            svg_shape = ('<polygon points="6,0.4 7.48,4.36 11.71,4.55 8.4,7.18 9.53,11.25 '
+                         '6,8.92 2.47,11.25 3.6,7.18 0.29,4.55 4.52,4.36"')
         else:
             svg_shape = '<circle cx="4" cy="4" r="4"'
         html = (
-            '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="8">'
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}">'
             f'{svg_shape} fill="{hex_color}" fill-opacity="0.80"/></svg>'
         )
-        return folium.DivIcon(html=html, icon_size=(8, 8), icon_anchor=(4, 4))
+        # Anchored at the center, so a larger icon stays centered on the station.
+        return folium.DivIcon(html=html, icon_size=(size, size),
+                              icon_anchor=(size // 2, size // 2))
 
     @staticmethod
     def _event_pin_icon(color: str) -> "folium.DivIcon":
@@ -8362,6 +8373,7 @@ class MainWindow(QtWidgets.QMainWindow):
                             icon=self._event_pin_icon(self.config.get_color(
                                 'condition_magenta' if status == "7" else 'condition_purple')),
                             popup=popup,
+                            tooltip=_callsign_html,   # callsign on hover, like watchlist pins
                             pane="statrepPane"
                         ).add_to(m)
                     else:
@@ -8408,7 +8420,8 @@ class MainWindow(QtWidgets.QMainWindow):
                             opacity=0,
                             weight=1,
                             location=[lat, lon],
-                            popup=popup
+                            popup=popup,
+                            tooltip=_callsign_html,   # callsign on hover, like watchlist pins
                         )
                         solid_marker.options["pane"] = "statrepPane"
                         solid_marker.add_to(m)
@@ -10389,22 +10402,33 @@ window.commstatBouncePin = function(srid) {
         return os.path.join(os.path.dirname(os.path.abspath(__file__)), "rfi_watch_floor.py")
 
     def _on_rfi_watch_floor(self) -> None:
-        """Launch the standalone RFI Watch Floor (tkinter) as its own process."""
-        path = self._rfi_watch_floor_path()
-        try:
-            proc = subprocess.Popen(
-                [sys.executable, path],
-                cwd=os.path.dirname(path),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                # No stray console window on Windows when CommStat runs under pythonw.
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except OSError as e:
-            QtWidgets.QMessageBox.warning(self, "RFI Watch Floor", f"Could not start RFI Watch Floor:\n{e}")
+        """Open the RFI Watch Floor as an in-process modeless window; reuse if already open."""
+        existing = getattr(self, "_rfi_watch_floor_window", None)
+        if existing is not None and existing.isVisible():
+            existing.raise_()
+            existing.activateWindow()
             return
-        # Reap the process when it exits so it doesn't linger as a zombie.
-        threading.Thread(target=proc.wait, daemon=True).start()
+        if existing is not None:
+            existing.deleteLater()  # closed earlier; build a fresh one (picks up theme changes)
+        Cls = self._resolve_dialog_class("rfi_watch_floor", "RFIWatchFloorWindow")
+        win = Cls(
+            refresh_callback=self._load_message_data,
+            panel_bg=self.config.get_color('module_background'),
+            panel_fg=self.config.get_color('module_foreground'),
+            prog_bg=self.config.get_color('program_background'),
+            prog_fg=self.config.get_color('program_foreground'),
+            data_bg=self.config.get_color('data_background'),
+            data_fg=self.config.get_color('data_foreground'),
+            parent=self,
+        )
+        # Center over CommStat only the first time; after that the window
+        # reopens where it was closed (it saves its own size and position).
+        if not getattr(win, "geometry_restored", False):
+            geo = self.geometry()
+            ww, wh = win.width(), win.height()
+            win.move(geo.x() + (geo.width() - ww) // 2, geo.y() + (geo.height() - wh) // 2)
+        self._rfi_watch_floor_window = win
+        win.show()
 
     def _populate_filter_groups_menu(self) -> None:
         """Populate filter menu with per-group checkboxes above 'Show Other Groups'."""

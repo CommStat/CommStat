@@ -47,12 +47,12 @@ _COL_CANCEL  = "#555555"
 _COL_HELP    = COLOR_BTN_HELP
 
 _WIN_W = 900
-_WIN_H = 360
+_WIN_H = 450   # 360 + 25%
 
 _TABLE_COLS = ["Watchlist Name", "Members", "Active", "Object Color", "Object Shape", "Comment"]
 _COL_NAME, _COL_COUNT, _COL_ACTIVE, _COL_OBJCOLOR, _COL_OBJSHAPE, _COL_COMMENT = range(6)
 
-_SHAPE_GLYPHS = {"CIRCLE": "●", "SQUARE": "■", "TRIANGLE": "▲"}
+_SHAPE_GLYPHS = {"CIRCLE": "●", "SQUARE": "■", "TRIANGLE": "▲", "STAR": "★"}
 
 
 # ── Dialog ─────────────────────────────────────────────────────────────────────
