@@ -17,14 +17,25 @@ replies with "0" (invalid code) and otherwise one of two payload shapes:
     e.g. the CARTO map tile API key. Only keys with an existing `set_<key>`
     method on ConfigManager are ever applied; anything else is silently
     ignored, so the server can't push arbitrary config.
+  - A `MODULE::url1;url2;...` payload (hidden codes, not listed in
+    _PRESET_CODES): each URL is an https file on the CommStat server. All of
+    them are downloaded, then staged into updates/update.zip — the same file a
+    heartbeat program_update drops — so commstat.py installs them on the next
+    launch, and the user is asked to close CommStat just like a program update.
+    Each file lands in the install folder under its URL's file name. Nothing is
+    staged unless every download succeeds.
 """
 
+import os
+import posixpath
+import re
 import sqlite3
 import urllib.parse
 import urllib.request
+import zipfile
 
 from PyQt5 import QtGui
-from PyQt5.QtCore import Qt, QThread, QUrl, pyqtSignal
+from PyQt5.QtCore import Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QScrollArea, QWidget
 
 from constants import (
@@ -48,6 +59,15 @@ _MAINTENANCE_URL = COMMSRVR_URL + "/maintenance-808585.php"
 
 _WIN_W = 720
 _WIN_H = 400
+
+# Module updates (MODULE:: payload) — staged where commstat.py looks on launch.
+_INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
+_UPDATES_DIR = os.path.join(_INSTALL_DIR, "updates")
+_UPDATE_ZIP = os.path.join(_UPDATES_DIR, "update.zip")
+_MODULE_HOST = urllib.parse.urlsplit(COMMSRVR_URL).hostname
+_SAFE_FILENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# User data a module update must never replace (mirrors commstat.PROTECTED_FILES).
+_PROTECTED_FILES = {"traffic.db3", "config.ini"}
 
 _PRESET_CODES = [
     ("GY9875", "Install Dark Map API Key",
@@ -88,6 +108,60 @@ _PRESET_CODES = [
 ]
 
 
+def _module_file_name(url: str) -> str:
+    """Install-folder file name for a module URL; raises ValueError if the URL is
+    not an https file on the CommStat server or would replace user data."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme != "https" or parts.hostname != _MODULE_HOST:
+        raise ValueError(f"refusing file from outside the CommStat server: {url}")
+    name = posixpath.basename(urllib.parse.unquote(parts.path))
+    if not _SAFE_FILENAME.match(name):
+        raise ValueError(f"bad file name in {url}")
+    lowered = name.lower()
+    if lowered in _PROTECTED_FILES or lowered.startswith("traffic.db3-"):
+        raise ValueError(f"{name} is user data and is never replaced")
+    return name
+
+
+def _stage_module_update(urls: list) -> list:
+    """Download every URL, then stage them all into updates/update.zip.
+
+    Runs on the worker thread. All downloads must succeed before anything is
+    written, so a failure leaves no half-staged update. If a program update is
+    already waiting in update.zip, its files are kept (the module files replace
+    any of the same name) so this doesn't throw away a pending build.
+    Returns the staged file names.
+    """
+    files = {}
+    for url in urls:
+        name = _module_file_name(url)
+        with urllib.request.urlopen(url, timeout=30, context=create_verified_ssl_context()) as resp:
+            data = resp.read()
+        if not data:
+            raise ValueError(f"{name} downloaded empty")
+        files[name] = data
+
+    os.makedirs(_UPDATES_DIR, exist_ok=True)
+    tmp_zip = _UPDATE_ZIP + ".tmp"
+    try:
+        with zipfile.ZipFile(tmp_zip, "w", zipfile.ZIP_DEFLATED) as out:
+            if os.path.exists(_UPDATE_ZIP):
+                try:
+                    with zipfile.ZipFile(_UPDATE_ZIP) as pending:
+                        for info in pending.infolist():
+                            if info.filename not in files:
+                                out.writestr(info, pending.read(info))
+                except zipfile.BadZipFile:
+                    pass  # unreadable leftover — commstat.py would reject it anyway
+            for name, data in files.items():
+                out.writestr(name, data)
+        os.replace(tmp_zip, _UPDATE_ZIP)
+    finally:
+        if os.path.exists(tmp_zip):
+            os.remove(tmp_zip)
+    return list(files)
+
+
 class _MaintenanceWorker(QThread):
     """Sends the code to the maintenance endpoint and applies whatever it returns.
 
@@ -95,7 +169,9 @@ class _MaintenanceWorker(QThread):
     slot only ever has one place to look for config values to apply — see
     MaintenanceDialog._on_worker_result.
     """
-    result_ready = pyqtSignal(str, str, dict)  # (status, message, config_updates) — status in {"success","invalid","error"}
+    # (status, message, config_updates) — status in {"success","invalid","error","module_update"};
+    # for "module_update" the message is the comma-separated staged file names.
+    result_ready = pyqtSignal(str, str, dict)
 
     def __init__(self, code: str, callsign: str = ""):
         super().__init__()
@@ -119,6 +195,19 @@ class _MaintenanceWorker(QThread):
 
         if content == "0" or not content:
             self.result_ready.emit("invalid", "Code is invalid.", {})
+            return
+
+        if content.startswith("MODULE::"):
+            urls = [u.strip() for u in content[len("MODULE::"):].split(";") if u.strip()]
+            if not urls:
+                self.result_ready.emit("invalid", "Code is invalid.", {})
+                return
+            try:
+                names = _stage_module_update(urls)
+            except Exception as e:
+                self.result_ready.emit("error", f"Module update failed: {e}", {})
+                return
+            self.result_ready.emit("module_update", ", ".join(names), {})
             return
 
         if content.startswith("CONFIG::"):
@@ -281,6 +370,34 @@ class MaintenanceDialog(QDialog):
         else:
             self.deleteLater()
 
+    def _prompt_module_restart(self, file_names: str) -> None:
+        """Mirror of MainWindow._show_program_update_notification for a module update.
+
+        Runs even if the user closed Maintenance while the download was in
+        flight — the files are already staged, so they still need to hear about it.
+        """
+        from ui_helpers import confirm
+        main_window = self.parent()
+        visible = self.isVisible()
+        if confirm(
+            self if visible else main_window,
+            "Module Updated",
+            f"A CommStat module has been updated ({file_names}).\n\n"
+            f"Please restart the application to finish installing the update.\n\n"
+            f"Close CommStat now?",
+            default_yes=True,
+            on_top=True,
+        ):
+            if visible:
+                self.accept()
+            # Deferred so exec_() in MainWindow._on_maintenance unwinds first; close()
+            # runs closeEvent() (saves state, disconnects), and commstat.py
+            # installs updates/update.zip on the next launch.
+            if main_window is not None:
+                QTimer.singleShot(0, main_window.close)
+        elif visible:
+            self.accept()
+
     def _on_worker_result(self, status: str, message: str, config_updates: dict) -> None:
         self.code_edit.setEnabled(True)
         self.btn_run.setEnabled(True)
@@ -292,6 +409,10 @@ class MaintenanceDialog(QDialog):
                 setter = getattr(config, f"set_{key}", None) if config else None
                 if setter:
                     setter(value)
+
+        if status == "module_update":
+            self._prompt_module_restart(message)
+            return
 
         if self.isVisible():
             show_help_dialog(self, "Maintenance", message, width=360, height=220)
